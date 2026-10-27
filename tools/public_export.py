@@ -154,7 +154,18 @@ def rel(path: Path, base: Path) -> str:
     return path.relative_to(base).as_posix()
 
 
+# Synthetic SQLite libraries the golden conformance replays (generated test
+# data, no user content); exported despite the *.sqlite3 rule and scanned as
+# text like any other file.
+SYNTHETIC_DATABASES = {
+    'crates/notes-engine/conformance/golden/library/main/library.sqlite3',
+    'crates/notes-engine/conformance/golden/library/uninit/library.sqlite3',
+}
+
+
 def excluded(relpath: str) -> bool:
+    if relpath in SYNTHETIC_DATABASES:
+        return False
     return any(fnmatch.fnmatch(relpath, g) for g in EXCLUDE_GLOBS)
 
 
@@ -290,8 +301,9 @@ def scan(tree: Path, forbid_emails: list[bytes], personal_terms: list[bytes]) ->
                 findings['largeFile'].append({'path': r, 'bytes': len(data)})
             kind = next((k for m, k in MAGIC if data.startswith(m)), None)
             if kind and kind != 'gzip':
-                (findings['blockingBinary'] if kind in BLOCKING_MAGIC else findings['otherBinary']).append({'path': r, 'type': kind})
-                if kind in BLOCKING_MAGIC or len(data) > TEXT_LIMIT:
+                blocking = kind in BLOCKING_MAGIC and r not in SYNTHETIC_DATABASES
+                (findings['blockingBinary'] if blocking else findings['otherBinary']).append({'path': r, 'type': kind})
+                if blocking or (len(data) > TEXT_LIMIT and r not in SYNTHETIC_DATABASES):
                     continue
             if b'\x00' in data[:8192] and not kind:
                 findings['otherBinary'].append({'path': r, 'type': 'unknown binary'})

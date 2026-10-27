@@ -349,9 +349,12 @@ test('ink and PDF title editing uses the title-only API and preserves draft acro
   await openNote(page,/Tablet çizimleri/);await expect(page.getByLabel('Not başlığı')).toBeEditable();await expect(page.getByLabel('Not içeriği')).toHaveAttribute('readonly','');
   await page.getByLabel('Not başlığı').fill('Düzenlenen kitap başlığı');await openNote(page,/Aklımda kalanlar/);await openNote(page,/Düzenlenen kitap başlığı/);
   await page.waitForResponse(response=>response.url().endsWith('/api/notes/rich')&&response.request().method()==='GET');
-  await expect(page.getByLabel('Not başlığı')).toHaveValue('Düzenlenen kitap başlığı');await page.keyboard.press('Control+s');
+  await expect(page.getByLabel('Not başlığı')).toHaveValue('Düzenlenen kitap başlığı');
+  // Ctrl+S only acts once the reopened note's details are loaded (the Save button is enabled then).
+  await expect(page.getByRole('button',{name:'Kaydet',exact:true})).toBeEnabled();await page.keyboard.press('Control+s');
   await expect(page.getByText('Kaydedilmedi',{exact:true})).toHaveCount(0);
-  expect(requests.filter(r=>r.method==='PATCH'&&r.path.endsWith('/title')).map(r=>r.data)).toEqual([{title:'Düzenlenen kitap başlığı',expectedRevision:1}]);
+  // The save is asynchronous after Ctrl+S: wait for the request instead of reading the log at once.
+  await expect.poll(()=>requests.filter(r=>r.method==='PATCH'&&r.path.endsWith('/title')).map(r=>r.data)).toEqual([{title:'Düzenlenen kitap başlığı',expectedRevision:1}]);
   expect(requests.some(r=>r.method==='PUT'&&r.path.endsWith('/rich'))).toBe(false);expect(rich.body).toBe('Çizim notunun metin önizlemesi.');
   await page.reload();await openNote(page,/Düzenlenen kitap başlığı/);await expect(page.getByLabel('Not başlığı')).toHaveValue('Düzenlenen kitap başlığı');await expect(page.getByLabel('Not içeriği')).toHaveAttribute('readonly','');
 });
