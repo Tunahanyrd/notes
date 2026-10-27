@@ -1,27 +1,39 @@
+# One grouped PR per ecosystem per month: every PR runs CI, macOS and Semgrep,
+# and the macOS runner queue is small.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
     groups:
       actions: { patterns: ['*'] }
   - package-ecosystem: cargo
     directory: /
-    schedule: { interval: weekly }
-    open-pull-requests-limit: 5
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    groups:
+      cargo-engine: { patterns: ['*'] }
   - package-ecosystem: cargo
     directory: /desktop/src-tauri
-    schedule: { interval: weekly }
-    open-pull-requests-limit: 5
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    groups:
+      cargo-shell: { patterns: ['*'] }
   - package-ecosystem: cargo
     directory: /tools/ink-renderer
-    schedule: { interval: weekly }
-    open-pull-requests-limit: 5
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    groups:
+      cargo-ink-renderer: { patterns: ['*'] }
   - package-ecosystem: cargo
     directory: /crates/notes-ink-live
-    schedule: { interval: weekly }
-    open-pull-requests-limit: 5
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    groups:
+      cargo-ink-live: { patterns: ['*'] }
   - package-ecosystem: npm
     directory: /desktop
-    schedule: { interval: weekly }
-    open-pull-requests-limit: 5
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 2
+    groups:
+      npm: { patterns: ['*'] }
