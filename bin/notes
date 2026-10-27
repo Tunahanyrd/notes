@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+notes_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export LINUX_NOTES_PROJECT_ROOT="$notes_root"
+notes_binary="$notes_root/desktop/src-tauri/target/debug/linux-notes-desktop"
+if [ ! -x "$notes_binary" ] || [ ! -f "$notes_root/desktop/dist/index.html" ]; then
+    printf '%s\n' 'Notlar henüz derlenmemiş. Proje dizininde ./bin/build çalıştır.' >&2
+    exit 1
+fi
+exec "$notes_binary" "$@"

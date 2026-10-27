@@ -1,0 +1,190 @@
+# Flatpak manifest (generated from io.github.tunahanyrd.Notes.yml.in by tools/branding.py sync).
+# Builds fully offline from the source lists next to it
+# (cargo-sources.json, node-sources.json: tools/flatpak_sources.sh).
+#
+#   packaging/build-flatpak.sh OUT_DIR
+#
+# The app runs the Python-free notes-engine (next to the shell in /app/bin).
+# bubblewrap cannot nest inside the Flatpak sandbox: the engine detects
+# /.flatpak-info and runs pdftoppm / ink-render with rlimits only
+# (NOTES_SANDBOX=direct), inside the Flatpak sandbox.
+app-id: io.github.tunahanyrd.Notes
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.node22
+command: notes
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Samsung account sign-in and Samsung Cloud sync.
+  - --share=network
+  # "Save as file" / PDF export writes to ~/Downloads.
+  - --filesystem=xdg-download
+modules:
+  - name: poppler
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DENABLE_UTILS=ON
+      - -DENABLE_CPP=OFF
+      - -DENABLE_GLIB=OFF
+      - -DENABLE_GOBJECT_INTROSPECTION=OFF
+      - -DENABLE_QT5=OFF
+      - -DENABLE_QT6=OFF
+      - -DENABLE_BOOST=OFF
+      - -DENABLE_NSS3=OFF
+      - -DENABLE_GPGME=OFF
+      - -DENABLE_LIBCURL=OFF
+      - -DENABLE_LCMS=ON
+      - -DENABLE_LIBOPENJPEG=openjpeg2
+      - -DBUILD_GTK_TESTS=OFF
+      - -DBUILD_QT5_TESTS=OFF
+      - -DBUILD_QT6_TESTS=OFF
+      - -DBUILD_CPP_TESTS=OFF
+      - -DBUILD_MANUAL_TESTS=OFF
+      - -DENABLE_ZLIB_UNCOMPRESS=OFF
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share/man
+      - /bin/pdfattach
+      - /bin/pdfdetach
+      - /bin/pdffonts
+      - /bin/pdfimages
+      - /bin/pdfseparate
+      - /bin/pdfsig
+      - /bin/pdftocairo
+      - /bin/pdftohtml
+      - /bin/pdftops
+      - /bin/pdftotext
+      - /bin/pdfunite
+    sources:
+      - type: archive
+        url: https://poppler.freedesktop.org/poppler-26.10.0.tar.xz
+        sha256: 6792cb7c69205007ad87d2e936cecc5b3a31fac29ab54ffc3175fdb6b2a6ce35
+
+  # ImageMagick: only "Save as PDF" (PNG pages -> PDF).
+  - name: imagemagick
+    config-opts:
+      - --disable-static
+      - --disable-docs
+      - --disable-openmp
+      - --disable-deprecated
+      - --without-modules
+      - --without-magick-plus-plus
+      - --without-perl
+      - --without-x
+      - --without-djvu
+      - --without-fftw
+      - --without-fpx
+      - --without-gvc
+      - --without-heic
+      - --without-jbig
+      - --without-jxl
+      - --without-lqr
+      - --without-openexr
+      - --without-raqm
+      - --without-raw
+      - --without-wmf
+      - --without-dps
+      - --with-png
+      - --with-zlib
+      - --with-jpeg
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /lib/*.la
+      - /share/doc
+      - /share/man
+      - /bin/*-config
+    sources:
+      - type: archive
+        url: https://github.com/ImageMagick/ImageMagick/archive/refs/tags/7.1.2-34.tar.gz
+        sha256: f5163a573a1c1bff16358d0a592b2fb168ad0fd3b9dc5ff57dc7820eebc5cf79
+
+  - name: notes
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node22/bin
+      env:
+        CARGO_HOME: /run/build/notes/cargo
+        CARGO_NET_OFFLINE: 'true'
+        CARGO_BUILD_JOBS: '4'
+        CARGO_PROFILE_RELEASE_DEBUG: '0'
+        npm_config_offline: 'true'
+        npm_config_cache: /run/build/notes/flatpak-node/npm-cache
+        # Resources are found below this root (frontend, ink renderer).
+        LINUX_NOTES_INSTALL_ROOT: /app/lib/notes
+        # Same identity as the release bundles (branding.json).
+        TAURI_CONFIG: '{"productName":"Notes","mainBinaryName":"notes","identifier":"io.github.tunahanyrd.Notes"}'
+    build-commands:
+      - test "$(git -C references/upstream/sdocx rev-parse HEAD)" = 41e9c1099b29a48dc7320501573d7c4858f09303
+      - cargo build --offline --locked --release -p notes-engine
+      - cargo build --offline --locked --release --manifest-path tools/ink-renderer/Cargo.toml
+      # Live pen module (WebAssembly): the rust-stable extension has no
+      # wasm32 std, so the matching official rust-std (source below) is put in
+      # a private sysroot that only wasm32 compiles see (rustc wrapper).
+      - test "$(rustc --version | cut -d' ' -f2)" = 1.98.1 || { echo "rust-stable is now $(rustc --version); update the rust-std wasm32 source in this manifest" >&2; exit 1; }
+      - mkdir -p wasm-sysroot/lib/rustlib wasm-bin
+      - ln -sfn "/usr/lib/sdk/rust-stable/lib/rustlib/$(rustc -vV | sed -n 's/^host. //p')" wasm-sysroot/lib/rustlib/
+      - cp -r rust-wasm32-std/rust-std-wasm32-unknown-unknown/lib/rustlib/wasm32-unknown-unknown wasm-sysroot/lib/rustlib/
+      - printf '#!/bin/sh\ncase " $* " in *wasm32-unknown-unknown*) exec /usr/lib/sdk/rust-stable/bin/rustc --sysroot "%s" "$@";; esac\nexec /usr/lib/sdk/rust-stable/bin/rustc "$@"\n' "$PWD/wasm-sysroot" > wasm-bin/rustc && chmod +x wasm-bin/rustc
+      - PATH="$PWD/wasm-bin:$PATH" tools/build_ink_wasm.sh
+      # node-sources.json (packaging/flatpak/npm_sources.py): locked tarballs -> npm cache.
+      - for f in flatpak-node/tarballs/*.tgz; do npm cache add "./$f" >/dev/null; done
+      - npm --prefix desktop ci --offline --no-audit --no-fund --ignore-scripts
+      - npm --prefix desktop run build
+      # Shell: feature `packaged` (defaults to the notes-engine binary);
+      # tauri/custom-protocol = production build without the Tauri CLI.
+      - cargo build --offline --locked --release --manifest-path desktop/src-tauri/Cargo.toml --features packaged,tauri/custom-protocol
+      - install -Dm755 desktop/src-tauri/target/release/linux-notes-desktop /app/bin/notes
+      - install -Dm755 target/release/notes-engine /app/bin/notes-engine
+      - install -Dm755 tools/ink-renderer/target/release/ink-render /app/lib/notes/tools/ink-renderer/target/release/ink-render
+      - mkdir -p /app/lib/notes/desktop && cp -r desktop/dist /app/lib/notes/desktop/dist
+      - install -Dm644 packaging/flatpak/io.github.tunahanyrd.Notes.desktop /app/share/applications/io.github.tunahanyrd.Notes.desktop
+      - install -Dm644 packaging/flatpak/io.github.tunahanyrd.Notes.LoginCallback.desktop /app/share/applications/io.github.tunahanyrd.Notes.LoginCallback.desktop
+      - sed 's|<launchable type="desktop-id">Notes.desktop</launchable>|<launchable type="desktop-id">io.github.tunahanyrd.Notes.desktop</launchable>|' packaging/linux/io.github.tunahanyrd.Notes.metainfo.xml > io.github.tunahanyrd.Notes.metainfo.xml
+      - install -Dm644 io.github.tunahanyrd.Notes.metainfo.xml /app/share/metainfo/io.github.tunahanyrd.Notes.metainfo.xml
+      - install -Dm644 desktop/src-tauri/icons/32x32.png /app/share/icons/hicolor/32x32/apps/io.github.tunahanyrd.Notes.png
+      - install -Dm644 desktop/src-tauri/icons/64x64.png /app/share/icons/hicolor/64x64/apps/io.github.tunahanyrd.Notes.png
+      - install -Dm644 desktop/src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/io.github.tunahanyrd.Notes.png
+      - install -Dm644 desktop/src-tauri/icons/128x128@2x.png /app/share/icons/hicolor/256x256/apps/io.github.tunahanyrd.Notes.png
+      - install -Dm644 desktop/src-tauri/icons/icon.png /app/share/icons/hicolor/512x512/apps/io.github.tunahanyrd.Notes.png
+      - install -Dm644 desktop/public/icon.svg /app/share/icons/hicolor/scalable/apps/io.github.tunahanyrd.Notes.svg
+      - install -Dm644 LICENSE /app/share/licenses/io.github.tunahanyrd.Notes/LICENSE
+      - install -Dm644 NOTICE THIRD_PARTY_LICENSES.md -t /app/share/licenses/io.github.tunahanyrd.Notes/
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - target
+          - artifacts
+          - references
+          - dist
+          - .flatpak-builder
+          - tools/vendor
+          - tools/ink-renderer/target
+          - desktop/node_modules
+          - desktop/dist
+          - desktop/src-tauri/target
+          - desktop/test-results
+          - reference
+          - fuzz/target
+          - fuzz/target-nosan
+      - type: git
+        url: https://github.com/twangodev/sdocx.git
+        commit: 41e9c1099b29a48dc7320501573d7c4858f09303
+        dest: references/upstream/sdocx
+        disable-shallow-clone: true
+      - type: archive
+        url: https://static.rust-lang.org/dist/rust-std-1.98.1-wasm32-unknown-unknown.tar.xz
+        sha256: cf1fcf68880d8b2b90128cede7416cfb82ad3584357ce9fb668f2b6244c26e55
+        dest: rust-wasm32-std
+      - cargo-sources.json
+      - node-sources.json

@@ -1,0 +1,26 @@
+[package]
+name = "rs-doc"
+license.workspace = true
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lib]
+name = "_doc"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+flate2 = { version = "=1.1.10", default-features = false, features = ["zlib"] }
+pyo3 = { workspace = true, optional = true }
+regex = { version = "=1.13.1", default-features = false, features = ["std", "perf", "unicode"] }
+rs-common = { path = "../rs-common", optional = true }
+roxmltree = { workspace = true }
+sha2 = { workspace = true, features = ["std"] }
+base64 = { workspace = true }
+getrandom = { workspace = true }
+sha1 = "=0.10.7"
+
+[features]
+# PyO3 bindings (the historical Python extension `_doc`, see reference/python).
+# Off by default: the pure engine and the desktop app never compile pyo3.
+python = ["dep:pyo3", "dep:rs-common", "rs-common/python"]

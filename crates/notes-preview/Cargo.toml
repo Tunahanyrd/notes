@@ -1,0 +1,24 @@
+[package]
+name = "notes-preview"
+license.workspace = true
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+# Pure-Rust page previews and thumbnails (samsung_notes/previews.py,
+# thumbnails.py and the ink/PDF preparation they drive) for the Python-free
+# engine. Only the pure layers of the area crates are used (no PyO3 calls).
+[lib]
+name = "notes_preview"
+
+[dependencies]
+notes_host = { path = "../notes-host", package = "notes-host" }
+rs_store = { path = "../rs-store", package = "rs-store" }
+rs_doc = { path = "../rs-doc", package = "rs-doc" }
+rs_ink = { path = "../rs-ink", package = "rs-ink" }
+rs_ops = { path = "../rs-ops", package = "rs-ops" }
+rs_editor = { path = "../rs-editor", package = "rs-editor" }
+rs_render = { path = "../rs-render", package = "rs-render" }
+sha2 = { workspace = true }
+getrandom = { workspace = true }
+libc = "=0.2.191"

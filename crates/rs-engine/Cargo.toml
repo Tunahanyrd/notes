@@ -1,0 +1,24 @@
+[package]
+name = "rs-engine"
+license.workspace = true
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lib]
+name = "_engine"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+getrandom = { workspace = true }
+libc = "=0.2.191"
+pyo3 = { workspace = true, optional = true }
+roxmltree = "=0.21.2"
+rs-common = { path = "../rs-common", optional = true }
+notes_platform = { path = "../notes-platform", package = "notes-platform" }
+sha2 = "=0.10.9"
+
+[features]
+# PyO3 bindings (the historical Python extension `_engine`, see reference/python).
+# Off by default: the pure engine and the desktop app never compile pyo3.
+python = ["dep:pyo3", "dep:rs-common", "rs-common/python"]

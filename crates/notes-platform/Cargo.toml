@@ -1,0 +1,18 @@
+[package]
+name = "notes-platform"
+license.workspace = true
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# Operating-system seams of the engine, one module per concern (dirs, open,
+# process, tools, net, url_scheme). Linux keeps the exact behaviour the
+# engine had before this crate existed (XDG paths, xdg-open, bwrap tool
+# paths, PDEATHSIG, CPU pinning, SOCK_CLOEXEC); macOS gets its own branch.
+# Only std + libc: shared by the PyO3 rs-* crates and the pure engine.
+[lib]
+name = "notes_platform"
+
+[dependencies]
+libc = "=0.2.191"

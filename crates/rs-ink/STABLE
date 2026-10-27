@@ -1,0 +1,16 @@
+rs-ink stable 2026-10-26: all 31 public names of ink, ink_coordinates, ink_cache, ink_editor, ink_capture ported; PYFALLBACK 0 (uses rs-doc rlib); global rust-strict passes the 7 core ink test modules; full suites green under NOTES_IMPL=rust. Pure-Rust API: rs_ink::core (rlib, lib name _ink).
+
+Public pure-Rust append API (add-only), rs_ink::core::prepare (dep: rs_ink = { path = "../rs-ink", package = "rs-ink" }):
+  pub struct AppendSnapshot<'a> { resource_xml: &[u8], raw_body: &[u8], content_type: &str, commit_id: Option<&str> }
+      AppendSnapshot::from_doc(&rs_doc::doc::DocumentSnapshot)
+  pub enum AppendRecipe { V1, V2, V3 { color_argb: u32, pen_size: f64 } }
+  pub fn prepare_append(&AppendSnapshot, source_stroke_id: &str, new_stroke_id: &str, &RawSamples, now_ms: i64,
+                        AppendRecipe, limits: Option<&rs_doc::mime::Limits>) -> Result<InkAppendEdit, InkErr>
+  pub fn append_v2(snap, source, new, &RawSamples, now_ms, limits) / append_v3(..., color_argb: u32, pen_size: f64, limits)
+  rs_ink::core::binary::RawSamples::from_parts(points: &[(f64,f64)], pressures: &[f64], timestamps: &[i64])
+  InkAppendEdit { full_xml, tree_xml, upload_xml, requested_ids, page_id, layer_id, stroke_id, stroke_modified_time,
+                  binary_parts: Vec<(name, filename, body)>, content_file_ids, recipe_version }  (title/body = snapshot's)
+  Semantics: identical to ink_capture.prepare_ink_append{,_v2,_v3} (normalize -> commit check -> preparation).
+PyO3 helpers for OTHER cdylibs (live classes only; never this extension's own types): rs_ink::pyapi
+  ink_error(py, InkErr) -> PyErr   (samsung_notes.ink.InkError / DocumentError / PayloadError ...)
+  append_edit_to_py(py, &InkAppendEdit, title, body) -> samsung_notes.ink_editor.InkAppendEdit instance

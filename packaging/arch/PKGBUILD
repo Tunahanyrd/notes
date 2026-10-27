@@ -1,0 +1,103 @@
+# Maintainer: Tunahanyrd <https://github.com/Tunahanyrd>
+#
+# Notes: unofficial desktop client compatible with Samsung Notes (Tauri shell
+# + the Python-free notes-engine). Not affiliated with Samsung.
+#
+# Release package. Until the GitHub repository and tag exist, build from the
+# local tree with packaging/build-arch.sh (it places a tarball of the tree
+# under the source file name below and runs makepkg in an Arch container).
+pkgname=notes
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Unofficial notes client compatible with Samsung Notes and Samsung Cloud'
+arch=('x86_64' 'aarch64')
+url='https://github.com/Tunahanyrd/notes'
+# App code GPL-3.0-or-later; the bundled ink-render links sdocx (GPL-3.0-only).
+license=('GPL-3.0-or-later' 'GPL-3.0-only')
+depends=(
+  'webkit2gtk-4.1' 'gtk3' 'glib2' 'cairo' 'gdk-pixbuf2' 'libsoup3'  # Tauri shell
+  'openssl' 'sqlite' 'gcc-libs' 'glibc' 'zlib'                     # notes-engine
+  'poppler'          # pdftoppm: PDF page backgrounds
+  'bubblewrap'       # renderer sandbox (falls back to rlimits only without it)
+  'xdg-utils'        # xdg-open: sign-in page, exported files
+  'hicolor-icon-theme'
+)
+optdepends=(
+  'imagemagick: Save as PDF'
+  'librsvg: rsvg-convert ink rasterizer (SAMSUNG_NOTES_INK_RASTER=rsvg)'
+)
+# rust-wasm: wasm32-unknown-unknown std for the live pen module (ink-live.wasm).
+makedepends=('rust' 'rust-wasm' 'nodejs' 'npm' 'git')
+conflicts=('notes-git')
+options=('!lto' '!debug')
+_sdocx_commit=41e9c1099b29a48dc7320501573d7c4858f09303
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
+        "sdocx::git+https://github.com/twangodev/sdocx.git#commit=$_sdocx_commit")
+# The tag tarball does not exist yet: replace SKIP with its sha256 at release.
+sha256sums=('SKIP'
+            'SKIP')
+
+_lib=/usr/lib/$pkgname
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  # tools/ink-renderer/build.rs verifies a clean git checkout at the pin.
+  mkdir -p references/upstream
+  ln -sfn "$srcdir/sdocx" references/upstream/sdocx
+  [ "$(git -C "$srcdir/sdocx" rev-parse HEAD)" = "$_sdocx_commit" ]
+  local host; host="$(rustc -vV | sed -n 's/^host: //p')"
+  cargo fetch --locked --target "$host"
+  cargo fetch --locked --target "$host" --manifest-path tools/ink-renderer/Cargo.toml
+  cargo fetch --locked --target "$host" --manifest-path desktop/src-tauri/Cargo.toml
+  cargo fetch --locked --target wasm32-unknown-unknown --manifest-path crates/notes-ink-live/Cargo.toml
+  npm --prefix desktop ci --no-audit --no-fund
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}" CARGO_PROFILE_RELEASE_DEBUG=0
+  export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$srcdir=/usr/src/$pkgname"
+  local host; host="$(rustc -vV | sed -n 's/^host: //p')"
+  cargo build --frozen --release -p notes-engine
+  cp -f target/release/notes-engine "target/release/notes-engine-$host"
+  cargo build --frozen --release --manifest-path tools/ink-renderer/Cargo.toml
+  CARGO_NET_OFFLINE=true tools/build_ink_wasm.sh   # -> desktop/public/ink-live.wasm
+  # Shell: feature `packaged` (via the release config) defaults to the
+  # notes-engine binary; resources live under $_lib.
+  cd desktop
+  LINUX_NOTES_INSTALL_ROOT="$_lib" npx tauri build --no-bundle \
+    --config ../packaging/linux/tauri.release.conf.json -- --frozen
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 desktop/src-tauri/target/release/notes "$pkgdir/usr/bin/notes"
+  install -Dm755 target/release/notes-engine "$pkgdir$_lib/bin/notes-engine"
+  install -Dm755 tools/ink-renderer/target/release/ink-render \
+    "$pkgdir$_lib/tools/ink-renderer/target/release/ink-render"
+  install -d "$pkgdir$_lib/desktop"
+  cp -r --no-preserve=ownership desktop/dist "$pkgdir$_lib/desktop/dist"
+
+  sed 's/{{exec}}/notes/g; s/{{icon}}/notes/g' packaging/linux/desktop.hbs \
+    | install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/Notes.desktop"
+  install -Dm644 packaging/linux/io.github.tunahanyrd.Notes.metainfo.xml \
+    "$pkgdir/usr/share/metainfo/io.github.tunahanyrd.Notes.metainfo.xml"
+  local size
+  for size in 32 64 128; do
+    install -Dm644 "desktop/src-tauri/icons/${size}x${size}.png" \
+      "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/notes.png"
+  done
+  install -Dm644 desktop/src-tauri/icons/128x128@2x.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/notes.png"
+  install -Dm644 desktop/src-tauri/icons/icon.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/notes.png"
+  install -Dm644 desktop/public/icon.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/notes.svg"
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 NOTICE THIRD_PARTY_LICENSES.md -t "$pkgdir/usr/share/licenses/$pkgname/"
+  # Optional examples (not part of every source export).
+  if [ -f packaging/autostart/notes.desktop ]; then
+    install -Dm644 packaging/autostart/notes.desktop "$pkgdir/usr/share/doc/$pkgname/examples/autostart/notes.desktop"
+  fi
+  if [ -f packaging/systemd/notes.service ]; then
+    install -Dm644 packaging/systemd/notes.service "$pkgdir/usr/share/doc/$pkgname/examples/systemd/notes.service"
+  fi
+}

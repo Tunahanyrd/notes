@@ -1,0 +1,11 @@
+.shape-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:2}
+.shape-overlay.drawing{pointer-events:auto;touch-action:none;cursor:crosshair}
+.shape-preview{opacity:.75;pointer-events:none}
+.shape-pending{opacity:.6}
+.shape-notice{z-index:3}
+.shape-panel .shape-kinds{display:grid;grid-template-columns:repeat(4,36px);gap:6px;margin:6px 0 12px}
+.shape-panel .shape-kinds button{width:36px;height:36px;display:grid;place-items:center;border:1px solid transparent;border-radius:6px;background:transparent;color:inherit;cursor:pointer}
+.shape-panel .shape-kinds button:hover{background:var(--hover,#0000000d)}
+.shape-panel .shape-kinds button.selected{border-color:var(--accent,#229bff);background:var(--accent-soft,#229bff1a)}
+.shape-panel .shape-fill{display:flex;align-items:center;gap:8px;margin:10px 0 6px}
+.shape-placeholder{position:absolute;inset:auto 0 12px 0;text-align:center;font-size:12px;opacity:.7;pointer-events:none}

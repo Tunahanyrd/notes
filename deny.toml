@@ -1,0 +1,78 @@
+# cargo-deny configuration (https://embarkstudios.github.io/cargo-deny/).
+#
+#   cargo deny check licenses
+#   cargo deny --manifest-path desktop/src-tauri/Cargo.toml check licenses
+#   cargo deny --manifest-path tools/ink-renderer/Cargo.toml check licenses
+#
+# The allow list matches the audit behind THIRD_PARTY_LICENSES.md: every
+# license here is compatible with distributing the combined work under
+# GPL-3.0. Adding a license to this list needs a compatibility check in the
+# pull request (GPL-2.0-only, SSPL, BUSL, CC-BY-NC, proprietary and
+# unlicensed code are not acceptable).
+[graph]
+all-features = true
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+  "MIT",
+  "MIT-0",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "0BSD",
+  "CC0-1.0",
+  "Unlicense",
+  "Unicode-3.0",
+  # Weak file-level copyleft; GPL-compatible through MPL-2.0 section 3.3
+  # (cssparser, selectors, dtoa-short, option-ext).
+  "MPL-2.0",
+  # sdocx (pinned upstream, linked only into the ink-render CLI) and this
+  # project's own crates.
+  "GPL-3.0",
+  "GPL-3.0-only",
+  "GPL-3.0-or-later",
+]
+
+[licenses.private]
+# Workspace crates are `publish = false`; their license is the repository
+# LICENSE (see NOTICE).
+ignore = true
+
+[advisories]
+version = 2
+# Every accepted advisory names the lock file it appears in and why it does
+# not reach this project's code paths. Re-check on every sdocx/Tauri bump.
+ignore = [
+  # zip 8.2.0, pulled in by sdocx (pinned upstream, `zip = "8.2.0"`) in
+  # tools/ink-renderer and crates/notes-ink-live. All three advisories are
+  # in `ZipArchive::extract` / `ZipStreamReader::extract` (writing entries to
+  # disk: symlinks, SUID bits, permissions through symlinks). sdocx only
+  # reads entries into memory (`by_name`/`by_index`, sdocx/src/container.rs)
+  # and never extracts to the filesystem; the renderer additionally runs in
+  # the bubblewrap/rlimit sandbox without a writable host path. Fixed in
+  # zip >= 9, which sdocx does not accept yet.
+  { id = "RUSTSEC-2026-0367", reason = "zip extract() only; sdocx reads archives in memory, never extracts (ink-renderer, ink-live)" },
+  { id = "RUSTSEC-2026-0368", reason = "zip extract() only; sdocx reads archives in memory, never extracts (ink-renderer, ink-live)" },
+  { id = "RUSTSEC-2026-0369", reason = "zip extract() only; sdocx reads archives in memory, never extracts (ink-renderer, ink-live)" },
+  # Unmaintained (no known vulnerability): sdocx text shaping in
+  # ink-renderer/ink-live, no maintained drop-in replacement in sdocx yet.
+  { id = "RUSTSEC-2026-0206", reason = "rustybuzz unmaintained; transitive via pinned sdocx, no vulnerability" },
+  { id = "RUSTSEC-2026-0192", reason = "ttf-parser unmaintained; transitive via pinned sdocx, no vulnerability" },
+  # Desktop shell (desktop/src-tauri) through Tauri 2's GTK3 stack on Linux.
+  { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained; build-time proc macro of gtk3-macros via Tauri, no vulnerability" },
+  { id = "RUSTSEC-2024-0429", reason = "glib 0.18 VariantStrIter unsoundness; Tauri/wry GTK3 dependency, the shell never iterates GVariant string arrays" },
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

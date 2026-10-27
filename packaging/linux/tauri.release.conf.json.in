@@ -1,0 +1,72 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "@APP_NAME@",
+  "mainBinaryName": "@BINARY_NAME@",
+  "identifier": "@APP_ID@",
+  "build": {
+    "features": ["packaged"]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["appimage", "deb", "rpm"],
+    "publisher": "@DEVELOPER_NAME@",
+    "homepage": "@REPOSITORY@",
+    "license": "GPL-3.0-or-later AND GPL-3.0-only",
+    "category": "Productivity",
+    "shortDescription": "@SUMMARY@",
+    "longDescription": "Unofficial desktop notes client compatible with Samsung Notes and Samsung Cloud. Not affiliated with, endorsed by, or sponsored by Samsung Electronics Co., Ltd. Samsung, Samsung Notes and Galaxy are trademarks of Samsung Electronics Co., Ltd.",
+    "copyright": "Copyright (C) 2026 @DEVELOPER_NAME@. @LICENSE@.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/64x64.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png"
+    ],
+    "externalBin": ["../../target/release/notes-engine"],
+    "resources": {
+      "../dist/": "desktop/dist/",
+      "../../tools/ink-renderer/target/release/ink-render": "tools/ink-renderer/target/release/ink-render",
+      "../../LICENSE": "licenses/LICENSE",
+      "../../NOTICE": "licenses/NOTICE",
+      "../../THIRD_PARTY_LICENSES.md": "licenses/THIRD_PARTY_LICENSES.md"
+    },
+    "linux": {
+      "deb": {
+        "section": "editors",
+        "depends": [
+          "libssl3 | libssl3t64",
+          "poppler-utils",
+          "bubblewrap",
+          "xdg-utils"
+        ],
+        "recommends": ["imagemagick"],
+        "desktopTemplate": "../../packaging/linux/desktop.hbs",
+        "files": {
+          "/usr/share/metainfo/@APP_ID@.metainfo.xml": "../../packaging/linux/@APP_ID@.metainfo.xml"
+        }
+      },
+      "rpm": {
+        "depends": [
+          "webkit2gtk4.1",
+          "gtk3",
+          "openssl-libs",
+          "poppler-utils",
+          "bubblewrap",
+          "xdg-utils"
+        ],
+        "recommends": ["ImageMagick"],
+        "desktopTemplate": "../../packaging/linux/desktop.hbs",
+        "files": {
+          "/usr/share/metainfo/@APP_ID@.metainfo.xml": "../../packaging/linux/@APP_ID@.metainfo.xml"
+        }
+      },
+      "appimage": {
+        "bundleMediaFramework": false,
+        "files": {
+          "/usr/share/metainfo/@APP_ID@.appdata.xml": "../../packaging/linux/@APP_ID@.metainfo.xml"
+        }
+      }
+    }
+  }
+}

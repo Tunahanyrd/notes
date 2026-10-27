@@ -1,0 +1,7 @@
+rs-engine is stable: every public name of samsung_notes.engine (Engine), samsung_notes.server
+(AppServer, Handler) and samsung_notes.ui_assets (local_font) is Rust; launcher main() exported as
+_engine.__main__.main. Top layer: no other area should depend on it.
+Pure-Rust API (add-only): rs_engine::server_core (Backend, Call, Arg, Target, Config, Failure,
+serve_connection, dispatch, handle_request, realpath), rs_engine::pyjson, rs_engine::pyhttp,
+rs_engine::urlparse, rs_engine::mime, rs_engine::engine_core, rs_engine::ui_assets::local_font,
+rs_engine::launcher::{Args, token_urlsafe, token_hex, runtime_json}.

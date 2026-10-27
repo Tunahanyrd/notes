@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Notes app icon. Original artwork for this project, GPL-3.0-or-later.
+       Round indigo-to-teal badge, a tilted sheet with a folded corner and a
+       handwritten ink stroke ending in an amber pen nib. -->
+  <defs>
+    <linearGradient id="bg" x1="72" y1="56" x2="440" y2="456" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3442A8"/>
+      <stop offset="1" stop-color="#14A39A"/>
+    </linearGradient>
+    <linearGradient id="sheet" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#EAF3F7"/>
+    </linearGradient>
+  </defs>
+  <circle cx="256" cy="256" r="236" fill="url(#bg)"/>
+  <g transform="rotate(-9 256 256)">
+    <path d="M150 112h168l70 70v206a20 20 0 0 1-20 20H150a20 20 0 0 1-20-20V132a20 20 0 0 1 20-20z" fill="url(#sheet)"/>
+    <path d="M318 112v50a20 20 0 0 0 20 20h50z" fill="#BFD6E3"/>
+    <path d="M168 300c26-62 52-92 70-80 20 14-26 92-4 100 20 8 44-74 66-66 18 6-6 52 12 58 14 5 30-20 46-40"
+          fill="none" stroke="#25348F" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <g transform="translate(372 236) rotate(36)">
+    <path d="M-16 -86h32v60l-16 34-16-34z" fill="#F5B53F"/>
+    <path d="M-16 -86h32v18h-32z" fill="#D9932A"/>
+    <circle cx="0" cy="-30" r="5" fill="#25348F"/>
+  </g>
+</svg>

@@ -1,0 +1,17 @@
+rs-doc is stable (strict passes for samsung_notes.document, tools.notes_payload, tools.notes_writer).
+Public Rust API (add-only from now on):
+  rs_doc::xml      Element (tag/attrs/text/tail/children, get/set/local/iter/at/at_mut), parse, fromstring,
+                   tostring (ET.tostring utf-8 + declaration), tostring_unicode, canonicalize_subtree, local_lower, casefold
+  rs_doc::mime     Limits, Headers, Part, Hooks/NoHooks, parse_headers, parts, samsung_fast_match
+  rs_doc::payload  PayloadResult (+ parsed roots), DownloadUrl, ContentFile, TextPreview, parse, parse_payload,
+                   parse_xml (_xml), decode_rich_text, base64_utf8, url_ok, walk_root, payload_from_parts
+  rs_doc::writer   ResearchNote, object_hash, parent_hash, encode_plain_text, double_b64, create_multipart, ...
+  rs_doc::doc      DocumentSnapshot, ParsedDocument, DocumentEdit, DocLimits, NowArg, parse_document,
+                   parse_document_fields, plain_structure (_plain_structure; returns index paths), one, integer,
+                   text_value, encode_text, normalize_commit, new_document, prepare_edit, multipart, page_inventory
+  rs_doc::util     b64encode, b64decode_strict, sha256, hex, uuid4, uuid5, is_canonical_uuid, gzip_compress, token_hex, json_dumps
+  rs_doc::pyapi    document_error/payload_error (import live classes: use these from OTHER cdylibs),
+                   element_from_py, py_xml_bytes, payload_limits, doc_limits, exact_int, bytes_of
+Do NOT construct rs-doc pyclasses or the static exception types from another extension module:
+each cdylib gets its own type objects. Call samsung_notes.document.* / tools.notes_payload.* through Python
+for Python-visible objects, or use the pure-Rust functions above.

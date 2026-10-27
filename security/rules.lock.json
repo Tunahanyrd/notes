@@ -1,0 +1,29 @@
+{
+  "semgrep": {
+    "version": "1.178.0",
+    "requirements": "security/semgrep-requirements.txt"
+  },
+  "repositories": [
+    {
+      "name": "official",
+      "repository": "semgrep/semgrep-rules",
+      "commit": "a84ff9cc2453ca91d581380de4b8b3f272f6f4be",
+      "url": "https://codeload.github.com/semgrep/semgrep-rules/tar.gz/a84ff9cc2453ca91d581380de4b8b3f272f6f4be",
+      "sha256": "b227c2d234ffd9c84c4dbd6619a5897a7192637c141baeace3bfc37b0715a887"
+    },
+    {
+      "name": "tob",
+      "repository": "trailofbits/semgrep-rules",
+      "commit": "31390b3a99c04c81522d1b37c8d1900aa2dd4094",
+      "url": "https://codeload.github.com/trailofbits/semgrep-rules/tar.gz/31390b3a99c04c81522d1b37c8d1900aa2dd4094",
+      "sha256": "d581db6374b32e63509daf569798e7ccad7d40375a5058a85c21033598ec73d8"
+    },
+    {
+      "name": "elttam",
+      "repository": "elttam/semgrep-rules",
+      "commit": "244268562cc92d33f54b8a60a187df5520f91b26",
+      "url": "https://codeload.github.com/elttam/semgrep-rules/tar.gz/244268562cc92d33f54b8a60a187df5520f91b26",
+      "sha256": "4a1c064f24391ec8423e53b9d423c5ba2cdedd5b481a0c73237ca32d6cd9d748"
+    }
+  ]
+}

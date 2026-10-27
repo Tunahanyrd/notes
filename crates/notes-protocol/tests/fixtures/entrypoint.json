@@ -1,0 +1,11 @@
+{
+  "signOutURI": "https://example.invalid/signOut",
+  "chkDoNum": "synthetic-check-value",
+  "signInURI": "https://example.invalid/signInGate",
+  "acsChnl": "SDK",
+  "confirmPasswordURI": "https://example.invalid/confirmPassword",
+  "signUpURI": "https://example.invalid/signUp",
+  "pkiPublicKey": "ZmFrZS1rZXktbm90LURFUg==",
+  "changePasswordURI": "https://example.invalid/changePassword",
+  "pbeKySpcIters": "200"
+}

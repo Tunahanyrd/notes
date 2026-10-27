@@ -1,0 +1,316 @@
+# Linux CI. Every action is pinned to a full commit SHA (version in the
+# trailing comment); Dependabot (.github/dependabot.yml) proposes bumps.
+#
+# Nothing here talks to Samsung: all suites use synthetic fixtures, the
+# engines run with --offline, and the XDG state/config/data/cache dirs point
+# at an empty temp tree so no job can read a developer's private library.
+# Live probes (tools/live_*.py) and the private desktop stage tools
+# (desktop/tests/ink-stage.mjs, native-lifecycle.py, real-engine.mjs) are
+# never run in CI. Python is not a product gate any more (2026-10-27): the
+# historical reference under reference/python is never run; python3 only runs
+# standalone helper scripts (branding, licenses, the conformance harness).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  PYTHON_VERSION: '3.14'
+  NODE_VERSION: '24'
+  # GPL-3.0 renderer library linked by tools/ink-renderer; build.rs verifies
+  # this exact commit (see NOTICE).
+  SDOCX_COMMIT: 41e9c1099b29a48dc7320501573d7c4858f09303
+  # Runtime tools of the preview/export paths (pdfinfo/pdftoppm, rsvg-convert,
+  # bwrap, xdg-user-dir). Ubuntu's imagemagick package is ImageMagick 6
+  # without a `magick` binary, so the golden replay selects its recorded
+  # `no-magick` variant (see crates/notes-engine/conformance/run.py).
+  RUNTIME_APT: poppler-utils librsvg2-bin imagemagick bubblewrap xdg-user-dirs
+
+jobs:
+  meta:
+    name: Branding and licenses
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Branding outputs are in sync with branding.json
+        run: python3 tools/branding.py sync --check
+      - name: Cache sdocx
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: references/upstream/sdocx
+          key: sdocx-${{ env.SDOCX_COMMIT }}
+      - name: Fetch sdocx at the pinned commit
+        run: tools/fetch_sdocx.sh
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci --ignore-scripts
+      - name: Third-party license list is up to date
+        run: python3 tools/third_party_licenses.py --check
+      - name: cargo-deny licenses (engine workspace)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check licenses
+          manifest-path: ./Cargo.toml
+      - name: cargo-deny licenses (desktop shell)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check licenses
+          manifest-path: ./desktop/src-tauri/Cargo.toml
+      - name: cargo-deny licenses (ink renderer)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check licenses
+          manifest-path: ./tools/ink-renderer/Cargo.toml
+      - name: cargo-deny licenses (live pen preview, WebAssembly)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check licenses
+          manifest-path: ./crates/notes-ink-live/Cargo.toml
+
+  security:
+    name: Security lints and advisories
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libssl-dev libsqlite3-dev pkg-config
+      - name: Rust toolchain (+ clippy)
+        run: rustup toolchain install stable --profile minimal --component clippy && rustup default stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: security-clippy
+      # Fails on: `unsafe` without a `// SAFETY:` comment, mem::forget,
+      # todo!/unimplemented! anywhere in product code; unwrap/expect/panic!
+      # in the hardened crates listed in the script. Tests are not linted.
+      - name: clippy security gate
+        run: tools/clippy_security.sh --gate
+      - name: Cache sdocx
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: references/upstream/sdocx
+          key: sdocx-${{ env.SDOCX_COMMIT }}
+      - name: Fetch sdocx at the pinned commit (ink-renderer/ink-live path dependency)
+        run: tools/fetch_sdocx.sh
+      # RustSec advisories, banned crates and sources for every lock file.
+      # Accepted advisories are listed with their reason in deny.toml.
+      - name: cargo-deny advisories (engine workspace)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories bans sources
+          manifest-path: ./Cargo.toml
+      - name: cargo-deny advisories (desktop shell)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories bans sources
+          manifest-path: ./desktop/src-tauri/Cargo.toml
+      - name: cargo-deny advisories (ink renderer)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories bans sources
+          manifest-path: ./tools/ink-renderer/Cargo.toml
+      - name: cargo-deny advisories (live pen preview, WebAssembly)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories bans sources
+          manifest-path: ./crates/notes-ink-live/Cargo.toml
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: npm audit (shipped UI dependencies)
+        working-directory: desktop
+        run: npm audit --omit=dev --audit-level=moderate
+
+  ink-live:
+    name: Live pen preview (notes-ink-live, native tests + wasm32)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust toolchain (+ wasm32-unknown-unknown)
+        run: |
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          rustup default stable
+      - name: Cache sdocx
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: references/upstream/sdocx
+          key: sdocx-${{ env.SDOCX_COMMIT }}
+      - name: Fetch sdocx at the pinned commit
+        run: tools/fetch_sdocx.sh
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ink-live
+          workspaces: crates/notes-ink-live -> target
+      # Separate GPL-3.0 workspace with its own Cargo.lock (not a member of
+      # the root workspace). tools/build_ink_wasm.sh, when present, is the
+      # canonical WebAssembly build; otherwise build the plain C-ABI module.
+      - name: cargo test (native)
+        run: cargo test --locked --manifest-path crates/notes-ink-live/Cargo.toml
+      - name: Build the WebAssembly module
+        run: |
+          if [ -x tools/build_ink_wasm.sh ]; then
+            tools/build_ink_wasm.sh
+          else
+            cargo build --locked --release --target wasm32-unknown-unknown \
+              --manifest-path crates/notes-ink-live/Cargo.toml
+          fi
+
+  rust-crates:
+    name: Rust crate tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $RUNTIME_APT libssl-dev libsqlite3-dev pkg-config
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Isolate XDG directories
+        run: |
+          for d in state config data cache; do mkdir -p "$RUNNER_TEMP/xdg/$d"; done
+          {
+            echo "XDG_STATE_HOME=$RUNNER_TEMP/xdg/state"
+            echo "XDG_CONFIG_HOME=$RUNNER_TEMP/xdg/config"
+            echo "XDG_DATA_HOME=$RUNNER_TEMP/xdg/data"
+            echo "XDG_CACHE_HOME=$RUNNER_TEMP/xdg/cache"
+          } >> "$GITHUB_ENV"
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: rust-crates
+      - name: cargo test (notes-* and rs-* crates, default features)
+        run: cargo test --locked --workspace
+      - name: No PyO3 in the engine or the default workspace graph
+        # Python left the product (2026-10-27); the rs-* PyO3 bindings sit
+        # behind their default-off `python` feature.
+        run: |
+          if cargo tree --locked -e normal -p notes-engine | grep -i pyo3; then echo 'pyo3 reached notes-engine' >&2; exit 1; fi
+          if cargo tree --locked --workspace -e all | grep -i pyo3; then echo 'pyo3 in the default workspace graph' >&2; exit 1; fi
+      - name: Build notes-engine for the HTTP conformance job
+        run: cargo build --locked -p notes-engine
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: notes-engine-debug
+          path: target/debug/notes-engine
+          retention-days: 3
+
+  engine-conformance:
+    name: notes-engine HTTP conformance (golden replay)
+    needs: [rust-crates]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install runtime tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $RUNTIME_APT libssl-dev pkg-config
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Cache sdocx
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: references/upstream/sdocx
+          key: sdocx-${{ env.SDOCX_COMMIT }}
+      - name: Fetch sdocx at the pinned commit
+        run: tools/fetch_sdocx.sh
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ink-render
+          workspaces: tools/ink-renderer -> target
+      - name: Build ink-render (ink-reconstructed previews)
+        run: cargo build --locked --release --manifest-path tools/ink-renderer/Cargo.toml
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: notes-engine-debug
+          path: target/debug/
+      - name: Replay the golden fixtures against notes-engine
+        # Frozen responses of the historical Python reference over the
+        # committed synthetic library (crates/notes-engine/conformance/golden;
+        # reference/python is never run). Python 3 stdlib only; every server
+        # gets its own scratch HOME/XDG dirs and --offline; non-zero exit
+        # unless every request, table and file matches.
+        run: |
+          chmod +x target/debug/notes-engine
+          python3 crates/notes-engine/conformance/run.py --replay \
+            --candidate target/debug/notes-engine \
+            --report "$RUNNER_TEMP/conformance-report.json"
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: conformance-report
+          path: ${{ runner.temp }}/conformance-report.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  desktop:
+    name: Desktop UI (tsc + Playwright)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Build (tsc -b && vite build)
+        run: npm run build
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Playwright (mocked API, served by vite preview)
+        run: npx playwright test
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-results
+          path: desktop/test-results/
+          if-no-files-found: ignore
+          retention-days: 7

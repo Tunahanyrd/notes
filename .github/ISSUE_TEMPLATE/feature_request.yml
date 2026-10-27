@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest an improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that the client cannot do today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: |
+        How should it work? If it changes what is written to the Cloud, describe how
+        the change can be verified by a full readback.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Format / behaviour evidence
+      description: |
+        Describe observed formats or behaviour in your own words. Do not attach Samsung
+        binaries, decompiled code, icons, fonts or screenshots of personal notes.

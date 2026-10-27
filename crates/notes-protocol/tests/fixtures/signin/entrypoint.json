@@ -1,0 +1,7 @@
+{
+  "signInURI": "https://account.samsung.com/accounts/WINSDK/signInGate",
+  "chkDoNum": "synthetic-check",
+  "pkiPublicKey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqkYCHi9a1v0ZatYQGM+VqI0MPHAGo6IsnpZlVEWIHr2LJcMSHWRpPqCEGsBl9nqL9nFMXZXWcFIe3toBi9f5tNiGeRxuIvPRhjECyud+KIIPe4PjDnY61prYvn8BZ/E6QDeoQHkaMAUespu38GT3peoWcu/7I+Ie31oHYOY/OQPjyNZuxIG60DgRpQ/TEhir9yNpSlhBvL+Gv8v6+n8doaR2gRVanhsRJsOC67QOacJISgIzovubNaf/GLlsCY8n7dONLSbuuGpXj1y3dZBvMXP/OX2ir3ZcnDV7tYTao122ns4OMSAZUG+8D8jis7+fnQJXpuEnvx4qjHqp2pDvEQIDAQAB",
+  "pbeKySpcIters": "200",
+  "acsChnl": "SDK"
+}

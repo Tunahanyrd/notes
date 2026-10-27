@@ -1,0 +1,27 @@
+[package]
+name = "rs-auth"
+license.workspace = true
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lib]
+name = "_auth"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { workspace = true, optional = true }
+rs-common = { path = "../rs-common", optional = true }
+notes_platform = { path = "../notes-platform", package = "notes-platform" }
+# STABLE pure helpers: byte-identical json.dumps/loads, private files, urlencode.
+rs_cloud = { path = "../rs-cloud", package = "rs-cloud" }
+base64 = { workspace = true }
+sha2 = { workspace = true }
+getrandom = { workspace = true }
+libc = "=0.2.191"
+flate2 = { version = "=1.1.10", default-features = false, features = ["zlib"] }
+
+[features]
+# PyO3 bindings (the historical Python extension `_auth`, see reference/python).
+# Off by default: the pure engine and the desktop app never compile pyo3.
+python = ["dep:pyo3", "dep:rs-common", "rs-common/python", "rs_cloud/python"]

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Generated from io.github.tunahanyrd.Notes.metainfo.xml.in by tools/branding.py sync. -->
+<component type="desktop-application">
+  <id>io.github.tunahanyrd.Notes</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later AND GPL-3.0-only</project_license>
+  <name>Notes</name>
+  <name xml:lang="tr">Notlar</name>
+  <summary>Unofficial notes client compatible with Samsung Notes</summary>
+  <summary xml:lang="tr">Samsung Notes ile uyumlu, resmi olmayan not istemcisi</summary>
+  <developer id="io.github.tunahanyrd">
+    <name>Tunahanyrd and contributors</name>
+  </developer>
+  <description>
+    <p>
+      Notes is a desktop notes application that reads and writes notes in
+      the Samsung Notes format and keeps them in sync with your Samsung Cloud
+      account: handwritten pages, text notes, folders, favorites and the trash.
+    </p>
+    <ul>
+      <li>Handwritten pages rendered from the original strokes, with pen, eraser and lasso tools</li>
+      <li>Rich text editing, PDF backgrounds and page management</li>
+      <li>Works offline; changes are queued and verified after upload</li>
+    </ul>
+    <p>
+      Unofficial client compatible with Samsung Notes and Samsung Cloud. Not affiliated with, endorsed by, or sponsored by Samsung Electronics Co., Ltd. "Samsung", "Samsung Notes" and "Galaxy" are trademarks of Samsung Electronics Co., Ltd., used only to describe compatibility.
+    </p>
+  </description>
+  <launchable type="desktop-id">Notes.desktop</launchable>
+  <url type="homepage">https://github.com/Tunahanyrd/notes</url>
+  <url type="bugtracker">https://github.com/Tunahanyrd/notes/issues</url>
+  <url type="vcs-browser">https://github.com/Tunahanyrd/notes</url>
+  <categories>
+    <category>Office</category>
+  </categories>
+  <keywords>
+    <keyword>notes</keyword>
+    <keyword>handwriting</keyword>
+    <keyword>pen</keyword>
+    <keyword>Samsung Notes</keyword>
+  </keywords>
+  <provides>
+    <binary>notes</binary>
+  </provides>
+  <requires>
+    <display_length compare="ge">760</display_length>
+  </requires>
+  <recommends>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </recommends>
+  <supports>
+    <control>tablet</control>
+    <control>touch</control>
+  </supports>
+  <content_rating type="oars-1.1"/>
+  <branding>
+    <color type="primary" scheme_preference="light">#f2d5d2</color>
+    <color type="primary" scheme_preference="dark">#7a2c25</color>
+  </branding>
+  <releases>
+    <release version="0.1.0" date="2026-10-27">
+      <description>
+        <p>First packaged release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

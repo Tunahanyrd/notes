@@ -1,0 +1,104 @@
+// Isolated real backend integration. No research session or Samsung cloud calls.
+import {chromium} from '@playwright/test';
+import {spawn} from 'node:child_process';
+import {expect} from '@playwright/test';
+import {mkdtemp,readFile,chmod,cp,mkdir} from 'node:fs/promises';
+import {existsSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+const root=path.resolve(import.meta.dirname,'../..');
+const directory=await mkdtemp(path.join(tmpdir(),'notes-ui-integration-'));await chmod(directory,0o700);
+const runtime=path.join(directory,'runtime.json');
+// Synthetic seed library, frozen once from the historical Python seeder
+// (reference/python/generators/desktop/seed-offline.py); the engine is the pure
+// notes-engine binary (NOTES_ENGINE_BIN, else target/{debug,release}).
+const data=path.join(directory,'data');await mkdir(data,{mode:0o700});
+await cp(path.join(root,'desktop/tests/fixtures/offline-library/library.sqlite3'),path.join(data,'library.sqlite3'));await chmod(path.join(data,'library.sqlite3'),0o600);
+const engine=process.env.NOTES_ENGINE_BIN||['debug','release'].map(kind=>path.join(root,'target',kind,'notes-engine')).find(p=>existsSync(p));
+assert.ok(engine,'notes-engine binary not found: cargo build -p notes-engine');
+const child=spawn(engine,['--data-dir',data,'--offline','--no-browser','--runtime-file',runtime],{cwd:root,stdio:'ignore',env:{...process.env,LINUX_NOTES_PROJECT_ROOT:root}});
+let browser;
+try{
+ let session;
+ for(let i=0;i<150;i++){try{session=JSON.parse(await readFile(runtime,'utf8'));break;}catch{}if(child.exitCode!==null)throw Error('isolated engine exited before readiness');await new Promise(r=>setTimeout(r,100));}
+ assert.ok(session);assert.equal(session.pid,child.pid);
+ browser=await chromium.launch({executablePath:'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
+ const page=await browser.newPage({viewport:{width:1366,height:900}});
+ const errors=[],consoleErrors=[],thumbnailFailures=new Map(),responseChecks=[];
+ page.on('pageerror',()=>errors.push('pageerror'));
+ page.on('console',entry=>{if(entry.type()==='error')consoleErrors.push({url:entry.location().url,text:entry.text()});});
+ page.on('response',response=>{if(/\/api\/notes\/[^/]+\/thumbnail\?revision=/.test(response.url())&&[404,409,422,429,503].includes(response.status()))responseChecks.push(response.json().then(body=>{const code=body?.error?.code;if(['not_found','revision_conflict','preview_unavailable','thumbnail_unavailable','preview_offline','preview_busy'].includes(code))thumbnailFailures.set(response.url(),{status:response.status(),code});}).catch(()=>{}));});
+ await page.goto(session.url);await expect(page).toHaveTitle(/Not/);await expect(page.locator('vite-error-overlay')).toHaveCount(0);
+ await page.getByRole('button',{name:'Yeni not',exact:false}).first().click();
+ await page.getByLabel('Not başlığı').fill('Gerçek yerel hizmet testi');
+ const content='Tamamen sentetik bir not.\nTürkçe: çığ, ışık, düşünce 🌱';
+ const richBody=page.getByLabel('Not içeriği');await expect(richBody).toHaveAttribute('contenteditable','true');await richBody.fill('Tamamen sentetik bir not.');await page.keyboard.press('Control+End');await page.keyboard.press('Enter');await page.keyboard.type('Türkçe: çığ, ışık, düşünce 🌱');
+ await richBody.locator('p').first().evaluate(element=>{const range=document.createRange();range.selectNodeContents(element);const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);});await page.getByRole('button',{name:'Kalın',exact:true}).click();await page.getByRole('button',{name:'Yapılacaklar listesi',exact:true}).click();await page.getByRole('checkbox',{name:'Yapılacak öğesini tamamla'}).click();await page.keyboard.press('Control+s');
+ await page.getByText('Yerel kayıt tamam',{exact:true}).waitFor();
+ assert.equal(new URL(page.url()).hash,'');
+ await page.reload();await page.getByRole('button',{name:/Gerçek yerel hizmet testi/}).click();
+ assert.equal(await page.getByLabel('Not içeriği').locator('p').evaluateAll(paragraphs=>paragraphs.map(p=>Array.from(p.childNodes).filter(node=>!(node.nodeType===1&&node.classList.contains('native-check-control'))).map(node=>node.textContent).join('')).join('\n')),content);
+ await expect(page.getByRole('checkbox')).toHaveAttribute('aria-checked','true');await expect(page.locator('.rich-document-body span[data-samsung-kind="bold"]')).toHaveText('Tamamen sentetik bir not.');
+ await page.getByRole('button',{name:'Not seçenekleri'}).click();
+ for(const name of ['Favorilere ekle','Çöp kutusuna taşı','Klasöre taşı'])await expect(page.getByRole('button',{name,exact:true})).toBeDisabled();
+ await page.getByRole('button',{name:'Not seçenekleri'}).click();
+ const downloadPromise=page.waitForEvent('download');await page.getByRole('button',{name:'Dışa aktar',exact:true}).click();
+ const download=await downloadPromise;assert.ok((await readFile(await download.path(),'utf8')).includes(content));
+ const open=async(title)=>{await page.getByRole('button',{name:'Not listesine dön'}).click();await page.getByRole('button',{name:new RegExp(title)}).click();};
+ const action=async(name)=>{await page.getByRole('button',{name:'Not seçenekleri'}).click();await page.getByRole('button',{name,exact:true}).click();};
+ await open('Sentetik çizim başlığı');await expect(page.getByLabel('Not başlığı')).toBeEditable();await expect(page.getByLabel('Not içeriği')).toHaveAttribute('readonly','');
+ const readonlyBody=await page.getByLabel('Not içeriği').inputValue();await page.getByLabel('Not başlığı').fill('Korunan çizim yeni başlık');await page.keyboard.press('Control+s');
+ await expect(page.getByText('Kaydedilmedi',{exact:true})).toHaveCount(0);await expect(page.getByLabel('Not içeriği')).toHaveValue(readonlyBody);
+ await page.reload();await page.getByRole('button',{name:/Korunan çizim yeni başlık/}).click();await expect(page.getByLabel('Not başlığı')).toHaveValue('Korunan çizim yeni başlık');await expect(page.getByLabel('Not içeriği')).toHaveAttribute('readonly','');
+ await open('Önbellek favori testi');await action('Favorilere ekle');
+ await expect(page.getByText(/Düzenleme işlemi buluta gönderilmeyi bekliyor/)).toBeVisible();
+ await page.getByRole('button',{name:'Not seçenekleri'}).click();await expect(page.getByRole('button',{name:'Favorilerden çıkar',exact:true})).toBeDisabled();
+ await page.reload();await page.getByRole('button',{name:/Önbellek favori testi/}).click();
+ await expect(page.getByText(/Düzenleme işlemi buluta gönderilmeyi bekliyor/)).toBeVisible();
+ await open('Önbellek çöp testi');await action('Çöp kutusuna taşı');
+ await expect(page.getByText('Çöp kutusu işleminin bulut sonucu bekleniyor.')).toBeVisible();
+ await expect(page.getByRole('button',{name:'Geri yükle',exact:true})).toBeDisabled();
+ await page.getByRole('button',{name:'Not listesine dön'}).click();await page.getByRole('button',{name:'Çöp kutusu',exact:true}).click();
+ await page.getByRole('button',{name:/Önbellek geri yükleme testi/}).click();
+ await expect(page.getByText('Bu not Samsung Cloud çöp kutusunda.')).toBeVisible();
+ await page.getByRole('button',{name:'Geri yükle',exact:true}).click();
+ await expect(page.getByText(/Düzenleme işlemi buluta gönderilmeyi bekliyor/)).toBeVisible();
+ await page.getByRole('button',{name:'Not listesine dön'}).click();await page.getByRole('button',{name:/Tüm notlar/}).click();
+ await page.getByRole('button',{name:/Önbellek taşıma testi/}).click();await action('Klasöre taşı');
+ await page.getByLabel('Hedef klasör').selectOption('synthetic-folder');await page.getByRole('button',{name:'Taşı',exact:true}).click();
+ await expect(page.getByText(/Düzenleme işlemi buluta gönderilmeyi bekliyor/)).toBeVisible();
+ await page.getByRole('button',{name:'Not listesine dön'}).click();await page.locator('.folder-item').filter({hasText:'Sentetik klasör'}).click();
+ await expect(page.getByRole('button',{name:/Önbellek taşıma testi/})).toBeVisible();
+ await expect(page.locator('.note-row')).toHaveCount(1);
+ await page.getByRole('button',{name:'Klasör oluştur',exact:true}).click();await page.getByLabel('Klasör adı').fill('Çevrimdışı yeni klasör');await page.getByRole('button',{name:'Oluştur',exact:true}).click();
+ await expect(page.locator('.folder-item').filter({hasText:'Çevrimdışı yeni klasör'}).locator('.state-dot.pending')).toBeVisible();
+ const folderAction=async(name,action)=>{await page.locator('.folder-item').filter({hasText:name}).click({button:'right'});await page.getByRole('menuitem',{name:action,exact:true}).click();};
+ await folderAction('Adlandırılacak klasör','Yeniden adlandır');await page.getByLabel('Klasör adı').fill('Yeni klasör adı');await page.getByRole('dialog').getByRole('button',{name:'Kaydet',exact:true}).click();
+ await expect(page.locator('.folder-item').filter({hasText:'Yeni klasör adı'}).locator('.state-dot.pending')).toBeVisible();
+ await folderAction('Taşınacak klasör','Klasörü taşı');await page.getByLabel('Üst klasör').selectOption('synthetic-folder');await page.getByRole('dialog').getByRole('button',{name:'Kaydet',exact:true}).click();
+ await expect(page.locator('.folder-item').filter({hasText:'Taşınacak klasör'}).locator('.state-dot.pending')).toBeVisible();
+ await folderAction('Silinecek boş klasör','Çöp kutusuna taşı');await page.getByRole('dialog').getByRole('button',{name:'Çöp kutusuna taşı',exact:true}).click();
+ await page.getByRole('button',{name:'Çöp kutusu',exact:true}).click();
+ const folderTrash=page.locator('.trash-folder-row');await expect(folderTrash.filter({hasText:'Silinecek boş klasör'}).getByRole('button',{name:'Geri yükle'})).toBeDisabled();
+ await folderTrash.filter({hasText:'Geri yüklenecek klasör'}).getByRole('button',{name:'Geri yükle'}).click();await page.getByRole('dialog').getByRole('button',{name:'Geri yükle',exact:true}).click();
+ await expect(page.locator('.folder-item').filter({hasText:'Geri yüklenecek klasör'}).locator('.state-dot.pending')).toBeVisible();
+ await page.reload();await expect(page.locator('.folder-item').filter({hasText:'Yeni klasör adı'}).locator('.state-dot.pending')).toBeVisible();
+ await expect(page.locator('.folder-item').filter({hasText:'Çevrimdışı yeni klasör'}).locator('.state-dot.pending')).toBeVisible();
+ await expect(page.locator('.folder-item .state-dot').first()).toHaveCSS('width','5px');
+ await page.getByRole('button',{name:'Ayarlar',exact:true}).click();await page.getByRole('button',{name:'Liste',exact:true}).click();
+ const preferenceSaved=page.waitForResponse(response=>response.url().endsWith('/api/preferences')&&response.request().method()==='PUT'&&response.request().postDataJSON().defaultZoom===125&&response.status()===200);
+ await page.getByLabel('Varsayılan yakınlaştırma').selectOption('125');await preferenceSaved;await page.getByRole('button',{name:'Ayarları kapat'}).click();await page.reload();await expect(page.locator('.note-rows')).toHaveClass(/gallery-list/);
+ await page.getByRole('button',{name:'Ayarlar',exact:true}).click();await expect(page.getByLabel('Varsayılan yakınlaştırma')).toHaveValue('125');await page.getByRole('button',{name:'Ayarları kapat'}).click();
+ await page.screenshot({path:'/tmp/notes-cloud-offline-desktop.png',fullPage:true});
+ await Promise.all(responseChecks);
+ const unexpectedConsole=consoleErrors.filter(entry=>{const expected=thumbnailFailures.get(entry.url);return !expected||!entry.text.startsWith('Failed to load resource:')||!entry.text.includes(`status of ${expected.status} `);});
+ assert.deepEqual(errors,[]);assert.deepEqual(unexpectedConsole,[]);
+ console.log('Expected unavailable synthetic-thumbnail responses (validated status/code):',consoleErrors.length-unexpectedConsole.length);
+ console.log('Real isolated offline engine: local create/save/reload/export, readonly-body title-only save/reload, cloud cached view, favorite/trash/restore/move queues, pending persistence, folder filter, folder create/rename/move/trash/restore pending persistence, SQLite-backed preference save/reload, token cleanup and page errors passed. No cloud confirmation claimed.');
+}finally{
+ await browser?.close();child.kill('SIGTERM');
+ await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,5000))]);
+ if(child.exitCode===null && child.signalCode===null){child.kill('SIGKILL');throw Error('isolated engine did not stop');}
+ console.log('Only owned isolated engine stopped. Synthetic private test data retained in OS temporary directory.');
+}

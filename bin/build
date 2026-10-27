@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+notes_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$notes_root"
+cargo build --locked -p notes-cli -j 1
+npm --prefix desktop ci --no-audit --no-fund
+npm --prefix desktop run build
+cargo build --manifest-path desktop/src-tauri/Cargo.toml --locked -j 1

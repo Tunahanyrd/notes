@@ -1,0 +1,28 @@
+[package]
+name = "notes-cloud"
+license.workspace = true
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+# Pure-Rust port of samsung_notes/cloud_api.py, cloud_metadata.py,
+# cloud_ink_erase.py and cloud_page_ops.py (no PyO3 symbols reachable).
+[lib]
+name = "notes_cloud"
+
+[dependencies]
+notes_host = { path = "../notes-host", package = "notes-host" }
+rs_store = { path = "../rs-store", package = "rs-store" }
+rs_doc = { path = "../rs-doc", package = "rs-doc" }
+rs_editor = { path = "../rs-editor", package = "rs-editor" }
+rs_ink = { path = "../rs-ink", package = "rs-ink" }
+rs_ops = { path = "../rs-ops", package = "rs-ops" }
+notes-protocol = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+getrandom = { workspace = true }
+roxmltree = { workspace = true }
+sha2 = { workspace = true }
+sha1 = { version = "=0.10.7", default-features = false }
+libc = "=0.2.191"
+flate2 = { version = "=1.1.10", default-features = false, features = ["zlib"] }

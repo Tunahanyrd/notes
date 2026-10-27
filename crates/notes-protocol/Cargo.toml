@@ -1,0 +1,17 @@
+[package]
+name = "notes-protocol"
+license.workspace = true
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+getrandom.workspace = true
+openssl.workspace = true
+roxmltree.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+zeroize.workspace = true

@@ -1,0 +1,25 @@
+[package]
+name = "notes-net"
+license.workspace = true
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+# Pure-Rust blocking HTTPS client implementing the `tools/notes_cloud.send_once`
+# contract (and the preview downloads' `_http`) for the Python-free engine.
+[lib]
+name = "notes_net"
+
+[features]
+# Exposes `Client::with_extra_roots` (a throwaway CA for local TLS fakes) to
+# other crates' tests. Never enable in production builds.
+test-support = []
+# In-memory response parser entry point for fuzz/ (cargo-fuzz). Never enable
+# in production builds.
+fuzzing = []
+
+[dependencies]
+openssl = { workspace = true }
+flate2 = { version = "=1.1.10", default-features = false, features = ["zlib"] }
+libc = "=0.2.191"
+notes_platform = { path = "../notes-platform", package = "notes-platform" }

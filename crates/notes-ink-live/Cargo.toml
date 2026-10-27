@@ -1,0 +1,38 @@
+# Live pen preview core: the same pinned sdocx stroke renderer and resvg
+# rasterizer as the saved-page pipeline, built for the desktop UI as
+# WebAssembly (tools/build_ink_wasm.sh). GPL-3.0 like tools/ink-renderer.
+# Separate Cargo workspace (not a member of the root workspace): the GPL
+# renderer source and its lockfile stay out of the main engine build.
+[workspace]
+
+[package]
+name = "notes-ink-live"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+publish = false
+license = "GPL-3.0-only"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+sdocx = { path = "../../references/upstream/sdocx/crates/sdocx", features = ["render", "serde"] }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
+# Same rasterizer and version as the saved-page ink PNGs (crates/rs-render).
+resvg = { version = "=0.47.0", default-features = false }
+# Empty font database: strokes need no text, and sdocx's default book would
+# embed its fonts in the WebAssembly module.
+fontdb = { version = "=0.23.0", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+debug = 0
+incremental = false

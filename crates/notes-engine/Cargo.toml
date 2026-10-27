@@ -1,0 +1,34 @@
+[package]
+name = "notes-engine"
+license.workspace = true
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+# Python-free engine: serves the same loopback API as `python -m samsung_notes`
+# over the same SQLite library, using only the pure-Rust cores of the area
+# crates (no PyO3 code is reachable; the binary does not link libpython).
+[lib]
+name = "notes_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "notes-engine"
+path = "src/main.rs"
+
+[dependencies]
+notes_net = { path = "../notes-net", package = "notes-net" }
+notes_login = { path = "../notes-login", package = "notes-login" }
+notes_cloud = { path = "../notes-cloud", package = "notes-cloud" }
+notes_preview = { path = "../notes-preview", package = "notes-preview" }
+notes_host = { path = "../notes-host", package = "notes-host" }
+rs_engine = { path = "../rs-engine", package = "rs-engine" }
+rs_store = { path = "../rs-store", package = "rs-store" }
+rs_doc = { path = "../rs-doc", package = "rs-doc" }
+rs_ops = { path = "../rs-ops", package = "rs-ops" }
+notes_platform = { path = "../notes-platform", package = "notes-platform" }
+libc = "=0.2.191"
+
+[features]
+# Statically link SQLite (packaged builds without a system libsqlite3).
+bundled-sqlite = ["rs_store/bundled"]

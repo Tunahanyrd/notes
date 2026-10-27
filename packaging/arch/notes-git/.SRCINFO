@@ -1,0 +1,41 @@
+pkgbase = notes-git
+	pkgdesc = Unofficial notes client compatible with Samsung Notes and Samsung Cloud
+	pkgver = 0.1.0.r0.g0000000
+	pkgrel = 1
+	url = https://github.com/Tunahanyrd/notes
+	arch = x86_64
+	arch = aarch64
+	license = GPL-3.0-or-later
+	license = GPL-3.0-only
+	makedepends = rust
+	makedepends = rust-wasm
+	makedepends = nodejs
+	makedepends = npm
+	makedepends = git
+	depends = webkit2gtk-4.1
+	depends = gtk3
+	depends = glib2
+	depends = cairo
+	depends = gdk-pixbuf2
+	depends = libsoup3
+	depends = openssl
+	depends = sqlite
+	depends = gcc-libs
+	depends = glibc
+	depends = zlib
+	depends = poppler
+	depends = bubblewrap
+	depends = xdg-utils
+	depends = hicolor-icon-theme
+	optdepends = imagemagick: Save as PDF
+	optdepends = librsvg: rsvg-convert ink rasterizer (SAMSUNG_NOTES_INK_RASTER=rsvg)
+	provides = notes
+	conflicts = notes
+	options = !lto
+	options = !debug
+	source = notes::git+https://github.com/Tunahanyrd/notes.git
+	source = sdocx::git+https://github.com/twangodev/sdocx.git#commit=41e9c1099b29a48dc7320501573d7c4858f09303
+	sha256sums = SKIP
+	sha256sums = SKIP
+
+pkgname = notes-git

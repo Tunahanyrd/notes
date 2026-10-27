@@ -1,0 +1,2 @@
+rs-ops: strict for all 6 modules; pure-Rust core API in lib (xml, err, util, deps, <module>::core fns).
+public (add-only): page_ops::load + page_ops::Loaded for rs-store.

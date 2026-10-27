@@ -1,0 +1,583 @@
+[
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@floating-ui/core/-/core-1.8.0.tgz",
+        "sha512": "d02219e62b69b3ff31ec11bc744221b39dc1bc2507d8f0a8a20b5a930453badf80ae6e7cb09a2827402e6612f0d87258211e5c30b34f0524bbdbcb0f868da485",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_floating-ui_core-1.8.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@floating-ui/dom/-/dom-1.8.0.tgz",
+        "sha512": "c974abcde1d905365a74b3a57f28429091cd78b2671d19d1227c1d678d0bed989a02dac1c28625b03ad7defe7307552d93b08b7f370e5675555a85c4932ec27a",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_floating-ui_dom-1.8.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@floating-ui/utils/-/utils-0.2.12.tgz",
+        "sha512": "1e90a8f2d996ccb55a779b36775f44840cf9ceaaeb43ab3af6a77a9a83cc42f90eb92c034f562045f59256e7387a79eaae0bf7387a6988e18c43ba02d77c88c3",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_floating-ui_utils-0.2.12.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@oxc-project/types/-/types-0.155.0.tgz",
+        "sha512": "49e13c24fc16d71b35b4778dc9c8d4b5405d868ad16bca388e5be3c24e3d47bfd9dbdd62fb80d06bb2492203a6fd3698419c7e42b3d06d527ff5cf1d30864df1",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_oxc-project_types-0.155.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@playwright/test/-/test-1.64.1.tgz",
+        "sha512": "21a6069a5fe748e89959139f3edb882fb9debaef6a0ce6774cdbcd963508ae10ccc6219380f8f38ff83da7d471a52dad49ea4f0d163e53001a11e88ab54bc802",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_playwright_test-1.64.1.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@rolldown/binding-linux-arm64-gnu/-/binding-linux-arm64-gnu-1.2.15.tgz",
+        "sha512": "8930635f1f81e504af808f3d9497e6aa1e304e1f0d69b47561920837784dc78cd21b41157d5aa43af2ee94da46e36e75a5b77afc802667f2de7d5935638acf87",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_rolldown_binding-linux-arm64-gnu-1.2.15.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@rolldown/binding-linux-x64-gnu/-/binding-linux-x64-gnu-1.2.15.tgz",
+        "sha512": "14783ad2b4ba0c178f01867d5fd17aef1f8939b15d9a09fab6ea40d42fdadc1f82b9f1664c3e265fe7bc33be6d0a200eddfa11ffac70541234290888eec9ffaf",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_rolldown_binding-linux-x64-gnu-1.2.15.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@rolldown/pluginutils/-/pluginutils-1.0.1.tgz",
+        "sha512": "da3f5b1ade4987c863faf3ed8333ed97bda3d324711c0cae9a8a3a4cd7c08ec2c1d3852da52bcf6cf703701331cfb9fef42601d1cd46c501716118368e29aa1b",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_rolldown_pluginutils-1.0.1.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tauri-apps/cli/-/cli-2.12.4.tgz",
+        "sha512": "248f5b1dfb9d4912629063ab8db5c49ba463cf3be62ae2dcf898b1075344f21373424365082202de94c44b7bb2a6447d9711ebb1bc737274b0848d88c4142987",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tauri-apps_cli-2.12.4.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tauri-apps/cli-linux-arm64-gnu/-/cli-linux-arm64-gnu-2.12.4.tgz",
+        "sha512": "8f9ace9e39915305ab9b5a28b1fd330589780fe7eac9d81444e14293486f299c6f6d34fc48e1117acd1007bac157f5d6372fa433aa422b36f7a129b6b11825ce",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tauri-apps_cli-linux-arm64-gnu-2.12.4.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tauri-apps/cli-linux-x64-gnu/-/cli-linux-x64-gnu-2.12.4.tgz",
+        "sha512": "b4dcd949aefd6759d1a47c44a50dfc96c005a4a945958be85f38d357e951467ff349fdf0add502df09cb72ad9711a75c84fbb8b6d2b4ce2be1633afe5c60f5f5",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tauri-apps_cli-linux-x64-gnu-2.12.4.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/core/-/core-3.32.0.tgz",
+        "sha512": "1a1876874d86292ab3cad40670b5787aca58386e041f18e3d0cb2b501d959ebe3bc669596117faafb936274f47f89a4175a1ab5b0ad39320448b98b7737cb2d9",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_core-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-blockquote/-/extension-blockquote-3.32.0.tgz",
+        "sha512": "c26bad84476561502b36851ba853c7df9822bad040045bbb7ea101d254c3d64d145c952ce1d16f71b4721965a09c715980fdd34f8bbc7bec626b2630d1e43435",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-blockquote-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-bold/-/extension-bold-3.32.0.tgz",
+        "sha512": "49061ec27603a0804dfbca07e77203703f29f8fcfe267caade1af18f2fc5028e5cb5cfbde9ddd92dda9cf60ccb552a85168fd250836fd85546a2af4fbd4ef2ab",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-bold-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-bubble-menu/-/extension-bubble-menu-3.32.0.tgz",
+        "sha512": "5f7965f22f59f1036fb7bfad72a970a29246fbaf2e80ed7702fd0ec7821ca3e8d77139c5743b8a40905223db0bb8c479bd340e7931e12985e18c5f3c69a84c48",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-bubble-menu-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-bullet-list/-/extension-bullet-list-3.32.0.tgz",
+        "sha512": "6393ff974ea9542506e3abd7a41977cf47d6d9be89a52317e02bebfb9b1f421f330774f1c1288b41a68fc08dd1e4c143d4a7d193702388f462784c9775670d1f",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-bullet-list-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-code/-/extension-code-3.32.0.tgz",
+        "sha512": "23e684565d1d4e691f9d4e87cc118479f6fd53b8dad8c92e730041c2b9a833053eb882a90b8c70f0d7070bd5fab2301ca26dcfc6cd875fef16128e15a75dd1fd",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-code-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-code-block/-/extension-code-block-3.32.0.tgz",
+        "sha512": "f4d656ff25cff63f572abfa1452e66e7cc62c9923eb50a353c9ede2c75e318d156685eb4d4d1bf87aef8d666ca879b82639d57b1bcaa1beeeab9ef916af9e03c",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-code-block-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-document/-/extension-document-3.32.0.tgz",
+        "sha512": "1ae81e284e809d90e5b915c950d06e5f8dd33dc689c72e70724eaf4f62786b4fc49ca4ad278decb926597f520f7dbd628fd10bf5b62f03083d0ce72bbdd1334d",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-document-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-dropcursor/-/extension-dropcursor-3.32.0.tgz",
+        "sha512": "b78520f2114bb77d1dc3062fae1eb705552de8dd588393d5237b4c96584298ddd0ebca03e3bbf8301fe2e6719fcc8b10a8cc9750e7adc07256719e0ca0b4f1e1",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-dropcursor-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-floating-menu/-/extension-floating-menu-3.32.0.tgz",
+        "sha512": "03328259c78bfb8435a5373c5a1c3590fa8dfda6063d0ef4fe35cfb1b956979d35b7fa578ba2b3d0f8bf36080a92ebbbdd51a3ca487af1861ffdd70e27f98f65",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-floating-menu-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-gapcursor/-/extension-gapcursor-3.32.0.tgz",
+        "sha512": "1d4a4a29624bb6d867a506392c88c794924e9a1e7ad91bac98e3087bfe223ff1fbcbe59447d6458998c4b353419118e283d7f08fc17705fb2b54f6019cce272c",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-gapcursor-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-hard-break/-/extension-hard-break-3.32.0.tgz",
+        "sha512": "20a518bcaf9b3b6846ac35a1853560d024a1f42d9b7a55a0f46c8bcefa72777499c90f4481d71c2dfa32b4d8ce04a6c013f4d0e0ea379123fe5c5e91b1420a3c",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-hard-break-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-heading/-/extension-heading-3.32.0.tgz",
+        "sha512": "5d1899c59ba17e3bdb8300afa011e3d3880eb0f00d117c71470ac509056e162e727931d82333048a873cd63ea2007f6957b6907890b02f1ba1e951cdcf775711",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-heading-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-horizontal-rule/-/extension-horizontal-rule-3.32.0.tgz",
+        "sha512": "22bcbbca7b06e3181cc671f5726fae5c99c4b54ce8a29e2c180d7435437d23ed3c4ce8e18ff1ab0e244a3101ca022548fd1eedd8c55abf530997115fd857731b",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-horizontal-rule-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-italic/-/extension-italic-3.32.0.tgz",
+        "sha512": "281fe2d71a078a56c119c43e528b435a18bad0aa5d09d7b7473448a65da76b4628978cf815ed8845683c96322b96cb2c0d1c1e97f7ec1c96c6edad7710ff2828",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-italic-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-link/-/extension-link-3.32.0.tgz",
+        "sha512": "0d17504a058f4848eb0e0e440c1079cb1472807b5454b85c7951b302c4f3f11ce2885caf73002fcc11c23bd85df63bad8c25d0d832c8b9907c3fe6878455a7a6",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-link-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-list/-/extension-list-3.32.0.tgz",
+        "sha512": "41dcd2e67173f5a80042106022e425ba86d689bdfd5b670c2b1d5707ab584ae7bb6c73097603c53f412719f15a8da7955f8d821ba457b505ab35fc9018a841be",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-list-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-list-item/-/extension-list-item-3.32.0.tgz",
+        "sha512": "15d2530807802e2c73cb21924849aba179a42047256e8ff8b763e5d37691111aa93ce48f25c0b77af0ed2212dacd3b8feaff858c2989fa95cdaa5ea8bfbaa2b4",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-list-item-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-list-keymap/-/extension-list-keymap-3.32.0.tgz",
+        "sha512": "bd716b7b5f039369b937f823a38d3c0b4d864aba2567c6487f4c33ebf53c94d0b815c60e212819163dc1343eae69b567b4687618248fad516e36954f8459e7fc",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-list-keymap-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-ordered-list/-/extension-ordered-list-3.32.0.tgz",
+        "sha512": "86d67986830b0641a20cfe8ce6619e9a33a86819a4ae3f75d70886a1398c30acceeea26af50c540642d8ec82cf68a95458bf14ddc70b7435764c1fe7caca7826",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-ordered-list-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-paragraph/-/extension-paragraph-3.32.0.tgz",
+        "sha512": "69f28b31cedf58c9246abf47e458a58b34ad49b845cd4a02cddc307597fa0c3b27dcb52df2d2651470022bbf1c032c7f4f3309068d0df3ff13d6ef5b2fe37aed",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-paragraph-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-strike/-/extension-strike-3.32.0.tgz",
+        "sha512": "27d570eb09a1ff057a4b14ac37d461babbc019c5d2639277a78110ad1383e4f011065d153a70c58bbfd4568cf546449da8e28f8008aa0d9a5a2d182d7413bd46",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-strike-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-text/-/extension-text-3.32.0.tgz",
+        "sha512": "b05d2320aebb207759327cefda6cf9bcf4f22bb474ba2ebf61980583efdb2e7142366c1e540a1870764b942ec84919f0bb49aa26bf9ea4db7325ea58d590c28e",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-text-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extension-underline/-/extension-underline-3.32.0.tgz",
+        "sha512": "acc2dd778be0eac79dfc99da5e76aea4b6c2b588968a44e743caa2afd22d28e5f07f5522f4fd58e06d1b614e3e81c9ccb05cda486b6b3a132a1b8fdceba02881",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extension-underline-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/extensions/-/extensions-3.32.0.tgz",
+        "sha512": "a8efa774dbe53a3cd4d8c582b501e8460d6d228aed0972efa8f8c3c79f05d6951814d08e5597a05e2fa3a8b183383500df57abf93573ebaba6cd16db3756ced5",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_extensions-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/pm/-/pm-3.32.0.tgz",
+        "sha512": "1fd78dfb11c56e82726c4eca3c656cbb6e12f1a065088818cf7f2f0874529cdbf5ee7c26aa6d3aa30abf210e6c7336b49f763b21f51fa603ceb66f5281e1e635",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_pm-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/react/-/react-3.32.0.tgz",
+        "sha512": "fa24bd44a8fa55ef125ea278f71a6d0e289f17b3d05e650e87872332ef810975ea2a985092251c72f6d660078e2424dc78cd35c1680586ba5fcbca86f821c963",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_react-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@tiptap/starter-kit/-/starter-kit-3.32.0.tgz",
+        "sha512": "68f63169ebdc8b83e032b4cbb20f9b6a2a88eccd4809de15f47fb34d376baacf0e51921b02f8ffa4d0ee1d4f2e599c8a32edc387bdadd83e9976a46effa6925b",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_tiptap_starter-kit-3.32.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@types/react/-/react-19.3.0.tgz",
+        "sha512": "374ac50ae1fd628c46f7f9bad65f4c7e924a7e62ce554d1e9bb8a9233e9346049292f45e2c1f6f2fce4607ecabf01b3995eaa9be0f7a252c05e194b5b38be242",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_types_react-19.3.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.3.0.tgz",
+        "sha512": "648edb538da66575ca1e7fea34b130d88adb888354ed7e7ebdf81d8b10479023696165e32a07d0fcffaec866f90a338b07d51c9d37a0debca542d5768729b8e1",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_types_react-dom-19.3.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@types/use-sync-external-store/-/use-sync-external-store-0.0.6.tgz",
+        "sha512": "cc50c00feb65a5fdabe1ab2e1c48f45c7ea963a8b483935e0073e7fb5e70937055e8903af5e1111570b58321938439156b5cc2c8aaf98e8c75fb62db57f00c2e",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_types_use-sync-external-store-0.0.6.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@vitejs/plugin-react/-/plugin-react-6.1.2.tgz",
+        "sha512": "7e124d19476c7106b81e4234c45c70a275b28675517823c36d723b147ee39b3a67542ac5408ecf46b85679c3b6eb7eb5d2f3abb3db6bd98e3171ff2e01d1716f",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_vitejs_plugin-react-6.1.2.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/csstype/-/csstype-3.2.3.tgz",
+        "sha512": "cf51c629c632db103c00641fc2b9f43c0cbe3c1ed7fc64a3dd45495bda8aca7e37c566be825e675e6538aaa2cc4735952c50bc2aeb145fc4ffd240a2398a4021",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "csstype-3.2.3.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/detect-libc/-/detect-libc-2.1.2.tgz",
+        "sha512": "06d8f604e38ef37a375b21f9f5ef0c817b3111055c6ab9143a9118aee6c1d2eaf09cdd74c90dfae2bb22072535d67665a966199b4e62fe87fb8a8e26ce2841b5",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "detect-libc-2.1.2.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/fast-equals/-/fast-equals-5.4.5.tgz",
+        "sha512": "c8a129705b913eefe94d02f6541f18284db216576b2e522ca16b497819c076a121beedb53a09054f40bc9e37ffc587362d264612bdcaf491a3b611c9c6754bbd",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "fast-equals-5.4.5.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/fdir/-/fdir-6.5.0.tgz",
+        "sha512": "b486d8b596ee70eb340511aa3c992c84951874bf920c7edd54cf208f2f84469dd60148cb105244fb4da46a7c87b708d63a7c2b298062c0098cd29e242c90275e",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "fdir-6.5.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/lightningcss/-/lightningcss-1.33.0.tgz",
+        "sha512": "5a4503ae88ee26cd3192019fdae756c5adf21814713edc54901efd8ba68264b46073b3ccf1f65ef53a2c7cf0dcbc4a5065bb850129c762644b04b51b98b38820",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "lightningcss-1.33.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/lightningcss-linux-arm64-gnu/-/lightningcss-linux-arm64-gnu-1.33.0.tgz",
+        "sha512": "8f6bff8ad9b2e0794dc6573abe829762006a362d0d8362d2860e33ec6b9fa4482cd393fedacb815728bd23a607ab9ba8545c7d1138a7dde08484b5725c64272a",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "lightningcss-linux-arm64-gnu-1.33.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/lightningcss-linux-x64-gnu/-/lightningcss-linux-x64-gnu-1.33.0.tgz",
+        "sha512": "6abf89bbb2e670dd09a381692f88691726f0346f7fdc0fc1af9296da7da3c8e0e0dcc1195da0d800375e9a8352f810cd7cc80abf29492e3e12e6dc9101cb6e02",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "lightningcss-linux-x64-gnu-1.33.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/linkifyjs/-/linkifyjs-4.4.0.tgz",
+        "sha512": "2274dec6fb5b6a2fb673e74454671ce8ee8fd83315222c03f5afe2e3316ba1acce2182ce4ba152566009ee415eba69c2331ebf810a8d0246d4be032e6d5e3e30",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "linkifyjs-4.4.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/lucide-react/-/lucide-react-0.577.0.tgz",
+        "sha512": "e0b8e816fd9e10fc180cf83f0947412504837cfcb35c246b556d57ee3af1fedae0c67c641c58e755920d6f3bf3c6337bd1dc7272139f83e1536300624b7a50e4",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "lucide-react-0.577.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/nanoid/-/nanoid-3.3.20.tgz",
+        "sha512": "b8a760d86dc63422909fd6f260ea716c6aab4f67c63b9291b7927ff1bde9a24f2b4faab119617a871332262118b407fe155c98b83f6145a0ea5f9b8f15827865",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "nanoid-3.3.20.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/orderedmap/-/orderedmap-2.1.1.tgz",
+        "sha512": "4ef016c62d270ded63febb4c7167088fde3e15f7ba9fbce1a30df7878d122b19ac9a8cece9dcff7be11a8f299fa0570777bb31367f321ccf3cdfdba2c4c395ea",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "orderedmap-2.1.1.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/picocolors/-/picocolors-1.1.1.tgz",
+        "sha512": "c5c787dac9e1b5be4cf658aa0ec984c39ea57b7efa993664117fe311bfd1c4d1727a036e97b78db250973fd1438ff2dcbb45fc284c8c71e3f69eda5a1eb0c454",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "picocolors-1.1.1.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/picomatch/-/picomatch-4.0.7.tgz",
+        "sha512": "a9c26ef3c436216a89b030f9dbd24a31dc069bf76f2275b81ef427470887f49b62849bf318eb1c0ed1c4df1d6904a794393cac43c91598b9c9da426eef285c18",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "picomatch-4.0.7.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/playwright/-/playwright-1.64.1.tgz",
+        "sha512": "1c2ad5847af9410bb0628b301141936fb806a79db6c9f95bbff493f27178b05586b8b8d00add7b43f12e6e918648d2989f5b6c4c23d9c6a1e11c27d5511bbb50",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "playwright-1.64.1.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/playwright-core/-/playwright-core-1.64.1.tgz",
+        "sha512": "042e2cf32e9211503a435ad2c594eda3c848d4a508df15e51c6660bc6a8fe08a8f748fdae855fd1f6f480cdcfbbcaa3d976d5be8b7d8a2c49c3cbe8cdf1c720d",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "playwright-core-1.64.1.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/postcss/-/postcss-8.5.31.tgz",
+        "sha512": "6146d6602804af09cc01592352761af8a94c0731a91f0888b7f0c4edfd06df702e5f62c7f5471393a2a05b1777cd153ea4ddeefc2f9797712730b3381de6bb4a",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "postcss-8.5.31.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/prosemirror-changeset/-/prosemirror-changeset-2.4.4.tgz",
+        "sha512": "1b2bb3f6361dac0780f48ec086897239eb3d2949affe5130b02e4ef6ce71179541dc48133ec5cc194c73e3e1f507ec0a54f7596ef45c8350a9df1f2a5fef287c",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "prosemirror-changeset-2.4.4.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/prosemirror-commands/-/prosemirror-commands-1.7.2.tgz",
+        "sha512": "aba43ab33c6a76ef5777a11c74ab2a5e086ee6741d653a41e10f72774e1645ceff8edefaddefeb4fad0ec21d0bd46618f93e3aa39ac3fbd944377e9d652e37b7",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "prosemirror-commands-1.7.2.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/prosemirror-dropcursor/-/prosemirror-dropcursor-1.8.4.tgz",
+        "sha512": "5662b185c03a6be879a0f49899f17564d790a8f6f261a231a99b0aa9e602c9394fb6b8d480d6872f73fcbd568ed7da2a015d33b9a33f6b1928c191eb0753f74e",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "prosemirror-dropcursor-1.8.4.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/prosemirror-gapcursor/-/prosemirror-gapcursor-1.4.1.tgz",
+        "sha512": "a4c7586849e334c4b0975d728c41ad81398b911d3c9bf565f898f8e37d7aee9f5e0771d540a85809ce20987543b0b3ce0df65f8ebfcc9a2aec7726738976d02b",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "prosemirror-gapcursor-1.4.1.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/prosemirror-history/-/prosemirror-history-1.5.1.tgz",
+        "sha512": "a279709ea2af82d160eacad93a60ce021940cb51481d0a4e131391c9b5f44be0ef25ea44e6d3c02eb07d8867adff6b2aaaaade9529c1d743a888e26a02fbb60c",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "prosemirror-history-1.5.1.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/prosemirror-inputrules/-/prosemirror-inputrules-1.5.1.tgz",
+        "sha512": "ef08f8b8c8ca69758043508383137336d47d025b2ec331df7451f5ca01070362871760ce11a5e5d4225f34f00a0a0f6a344878aee9bdef940b6828903f263a17",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "prosemirror-inputrules-1.5.1.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/prosemirror-keymap/-/prosemirror-keymap-1.2.3.tgz",
+        "sha512": "e07b9c465a622ddd483d041736a7a8f35046b6463c022e6c98784a5bd8e33ca45cdb0408c64b20ec7975b5323621f4f607f2e05fa6df62f5f1129265eda2982b",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "prosemirror-keymap-1.2.3.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/prosemirror-model/-/prosemirror-model-1.25.12.tgz",
+        "sha512": "51eda04e65cc6bb121a4b3610bb27e878fb2903f216b5d8aeabad914528a247045a2b7c84adc39809e99adfd66aaa01af4d9a9984078c29f5b2a60387945635a",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "prosemirror-model-1.25.12.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/prosemirror-schema-list/-/prosemirror-schema-list-1.5.1.tgz",
+        "sha512": "f76ee5171feec3241a1b02712d60994648d71b4a78f0aa4c8fab9ea188aee095f4e461ae19c833032eb675f895f1e1597ed832054bcbc7be91b0c7b6d1f265f9",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "prosemirror-schema-list-1.5.1.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/prosemirror-state/-/prosemirror-state-1.4.4.tgz",
+        "sha512": "ea38981c7d822066c27e7c5d1db5d9d7683248563f7f3fee959137df71ba6cfa8867817e4d7a3d89f891f3a9c01e95a77e836339bde8e444a2ec9f14cf58d71f",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "prosemirror-state-1.4.4.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/prosemirror-tables/-/prosemirror-tables-1.8.5.tgz",
+        "sha512": "57fd1c0c2b072877bfb5f5a47829ad84d51c129d4854ede9eafc0df17b7013d3d940b01926281bc37428ada01d7c93e2af834a26d36f381f2860629197eb740f",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "prosemirror-tables-1.8.5.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/prosemirror-transform/-/prosemirror-transform-1.12.4.tgz",
+        "sha512": "dbf5ae3ee9b7a67f8efd58b6bf3a62f36d7420251eda420f5dd2d88d0d3d3efe43b53e5b70a58c26100a3c1c2fa4f8e9a7988e614570544af480e335058d4c83",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "prosemirror-transform-1.12.4.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/prosemirror-view/-/prosemirror-view-1.42.8.tgz",
+        "sha512": "7ed0d98c2b3d02301e9179827c9467d94dc876544297461ce2d653d7f8c9582b33e0389289f1015ed5a6a49a70ff87f5460df6f2e01443ebb6942274f8055993",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "prosemirror-view-1.42.8.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/react/-/react-19.3.1.tgz",
+        "sha512": "40d85676dee7ae05565901b9f10b86b004778efdc76dee266f8bf3ef0d9cb271dabdc89926075ad423cd6a5745e9e571bfdd2e7778d45e92a51cbebd80edfccb",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "react-19.3.1.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/react-dom/-/react-dom-19.3.1.tgz",
+        "sha512": "6346c0473e77961102d4d302012b34fe3f9f681ff3aaddd1f21a6f8357bcfbad59549e142f451d0b87016d77d931c22e86b7e07882d32def9978109abd03ed29",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "react-dom-19.3.1.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/rolldown/-/rolldown-1.2.15.tgz",
+        "sha512": "ea874d0fe7de979cd5c3723861cd9eebd82f82e0e75f408000688d0d94aae2293959471a2eb903d862eea20d1770e0dba2bdf5859e5ac843205439e8f8a3d5e6",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "rolldown-1.2.15.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/rope-sequence/-/rope-sequence-1.3.4.tgz",
+        "sha512": "513e440ded9cbb613fe8ee22814af93d216cdb79efbee9227161f1e869ce3e51c08a261bccdb824500ae89474725072a29a94b2a5ad82678d8d32486b173505d",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "rope-sequence-1.3.4.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/scheduler/-/scheduler-0.28.0.tgz",
+        "sha512": "8eea2b7c2988908c3cb53fa9e415d29ba3c98d017fc9c11898acb3511088b7f45a64884bf8fba56d0f58bb6cf51dd3890dda834e5c40d7ec4a0661d726c73303",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "scheduler-0.28.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/source-map-js/-/source-map-js-1.2.2.tgz",
+        "sha512": "2868fff18e37c77e5a6550edb7e27898ad61a0b18750b3187d290e0c93508cd0c2de85b53ea3e8c4cc28d292d4b1633f5041b338dfcdc5e1f2c047cd5cd3f757",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "source-map-js-1.2.2.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/tinyglobby/-/tinyglobby-0.2.17.tgz",
+        "sha512": "c1747f758a5ca8a99f5a911d66388a24ec023459dd0f40cc9eb5bf7188d51adb449017d581c2c51e836b963e3b9a339589cf72c8dbbae5a96c805e0d4324dada",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "tinyglobby-0.2.17.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz",
+        "sha512": "8e5d6f6733c38a72ebf5e52ddc9feded5e8580d130f508ef04f772b33f4a7d00c3e357d0ac2d98e2f290762694a454f86d795bd511e12e9a7cc2d9ba3394e04b",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "typescript-5.9.3.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/use-sync-external-store/-/use-sync-external-store-1.7.0.tgz",
+        "sha512": "e8bf847a280731085d6883cd20550ac1f5894b058543c8096c9d832ceb39b0321e813c11f5f471be7337b9c8872a3219845cfe280bf67a6856311bc398c718f0",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "use-sync-external-store-1.7.0.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/vite/-/vite-8.3.5.tgz",
+        "sha512": "cf56298e2789f60d1e6d3990a4b06ffe8abd13717d10894e7beecb6a15bc4ab1372d3886dee7414545d03a56173fd6fe202daada9847795c63f711a5c37e0e11",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "vite-8.3.5.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/w3c-keyname/-/w3c-keyname-2.2.8.tgz",
+        "sha512": "769a2306136c08d37b4fcd939bb936e80e86f4c2f7364843b27c3d9ff7a8c52465541078084b4843f29308b2361707f76ad6925d1858164422dd29671703ef3d",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "w3c-keyname-2.2.8.tgz"
+    }
+]

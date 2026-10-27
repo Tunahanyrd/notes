@@ -1,0 +1,125 @@
+# cargo-fuzz harness for every parser that consumes data a broken Samsung
+# Cloud response, a hostile local client or a tampered cache could control.
+# Not a member of the main workspace (own Cargo.lock, nightly + libFuzzer);
+# see docs/FUZZING.md.
+[package]
+name = "notes-fuzz"
+version = "0.0.0"
+license = "GPL-3.0-or-later"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[lib]
+name = "notes_fuzz"
+path = "src/lib.rs"
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+rs_doc = { package = "rs-doc", path = "../crates/rs-doc" }
+rs_editor = { package = "rs-editor", path = "../crates/rs-editor" }
+rs_ink = { package = "rs-ink", path = "../crates/rs-ink" }
+rs_ops = { package = "rs-ops", path = "../crates/rs-ops" }
+rs_store = { package = "rs-store", path = "../crates/rs-store" }
+rs_render = { package = "rs-render", path = "../crates/rs-render" }
+rs_engine = { package = "rs-engine", path = "../crates/rs-engine" }
+notes-host = { path = "../crates/notes-host" }
+notes-cloud = { path = "../crates/notes-cloud" }
+notes-preview = { path = "../crates/notes-preview" }
+notes-net = { path = "../crates/notes-net", features = ["fuzzing"] }
+notes-login = { path = "../crates/notes-login" }
+notes-protocol = { path = "../crates/notes-protocol" }
+notes-engine = { path = "../crates/notes-engine" }
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "payload"
+path = "fuzz_targets/payload.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "document"
+path = "fuzz_targets/document.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "xml"
+path = "fuzz_targets/xml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cloud_response"
+path = "fuzz_targets/cloud_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ink_binary"
+path = "fuzz_targets/ink_binary.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "json"
+path = "fuzz_targets/json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "api_values"
+path = "fuzz_targets/api_values.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http_response"
+path = "fuzz_targets/http_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "login"
+path = "fuzz_targets/login.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "local_api"
+path = "fuzz_targets/local_api.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "png"
+path = "fuzz_targets/png.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "spi"
+path = "fuzz_targets/spi.rs"
+test = false
+doc = false
+bench = false
+

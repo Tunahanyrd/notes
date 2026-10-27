@@ -1,0 +1,536 @@
+//! Reconstructed ink pages (`ink_render`, `ink_render_job`).
+//!
+//! Page admission and renderer input are computed by [`prepare`] (pure Rust).
+//! Where that work runs:
+//!
+//! * **In-process (default)**: a background thread per note prepares the
+//!   inventory, then the requested page, then every other admitted page,
+//!   filling the same per-note body cache (96 MiB, 4 notes) the Python/PyO3
+//!   versions fill from their streaming child. No interpreter is started.
+//! * **Self-exec** ([`crate::PreviewEnv::ink_child_executable`] returns a path):
+//!   the engine binary is re-executed with the hidden first argument
+//!   [`CHILD_FLAG`]; it must call [`run_child`] at the top of `main()`. The
+//!   child gets the Python child's isolation: own session (killed as a group
+//!   on the 180 s deadline), PDEATHSIG bound to the parent, RLIMIT_AS 3 GiB,
+//!   RLIMIT_CPU 170 s, no core files.
+//!
+//! The GPL sdocx renderer (`tools/ink-renderer`) always runs as a separate,
+//! bwrap-sandboxed, rlimited process; the SVG is rasterized in-process with
+//! resvg (`SAMSUNG_NOTES_INK_RASTER=rsvg` selects the sandboxed rsvg-convert),
+//! exactly as rs-render does.
+pub mod prepare;
+
+use crate::util::{ink_render, sha256};
+use notes_host::{Fail, Val};
+use rs_render::pixels as px;
+use rs_render::sandbox;
+use std::collections::{HashMap, VecDeque};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
+
+/// Hidden argv[1] of the self-exec preparation child.
+pub const CHILD_FLAG: &str = "__notes-ink-render-job";
+pub const MAX_SVG: usize = 16 * 1024 * 1024;
+pub const MAX_PNG: usize = 32 * 1024 * 1024;
+const JOB_LIMITS: sandbox::Limits = sandbox::Limits { address_space: 3 * 1024 * 1024 * 1024, cpu_seconds: 170, file_size: None };
+const BODY_BUDGET: usize = 96 * 1024 * 1024;
+const NOT_FOUND: &str = "Bu sayfada desteklenen çizim bulunmuyor.";
+const TIMED_OUT: &str = "Çizim hazırlama süresi doldu.";
+const NOT_PREPARED: &str = "Bu sayfanın çizimi hazırlanamadı.";
+const UNSAFE: &str = "Bu çizginin görünümü güvenle oluşturulamadı.";
+
+/// One admitted page of `inspect_render_pages` (`darkMode` may be absent in
+/// pages a custom backend returns; the manager reads `.get('darkMode', False)`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct InkPage {
+    pub index: i64,
+    pub width: i64,
+    pub height: i64,
+    pub dark_mode: Option<bool>,
+}
+
+/// The `ink_render` functions the manager calls (tests substitute it the way
+/// the Python tests patch `sys.modules['samsung_notes.ink_render']`).
+pub trait InkBackend: Send + Sync {
+    /// `ink_render.provider_available()`
+    fn provider_available(&self) -> bool;
+    /// `ink_render.inspect_render_pages(snapshot)`; `[]` on any failure.
+    fn inspect_render_pages(&self, snapshot: &Val) -> Vec<InkPage>;
+    /// `ink_render.render_ink_page(snapshot, page_index)`: contract RGBA PNG.
+    fn render_ink_page(&self, snapshot: &Val, page_index: i64) -> Result<Vec<u8>, Fail>;
+}
+
+/// The real renderer pipeline.
+pub struct NativeInk {
+    root: PathBuf,
+    child: Option<PathBuf>,
+}
+
+impl NativeInk {
+    pub fn new(root: PathBuf, child: Option<PathBuf>) -> NativeInk {
+        NativeInk { root, child }
+    }
+
+    /// `ink_render.RENDERER`: the optimized build when present.
+    pub fn renderer(&self) -> PathBuf {
+        renderer_path(&self.root)
+    }
+}
+
+pub fn renderer_path(root: &Path) -> PathBuf {
+    let release = root.join("tools/ink-renderer/target/release/ink-render");
+    let debug = root.join("tools/ink-renderer/target/debug/ink-render");
+    if release.is_file() { release } else { debug }
+}
+
+impl InkBackend for NativeInk {
+    fn provider_available(&self) -> bool {
+        rs_render::ink_render::renderer_available(&self.renderer())
+    }
+
+    fn inspect_render_pages(&self, snapshot: &Val) -> Vec<InkPage> {
+        inspect_render_pages(snapshot, self.child.as_deref())
+    }
+
+    fn render_ink_page(&self, snapshot: &Val, page_index: i64) -> Result<Vec<u8>, Fail> {
+        let (page, body) = page_body(snapshot, page_index, self.child.as_deref())?;
+        // Shape-only page (shapes come from the UI overlay): plain background.
+        if let Some((width, height, argb)) = rs_render::ink_render::background_only(&body) {
+            if (width, height) != (page.width, page.height) {
+                return Err(ink_render(UNSAFE));
+            }
+            let pixels = rs_render::ink_render::background_pixels(width, height, argb);
+            return px::rgba_png(width, height, &pixels).map_err(|_| ink_render(px::FilteredError::Format.message()));
+        }
+        if !self.provider_available() {
+            return Err(ink_render("Çizim görüntüleyicisi bu cihazda hazır değil."));
+        }
+        let binary = self.renderer();
+        let (width, height) = (page.width, page.height);
+        let svg = rs_render::ink_render::run_renderer(&binary, false, body, MAX_SVG).map_err(|_| ink_render(UNSAFE))?;
+        let pixels = if std::env::var("SAMSUNG_NOTES_INK_RASTER").is_ok_and(|v| v == "rsvg") {
+            let png = rs_render::ink_render::run_renderer(&sandbox::rsvg_path(), true, svg, MAX_PNG).map_err(|_| ink_render(UNSAFE))?;
+            px::unfilter_png(&png, width, height, MAX_PNG).map_err(|e| match e {
+                px::FilteredError::Invalid => ink_render(UNSAFE),
+                other => ink_render(other.message()),
+            })?
+        } else {
+            // resvg in-process; the SVG is our own renderer's bounded output.
+            rs_render::raster::rasterize(&svg, width as u32, height as u32).map_err(|_| ink_render(UNSAFE))?
+        };
+        px::rgba_png(width, height, &pixels).map_err(|_| ink_render(px::FilteredError::Format.message()))
+    }
+}
+
+/// `_snapshot_bytes(snapshot)` for a snapshot dict (compact JSON).
+fn snapshot_bytes(snapshot: &Val) -> Option<Vec<u8>> {
+    rs_store::val::dumps(snapshot, true, true).ok().map(String::into_bytes)
+}
+
+fn parse_inventory(raw: &[u8]) -> Option<Vec<InkPage>> {
+    let text = std::str::from_utf8(raw).ok()?;
+    let Val::List(items) = rs_store::val::loads(text).ok()? else { return None };
+    items.iter().map(|p| {
+        Some(InkPage {
+            index: p.get("index")?.as_i64()?,
+            width: p.get("width")?.as_i64()?,
+            height: p.get("height")?.as_i64()?,
+            dark_mode: p.get("darkMode").map(Val::truthy),
+        })
+    }).collect()
+}
+
+// ---- inventory memo (ink_render._INVENTORY)
+
+static INVENTORY: Mutex<VecDeque<([u8; 32], Arc<Vec<InkPage>>)>> = Mutex::new(VecDeque::new());
+
+fn inventory_get(key: &[u8; 32]) -> Option<Arc<Vec<InkPage>>> {
+    let mut guard = INVENTORY.lock().unwrap();
+    let at = guard.iter().position(|(k, _)| k == key)?;
+    let entry = guard.remove(at).unwrap();
+    let value = entry.1.clone();
+    guard.push_back(entry);
+    Some(value)
+}
+
+fn inventory_put(key: [u8; 32], pages: Arc<Vec<InkPage>>) {
+    let mut guard = INVENTORY.lock().unwrap();
+    guard.retain(|(k, _)| *k != key);
+    guard.push_back((key, pages));
+    while guard.len() > 512 {
+        guard.pop_front();
+    }
+}
+
+fn child_args(exe: &Path, mode: &str, page: Option<i64>) -> Vec<String> {
+    let mut args = vec![exe.to_string_lossy().into_owned(), CHILD_FLAG.into(), mode.into(), std::process::id().to_string()];
+    if let Some(i) = page {
+        args.push(i.to_string());
+    }
+    args
+}
+
+/// `ink_render._job('inventory', data)` through the self-exec child.
+fn inventory_job(exe: &Path, data: Vec<u8>) -> Result<Vec<u8>, Fail> {
+    let args = child_args(exe, "inventory", None);
+    match sandbox::run_with_cwd(&args, Some(data), JOB_LIMITS, true, Duration::from_secs(180), None, false) {
+        Err(sandbox::RunError::Timeout) => Err(ink_render(TIMED_OUT)),
+        Err(sandbox::RunError::Spawn) => Err(Fail::os("ink preparation could not start")),
+        Ok(o) if o.code != Some(0) || o.stdout.is_empty() => Err(ink_render(NOT_PREPARED)),
+        Ok(o) => Ok(o.stdout),
+    }
+}
+
+/// `ink_render.inspect_render_pages(snapshot)`: admitted page metadata,
+/// memoized per exact snapshot; `[]` on any failure.
+pub fn inspect_render_pages(snapshot: &Val, child: Option<&Path>) -> Vec<InkPage> {
+    let Some(data) = snapshot_bytes(snapshot) else { return Vec::new() };
+    let key = sha256(&data);
+    if let Some(hit) = inventory_get(&key) {
+        return hit.to_vec();
+    }
+    let raw = match child {
+        Some(exe) => match inventory_job(exe, data) {
+            Ok(raw) => raw,
+            Err(_) => return Vec::new(),
+        },
+        None => prepare::inventory_json(snapshot).into_bytes(),
+    };
+    match parse_inventory(&raw) {
+        Some(pages) => {
+            let pages = Arc::new(pages);
+            inventory_put(key, pages.clone());
+            pages.to_vec()
+        }
+        None => Vec::new(),
+    }
+}
+
+// ---- per-note preparation cache filled by one producer (child or thread)
+
+#[derive(Default)]
+struct NoteBodies {
+    inventory: Option<Vec<u8>>,
+    pages: HashMap<i64, Option<Vec<u8>>>,
+    done: bool,
+    bytes: usize,
+}
+
+type Slot = Arc<(Mutex<NoteBodies>, Condvar)>;
+static BODIES: Mutex<VecDeque<([u8; 32], Slot)>> = Mutex::new(VecDeque::new());
+
+fn note_slot(key: [u8; 32]) -> (Slot, bool) {
+    let mut guard = BODIES.lock().unwrap();
+    if let Some(at) = guard.iter().position(|(k, _)| *k == key) {
+        let entry = guard.remove(at).unwrap();
+        let slot = entry.1.clone();
+        guard.push_back(entry);
+        return (slot, false);
+    }
+    let slot: Slot = Arc::new((Mutex::new(NoteBodies::default()), Condvar::new()));
+    guard.push_back((key, slot.clone()));
+    while guard.len() > 4 || guard.iter().map(|(_, s)| s.0.lock().map(|b| b.bytes).unwrap_or(0)).sum::<usize>() > BODY_BUDGET {
+        if guard.len() <= 1 {
+            break;
+        }
+        guard.pop_front();
+    }
+    (slot, true)
+}
+
+fn forget_note(key: [u8; 32]) {
+    BODIES.lock().unwrap().retain(|(k, _)| *k != key);
+}
+
+fn read_exact(stream: &mut impl Read, n: usize) -> Option<Vec<u8>> {
+    let mut buffer = vec![0u8; n];
+    stream.read_exact(&mut buffer).ok()?;
+    Some(buffer)
+}
+
+/// Store one prepared body; false when the budget is exhausted.
+fn store_body(slot: &Slot, index: i64, body: Option<Vec<u8>>) -> bool {
+    let (lock, wake) = &**slot;
+    let size = body.as_ref().map_or(0, Vec::len);
+    let mut state = lock.lock().unwrap();
+    if state.bytes + size > BODY_BUDGET {
+        state.pages.insert(index, None);
+        wake.notify_all();
+        return false;
+    }
+    state.bytes += size;
+    state.pages.insert(index, body);
+    wake.notify_all();
+    true
+}
+
+fn finish(slot: &Slot) {
+    let (lock, wake) = &**slot;
+    let mut state = lock.lock().unwrap();
+    state.done = true;
+    wake.notify_all();
+}
+
+fn set_inventory(slot: &Slot, inventory: Option<Vec<u8>>) {
+    let (lock, wake) = &**slot;
+    let mut state = lock.lock().unwrap();
+    state.inventory = inventory;
+    wake.notify_all();
+}
+
+/// Inventory first, then the wanted page, then every other admitted page.
+fn order(inventory: &[u8], wanted: i64) -> Vec<i64> {
+    let mut order: Vec<i64> = parse_inventory(inventory).unwrap_or_default().iter().map(|p| p.index).collect();
+    match order.iter().position(|i| *i == wanted) {
+        Some(at) => {
+            order.remove(at);
+            order.insert(0, wanted);
+            order
+        }
+        None => Vec::new(),
+    }
+}
+
+/// In-process producer (no self-exec configured).
+fn start_note_thread(snapshot: Val, wanted: i64, slot: Slot) {
+    let fallback = slot.clone();
+    let spawned = std::thread::Builder::new().name("notes-ink-prepare".into()).spawn(move || {
+        let inventory = prepare::inventory_json(&snapshot).into_bytes();
+        let pages = order(&inventory, wanted);
+        set_inventory(&slot, Some(inventory));
+        for index in pages {
+            let body = prepare::page_body(&snapshot, index);
+            let body = if body.is_empty() { None } else { Some(body) };
+            if !store_body(&slot, index, body) {
+                break;
+            }
+        }
+        finish(&slot);
+    });
+    if spawned.is_err() {
+        finish(&fallback);
+    }
+}
+
+/// Self-exec producer: frame 0 = inventory JSON, then (index, body) frames.
+fn start_note_child(exe: &Path, data: Vec<u8>, wanted: i64, slot: Slot, key: [u8; 32]) -> Result<(), Fail> {
+    let args = child_args(exe, "render", Some(wanted));
+    let (mut child, mut stdout) = match sandbox::spawn_streaming(&args, data, JOB_LIMITS, true, None) {
+        Ok(v) => v,
+        Err(_) => {
+            forget_note(key);
+            return Err(Fail::os("ink preparation could not start"));
+        }
+    };
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(180);
+        let killer_pid = child.id() as i32;
+        let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+        let watchdog = std::thread::spawn(move || {
+            if stop_rx.recv_timeout(deadline.saturating_duration_since(Instant::now())).is_err() {
+                // SAFETY: kill() takes plain integers. The child was spawned in its own session (pgid == pid) and is not reaped until after this watchdog is stopped, so the group id cannot have been reused.
+                unsafe { libc::kill(-killer_pid, libc::SIGKILL) };
+            }
+        });
+        // The child parses hostile note data: its frame lengths are bounded
+        // like the body frames below instead of allocating up to 4 GiB.
+        let header = read_exact(&mut stdout, 4)
+            .and_then(|n| <[u8; 4]>::try_from(n.as_slice()).ok())
+            .map(|n| u32::from_le_bytes(n) as usize)
+            .filter(|&size| size <= prepare::MAX_INPUT + 1)
+            .and_then(|size| read_exact(&mut stdout, size));
+        set_inventory(&slot, header);
+        loop {
+            let Some(head) = read_exact(&mut stdout, 8) else { break };
+            let index = i32::from_le_bytes(head[..4].try_into().unwrap()) as i64;
+            let size = u32::from_le_bytes(head[4..].try_into().unwrap()) as usize;
+            if size > prepare::MAX_INPUT + 1 {
+                break;
+            }
+            let body = if size == 0 { None } else { read_exact(&mut stdout, size) };
+            if size != 0 && body.is_none() {
+                break;
+            }
+            if !store_body(&slot, index, body) {
+                break;
+            }
+        }
+        let _ = child.wait();
+        let _ = stop_tx.send(());
+        let _ = watchdog.join();
+        finish(&slot);
+    });
+    Ok(())
+}
+
+fn start(snapshot: &Val, data: Vec<u8>, wanted: i64, slot: Slot, key: [u8; 32], child: Option<&Path>) -> Result<(), Fail> {
+    match child {
+        Some(exe) => start_note_child(exe, data, wanted, slot, key),
+        None => {
+            start_note_thread(snapshot.clone(), wanted, slot);
+            Ok(())
+        }
+    }
+}
+
+enum Lookup {
+    Inventory(Option<Vec<u8>>),
+    Body(Option<Vec<u8>>),
+}
+
+fn wait_for(slot: &Slot, page: Option<i64>, timeout: Duration) -> Option<Lookup> {
+    let (lock, wake) = &**slot;
+    let deadline = Instant::now() + timeout;
+    let mut state = lock.lock().unwrap();
+    loop {
+        match page {
+            None => {
+                if state.inventory.is_some() || state.done {
+                    return Some(Lookup::Inventory(state.inventory.clone()));
+                }
+            }
+            Some(i) => {
+                if let Some(body) = state.pages.get(&i) {
+                    return Some(Lookup::Body(body.clone()));
+                }
+                if state.done {
+                    return Some(Lookup::Body(None));
+                }
+            }
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return None;
+        }
+        state = wake.wait_timeout(state, deadline - now).unwrap().0;
+    }
+}
+
+/// Inventory page + renderer body for `index`, sharing one producer per note.
+fn page_body(snapshot: &Val, index: i64, child: Option<&Path>) -> Result<(InkPage, Vec<u8>), Fail> {
+    let Some(data) = snapshot_bytes(snapshot) else { return Err(ink_render(NOT_FOUND)) };
+    let key = sha256(&data);
+    let (slot, fresh) = note_slot(key);
+    if fresh {
+        start(snapshot, data, index, slot.clone(), key, child)?;
+    } else {
+        let missing = {
+            let known = slot.0.lock().unwrap();
+            !known.pages.contains_key(&index) && known.done
+        };
+        if missing {
+            // Evicted or failed earlier: start over for this page.
+            forget_note(key);
+            let (again, _) = note_slot(key);
+            start(snapshot, data, index, again.clone(), key, child)?;
+            return finish_page(key, again, index);
+        }
+    }
+    finish_page(key, slot, index)
+}
+
+fn finish_page(key: [u8; 32], slot: Slot, index: i64) -> Result<(InkPage, Vec<u8>), Fail> {
+    let timeout = Duration::from_secs(185);
+    let inventory = match inventory_get(&key) {
+        Some(hit) => hit,
+        None => {
+            let raw = match wait_for(&slot, None, timeout) {
+                Some(Lookup::Inventory(Some(raw))) => raw,
+                None => {
+                    forget_note(key);
+                    return Err(ink_render(TIMED_OUT));
+                }
+                _ => {
+                    forget_note(key);
+                    return Err(ink_render(NOT_FOUND));
+                }
+            };
+            let pages = Arc::new(parse_inventory(&raw).unwrap_or_default());
+            inventory_put(key, pages.clone());
+            pages
+        }
+    };
+    let Some(page) = inventory.iter().find(|p| p.index == index).cloned() else { return Err(ink_render(NOT_FOUND)) };
+    match wait_for(&slot, Some(index), timeout) {
+        Some(Lookup::Body(Some(body))) => Ok((page, body)),
+        None => {
+            forget_note(key);
+            Err(ink_render(TIMED_OUT))
+        }
+        _ => {
+            forget_note(key);
+            Err(ink_render(NOT_PREPARED))
+        }
+    }
+}
+
+// ---- self-exec child
+
+fn frame(out: &mut impl Write, index: i64, body: &[u8]) -> std::io::Result<()> {
+    out.write_all(&(index as i32).to_le_bytes())?;
+    out.write_all(&(body.len() as u32).to_le_bytes())?;
+    out.write_all(body)?;
+    out.flush()
+}
+
+/// Entry point of the self-exec preparation child. Call it first in the
+/// engine's `main()` with the full argv:
+///
+/// ```ignore
+/// let args: Vec<String> = std::env::args().collect();
+/// if let Some(code) = notes_preview::run_child(&args) { std::process::exit(code) }
+/// ```
+///
+/// Returns None when argv does not denote a child job. Exit codes follow
+/// `ink_render_job.main`: 0 ok, 65 usage, 70 internal failure, 71 parent
+/// binding failed. stdin: the snapshot JSON; argv: `CHILD_FLAG mode ppid [page]`.
+pub fn run_child(args: &[String]) -> Option<i32> {
+    if args.get(1).map(String::as_str) != Some(CHILD_FLAG) {
+        return None;
+    }
+    let rest = args[2..].to_vec();
+    Some(std::panic::catch_unwind(move || child_main(&rest)).unwrap_or(70))
+}
+
+fn child_main(args: &[String]) -> i32 {
+    if !(2..=3).contains(&args.len()) {
+        return 71;
+    }
+    let bound = args[1].parse::<i64>().is_ok_and(sandbox::bind_parent);
+    if !bound {
+        return 71;
+    }
+    let mode = args[0].as_str();
+    if (mode != "inventory" && mode != "render") || (mode == "render") != (args.len() == 3) {
+        return 65;
+    }
+    if sandbox::apply_limits(&JOB_LIMITS, true).is_err() {
+        return 70;
+    }
+    let mut raw = Vec::new();
+    if std::io::stdin().lock().take(256 * 1024 * 1024).read_to_end(&mut raw).is_err() {
+        return 70;
+    }
+    let Ok(text) = String::from_utf8(raw) else { return 70 };
+    let Ok(snapshot) = rs_store::val::loads(&text) else { return 70 };
+    let inventory = prepare::inventory_json(&snapshot);
+    let mut out = std::io::stdout().lock();
+    if mode == "inventory" {
+        return if out.write_all(inventory.as_bytes()).and_then(|_| out.flush()).is_ok() { 0 } else { 70 };
+    }
+    let Ok(wanted) = args[2].parse::<i64>() else { return 65 };
+    if out.write_all(&(inventory.len() as u32).to_le_bytes()).and_then(|_| out.write_all(inventory.as_bytes()))
+        .and_then(|_| out.flush()).is_err()
+    {
+        return 70;
+    }
+    for index in order(inventory.as_bytes(), wanted) {
+        let body = prepare::page_body(&snapshot, index);
+        if frame(&mut out, index, &body).is_err() {
+            break;
+        }
+    }
+    0
+}

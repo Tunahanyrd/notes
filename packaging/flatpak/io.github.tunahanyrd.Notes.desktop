@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Notes
+Name[tr]=Notlar
+GenericName=Note-taking app
+GenericName[tr]=Not alma uygulaması
+Comment=Samsung Notes compatible · unofficial
+Comment[tr]=Samsung Notes uyumlu · resmi değil
+Exec=notes
+Icon=io.github.tunahanyrd.Notes
+Terminal=false
+StartupNotify=true
+StartupWMClass=notes
+Categories=Office;
+Keywords=notes;handwriting;pen;samsung;notlar;kalem;

@@ -1,0 +1,15 @@
+rs-auth stable 2026-10-26: all public names of the auth-area modules ported to Rust and passing under global NOTES_IMPL=rust-strict —
+  session.SessionManager (1); notes_cloud/tools.notes_cloud (10: endpoint, registration_request, changes_request, send_once, register, accept_registration, changes, scan_for_note, fetch_candidate, main);
+  notes_login/tools.notes_login (12: private_write, load_json, save_json, desktop_quote, ensure_state, command, install_handler, dispatch, uninstall_handler, start, status, main);
+  probe_account_entrypoint (3: save_private, NoRedirect, main); notes_auth_bridge (6: uat_request, perform_once, authenticate, authorize_notes, exchange_notes_code, main);
+  exchange_account_code (5: safe_text, prepare, load_bound_inputs, exchange, main); capture_oauth_callback (4: CallbackError, validate, capture, main); await_notes_login (1: main).
+  samsung_notes.maetel / _maetel_native are research-only native-lib emulation (needs `unicorn`), kept in Python via ALLOW_PYTHON in samsung_notes/_rust.py (not part of this crate).
+
+rs-auth PYFALLBACK count: 0. Reuses rs-cloud STABLE pure helpers as an rlib (rs_cloud::util / pyjson / glue) and the Python stdlib (urllib/ssl/subprocess/os/re/hmac/hashlib/base64/argparse) for I/O.
+Design: logic in Rust; I/O goes through the exact Python stdlib seams the oracle patches (urllib.request.build_opener/opener.open, notes_login.STATE, notes_auth_bridge.perform_once/load_bound_inputs, samsung_notes.cloud_api.CloudAPI, samsung_notes.session.RESEARCH), so every oracle stays green and the suite makes no external request. SessionManager keeps its state in the instance __dict__ (like CloudAPI) so __new__/manual-attr/subclass/patch all work. CallbackError is a real PyException subclass; NoRedirect is a genuine urllib.request.HTTPRedirectHandler subclass built via type().
+
+Verification: global `NOTES_IMPL=rust-strict` — tests 388/388, tools 79/79 (python3 tools/rust_conformance.py --strict-suite: suite_rust and suite_rust_strict both True). Auth tool oracles 27/27; tests.test_cloud_api + test_engine_review 28/28.
+
+NOT in this crate (unchanged, still Python delegation inside rs-cloud): the CloudAPI login/renewal methods (renew_cloud_token, _renew_notes_token_locked, renew_notes_token, _credential_lock, _replace_credential, _uat_context, _auth_request) delegate to samsung_notes._cloud_api_python_auth. They pass every renewal oracle; porting them to Rust is deferred because they are the most credential-safety-critical code (atomic single-use claim, no-replay, no-rollback) and cannot be live-validated here. See PORTING.md.
+
+MUST be live-validated by the user: full browser sign-in end to end, and token renewal against the live server. The pure request builders are byte-checked against the oracle, but only a real session proves the live server accepts their bytes.

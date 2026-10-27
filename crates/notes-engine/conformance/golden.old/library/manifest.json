@@ -1,0 +1,349 @@
+{
+ "scenarios": {
+  "main": {
+   "eraseStrokes": [
+    "00000000-0000-4000-8000-000000000031",
+    "00000000-0000-4000-8000-000000000032"
+   ],
+   "extra": {
+    "blank_page": {
+     "pages": [
+      {
+       "id": "28ae4ba5-89ff-5366-a3b6-6fbe751b1feb",
+       "layerId": "e547f689-da7b-5905-bfae-e518cff8ed37",
+       "strokes": []
+      }
+     ]
+    },
+    "canvas": {
+     "pages": [
+      {
+       "id": "48aa8741-2598-5a5e-ac35-dae6d89f2cbc",
+       "layerId": "73de8945-eecc-5232-8c48-f19eadfd284a",
+       "strokes": [
+        "00000000-0000-4000-8000-000000000010"
+       ]
+      },
+      {
+       "id": "00000000-0000-4000-8000-0000000000a0",
+       "layerId": "00000000-0000-4000-8000-0000000000a1",
+       "strokes": []
+      },
+      {
+       "id": "00000000-0000-4000-8000-0000000000a2",
+       "layerId": "00000000-0000-4000-8000-0000000000a3",
+       "strokes": []
+      }
+     ],
+     "seededPages": [
+      0
+     ]
+    },
+    "ink_conflict_rev": {
+     "pages": [
+      {
+       "id": "2f1f7511-d3e3-5184-bdd7-7da1778e8fcf",
+       "layerId": "7fbfde1b-825f-572e-a505-0470c855dc01",
+       "strokes": [
+        "00000000-0000-4000-8000-000000000010"
+       ]
+      }
+     ]
+    },
+    "ink_draft": {
+     "pages": [
+      {
+       "id": "ca4a189e-9fac-5aee-bd18-ec2ea6866146",
+       "layerId": "d2a31559-0641-58f4-92ae-e55045eedd10",
+       "strokes": [
+        "00000000-0000-4000-8000-000000000010"
+       ]
+      }
+     ]
+    },
+    "ink_erase": {
+     "pages": [
+      {
+       "id": "3eecd32b-2777-5762-a59f-fbae314c890b",
+       "layerId": "d4b9f63c-0746-574b-9b64-86b0b8fac94a",
+       "strokes": [
+        "00000000-0000-4000-8000-000000000010",
+        "00000000-0000-4000-8000-000000000031",
+        "00000000-0000-4000-8000-000000000032"
+       ]
+      }
+     ]
+    },
+    "ink_move": {
+     "pages": [
+      {
+       "id": "daccaf7c-b795-5a0f-bc7d-f0d014a3ad31",
+       "layerId": "b56e2fb1-7449-5e8e-95f2-0a6e9e1b982b",
+       "strokes": [
+        "00000000-0000-4000-8000-000000000010",
+        "00000000-0000-4000-8000-000000000031",
+        "00000000-0000-4000-8000-000000000032"
+       ]
+      }
+     ]
+    },
+    "ink_pending": {
+     "pages": [
+      {
+       "id": "062aeef0-e9be-56b5-89a3-52b04a909319",
+       "layerId": "5d0f12d5-1635-5983-aba5-f48538902a31",
+       "strokes": [
+        "00000000-0000-4000-8000-000000000010"
+       ]
+      }
+     ]
+    },
+    "ink_put": {
+     "pages": [
+      {
+       "id": "0ecf5f2e-a4bf-5528-b4e6-60467accd230",
+       "layerId": "51ec15da-064a-5a52-bf1d-9e4ca675dd32",
+       "strokes": [
+        "00000000-0000-4000-8000-000000000010"
+       ]
+      }
+     ]
+    },
+    "ink_render": {
+     "pages": [
+      {
+       "id": "addd3167-61c7-50e8-9244-dfd49044d640",
+       "layerId": "7ade3622-e46a-520c-b4ea-cd55ab13a8a2",
+       "strokes": [
+        "00000000-0000-4000-8000-000000000010"
+       ]
+      }
+     ]
+    },
+    "ink_view": {
+     "pages": [
+      {
+       "id": "678a57ba-0e62-56f0-9f97-d0eb93667064",
+       "layerId": "07b786f0-d902-5ded-80c5-e76e18e1aa51",
+       "strokes": [
+        "00000000-0000-4000-8000-000000000010"
+       ]
+      }
+     ]
+    },
+    "page_ops": {
+     "pages": [
+      {
+       "id": "ad837b33-d796-5d0c-b0b5-b7a68e44d0de",
+       "layerId": "a512eba5-edb0-5a22-b12d-72b482d57c31",
+       "strokes": [
+        "00000000-0000-4000-8000-000000000010"
+       ]
+      },
+      {
+       "id": "00000000-0000-4000-8000-0000000000a0",
+       "layerId": "00000000-0000-4000-8000-0000000000a1",
+       "strokes": []
+      },
+      {
+       "id": "00000000-0000-4000-8000-0000000000a2",
+       "layerId": "00000000-0000-4000-8000-0000000000a3",
+       "strokes": []
+      }
+     ]
+    },
+    "page_ops_delete": {
+     "pages": [
+      {
+       "id": "b45f40dd-913a-5d8c-a6e7-713ceb81b635",
+       "layerId": "f1876fb1-8432-55d1-a476-c7eeda24e351",
+       "strokes": [
+        "00000000-0000-4000-8000-000000000010"
+       ]
+      },
+      {
+       "id": "00000000-0000-4000-8000-0000000000a0",
+       "layerId": "00000000-0000-4000-8000-0000000000a1",
+       "strokes": []
+      },
+      {
+       "id": "00000000-0000-4000-8000-0000000000a2",
+       "layerId": "00000000-0000-4000-8000-0000000000a3",
+       "strokes": []
+      }
+     ]
+    },
+    "page_ops_reorder": {
+     "pages": [
+      {
+       "id": "0d09c513-8784-561c-87c0-1035d52e08ff",
+       "layerId": "de363e9e-0e68-5c2f-bc44-9e03ee027f1a",
+       "strokes": [
+        "00000000-0000-4000-8000-000000000010"
+       ]
+      },
+      {
+       "id": "00000000-0000-4000-8000-0000000000a0",
+       "layerId": "00000000-0000-4000-8000-0000000000a1",
+       "strokes": []
+      },
+      {
+       "id": "00000000-0000-4000-8000-0000000000a2",
+       "layerId": "00000000-0000-4000-8000-0000000000a3",
+       "strokes": []
+      }
+     ]
+    },
+    "page_style": {
+     "pages": [
+      {
+       "id": "e625f20e-1fa3-52a8-ac5f-8e46ca97f72b",
+       "layerId": "a3d6b7bd-66a1-5838-ab15-88869bf5a478",
+       "strokes": [
+        "00000000-0000-4000-8000-000000000010"
+       ]
+      }
+     ]
+    },
+    "pdf_template": {
+     "pages": [
+      {
+       "id": "ccb54e67-44a6-5b78-a22c-428e58efad61",
+       "layerId": "10834549-b37b-573d-a0da-d86498e11077",
+       "strokes": []
+      },
+      {
+       "id": "68aa3b24-fdc4-5c1d-aaf7-6824051639d2",
+       "layerId": "47f4b936-15e5-5286-903f-3ff857a42036",
+       "strokes": []
+      },
+      {
+       "id": "3f28518a-3595-5c64-95b7-e2c80afb9121",
+       "layerId": "4c9dd5ef-31c5-5909-843f-c7374ec23a33",
+       "strokes": []
+      }
+     ],
+     "pdfSha256": "8d75f821f39d9bdca93a0e0221e71566ed6a3969cbc65062899f2af64e493711"
+    },
+    "pdf_uncached": {
+     "pdfSha256": "c79819264424c4fe198a69304859e36f219b0a0392307a81ba388c0bedc49398"
+    },
+    "shapes_drawn": {
+     "pages": [
+      {
+       "id": "a0f8af35-2c1c-5b49-aa11-d3cd345c18b0",
+       "layerId": "a44428d0-51c3-5454-9bad-7d36dd346231",
+       "strokes": [
+        "00000000-0000-4000-8000-000000000010"
+       ]
+      },
+      {
+       "id": "00000000-0000-4000-8000-0000000000a0",
+       "layerId": "00000000-0000-4000-8000-0000000000a1",
+       "strokes": [
+        "df22cf61-d6e9-5735-a0ae-c971303fb2b2",
+        "0292b0a3-0fc5-5a3f-bfcf-e6fe6deb4980"
+       ]
+      },
+      {
+       "id": "00000000-0000-4000-8000-0000000000a2",
+       "layerId": "00000000-0000-4000-8000-0000000000a3",
+       "strokes": []
+      }
+     ]
+    },
+    "shapes_target": {
+     "pages": [
+      {
+       "id": "6937d1c6-e950-528b-83ab-78e3580cd809",
+       "layerId": "a1475f1c-4c48-51aa-968b-a406bb036639",
+       "strokes": [
+        "00000000-0000-4000-8000-000000000010"
+       ]
+      },
+      {
+       "id": "00000000-0000-4000-8000-0000000000a0",
+       "layerId": "00000000-0000-4000-8000-0000000000a1",
+       "strokes": []
+      },
+      {
+       "id": "00000000-0000-4000-8000-0000000000a2",
+       "layerId": "00000000-0000-4000-8000-0000000000a3",
+       "strokes": []
+      }
+     ]
+    }
+   },
+   "folderInitialized": true,
+   "folders": {
+    "deep": "84fbca1f-c12c-5088-a66f-5de2d36bdffd",
+    "empty": "bf16ecbe-a431-540a-a3a4-315c93c0da80",
+    "old": "eb75fdb7-1209-5d8a-9641-988ad861bde7",
+    "pending": "36ab37a3-15b0-417c-b7f4-b9a6751a7355",
+    "projects": "3febeef8-cd54-5187-ad83-e12aec648089",
+    "system": "7d2731dc-f49f-5aa4-9eef-fd98039c6ab8",
+    "work": "9352a735-2502-5509-a47a-cb8a90e0f7e1"
+   },
+   "notes": {
+    "blank_page": "a3ad856f-cb25-48ec-90d6-84138d4b6819",
+    "canvas": "4d539827-b087-4050-9cee-f52b2c4b6394",
+    "cloud_deep": "548c0b9e-5acb-4473-94ad-64f5668a70d1",
+    "cloud_edit": "7f0c6420-f445-4b5b-b4f4-c5a39e93d364",
+    "cloud_export": "37bb8383-4ed2-4747-84c9-9da5e71cbebc",
+    "cloud_export_twice": "6e91dd6f-6451-4b9a-8657-a2e2c133dbed",
+    "cloud_fav": "678b09c8-7c6d-4a51-9277-3bee220bddeb",
+    "cloud_favtoggle": "ae36be56-e2a7-4364-b110-ca4b57741c54",
+    "cloud_folder": "d508421d-0238-41a9-96ef-dac28abd75da",
+    "cloud_move": "fdc65561-7f84-425e-bf45-5a9845634580",
+    "cloud_plain": "ac43abac-3a45-4cc0-8cc7-86391d0cc456",
+    "cloud_readonly": "4ea0c373-5243-4964-ac42-10bd25f9136a",
+    "cloud_resolve_org": "fbeb637e-7f10-4c70-9f99-f0dd37ff0cf3",
+    "cloud_rich": "569a6987-11ec-40c7-88eb-04dc5294581a",
+    "cloud_rich_edit": "5f879f2e-c07e-412c-9cf0-95dacbe88a55",
+    "cloud_title": "68bab23f-633a-4d59-8547-cccf210b9c5c",
+    "cloud_trash": "9be5a20a-a59d-4c67-b132-db5b5770da53",
+    "cloud_trashtoggle": "f41419d2-0d8a-4da0-9f57-fa60f3626bab",
+    "conflict": "ab18dd77-a0bd-4f43-ac2f-025d5da885ad",
+    "deleted_remote": "5bb368e6-d5b0-488b-b65e-78295efee24e",
+    "ink_conflict_rev": "d5a9d610-d71f-4a52-8190-c6c6ab9d960d",
+    "ink_draft": "c134fa40-3d60-4b9b-b0b5-52df79dd9fbb",
+    "ink_erase": "19dc7c4c-a562-4010-9ade-5743d300f786",
+    "ink_move": "40a04001-ffcc-49e9-b5c0-1a1997e32816",
+    "ink_pending": "4f491d0d-650c-4cbf-9cb0-7d1a64a14934",
+    "ink_put": "8c84cad2-271c-49d7-8e68-f9e4ef27e7d7",
+    "ink_render": "0e34b3bb-2a10-4ed8-a414-a3b820aa2c55",
+    "ink_view": "f0d64d6b-7a54-4bd5-acdf-0cb1eb193e1a",
+    "local_edit": "6945f413-86c0-4d49-b03c-f6a66447b941",
+    "local_editor": "8446ff69-e49d-429a-b1fa-0e2375cc610f",
+    "local_empty": "b1ea9062-b463-4a6e-97f0-5d71b492f2fd",
+    "local_plain": "5ad99109-28ab-4acf-8c45-e775c229a393",
+    "locked": "f662000c-d1b5-4c79-840b-9bbb7a75109f",
+    "page_ops": "69ef7f29-14ca-4b4b-9538-b4e9a582a0c3",
+    "page_ops_delete": "91b51d69-14bc-40e5-907d-58a986936f6d",
+    "page_ops_reorder": "03081c01-0c6a-4580-919e-bd61e0e992e5",
+    "page_style": "493a5683-71b4-4780-954a-fe5a37569502",
+    "pdf_target": "e4f64e62-141e-4da5-81a2-900973994efd",
+    "pdf_template": "6dfd4bbf-e334-4e80-b37b-93f461f09aa3",
+    "pdf_uncached": "8477819d-f53d-41d2-acd6-3dd9f84f81bf",
+    "shapes_drawn": "7292265b-2f4b-4164-ba4f-e86ffd46feec",
+    "shapes_target": "5a29f40e-ea3b-4cae-b3f0-f7dde0cf4c35",
+    "stub": "097f3a1a-ae79-4fa5-93e8-685ff4ce542b",
+    "template_target": "fab055b1-554f-4f89-916d-db22220e8620",
+    "uncertain": "4d5b4580-4e62-4dbe-9520-1a8c314100f6"
+   },
+   "sourceStrokeId": "00000000-0000-4000-8000-000000000010"
+  },
+  "uninit": {
+   "extra": {},
+   "folderInitialized": false,
+   "folders": {},
+   "notes": {
+    "cloud_fav": "af2c14fe-a8ea-46cf-a665-29b1a62ff87d",
+    "cloud_plain": "47141ac2-2874-4af2-b1c1-a8be38041e87",
+    "local_plain": "20a082df-5b78-4d58-b51e-76b2c1612684"
+   }
+  }
+ },
+ "schemaVersion": 1,
+ "seed": 20261026
+}

@@ -1,0 +1,31 @@
+[package]
+name = "rs-render"
+license.workspace = true
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lib]
+name = "_render"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+flate2 = { version = "=1.1.10", default-features = false, features = ["zlib"] }
+libc = "=0.2.191"
+sha2 = { workspace = true }
+serde_json = { workspace = true }
+roxmltree = { workspace = true }
+pyo3 = { workspace = true, optional = true }
+rs-common = { path = "../rs-common", optional = true }
+notes_platform = { path = "../notes-platform", package = "notes-platform" }
+rs_doc = { path = "../rs-doc", package = "rs-doc" }
+rs_editor = { path = "../rs-editor", package = "rs-editor" }
+rs_ink = { path = "../rs-ink", package = "rs-ink" }
+rs_ops = { path = "../rs-ops", package = "rs-ops" }
+rs_store = { path = "../rs-store", package = "rs-store" }
+resvg = { version = "=0.47.0", default-features = false }
+
+[features]
+# PyO3 bindings (the historical Python extension `_render`, see reference/python).
+# Off by default: the pure engine and the desktop app never compile pyo3.
+python = ["dep:pyo3", "dep:rs-common", "rs-common/python", "rs_doc/python", "rs_editor/python", "rs_ink/python", "rs_ops/python", "rs_store/python"]

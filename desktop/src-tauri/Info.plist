@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS only: merged by the Tauri bundler into Notlar.app/Contents/Info.plist
+  (and embedded into macOS dev builds). Ignored on Linux, where the ms-app
+  scheme is an XDG desktop entry (crates/notes-login/src/handler.rs).
+  CFBundleURLTypes makes LaunchServices hand Samsung's sign-in callback
+  (ms-app://...) to the running app as an Apple Event; desktop/src-tauri/
+  src/main.rs forwards it to notes_engine::deliver_login_callback.
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>org.linuxnotes.desktop.signin</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>ms-app</string>
+      </array>
+    </dict>
+  </array>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <!-- The UI is served by the in-process engine on http://127.0.0.1. -->
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
+</dict>
+</plist>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic fixture derived from observed field names, not a server capture. -->
+<NoteChangesView xmlns="urn:synthetic-notes">
+  <hasNext>true</hasNext>
+  <lastChangePoint>opaque+/cursor=</lastChangePoint>
+  <changes>
+    <serverId>synthetic-live-id</serverId>
+    <resourceId>synthetic-resource-id</resourceId>
+    <syncModifiedTime>1792926000000</syncModifiedTime>
+    <isDeleted>false</isDeleted>
+    <isLocked>true</isLocked>
+    <isEncrypted>true</isEncrypted>
+    <modelName>U3ludGhldGlj</modelName>
+    <commitId>0001-A</commitId>
+    <isUpdatedByDevice>false</isUpdatedByDevice>
+    <sdkVersion>19</sdkVersion>
+    <futureField><child attribute="preserve">öğe &amp; değer</child></futureField>
+  </changes>
+  <changes>
+    <serverId>synthetic-deleted-id</serverId>
+    <isDeleted>true</isDeleted>
+  </changes>
+  <futurePageField enabled="true" />
+</NoteChangesView>

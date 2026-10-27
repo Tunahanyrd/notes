@@ -1,0 +1,35 @@
+# Community rule directories used by tools/semgrep.sh, relative to the
+# extracted archives pinned in security/rules.lock.json (<name>/<path>).
+#
+#   gate    CI gate only; ERROR-severity findings in product code fail
+#   report  full, non-blocking report only (tools/semgrep.sh report)
+#   both    used by both
+#
+# The report set is a superset that never overlaps itself (a rule loaded
+# twice would be reported twice); the gate uses narrower subdirectories.
+#
+# The gate excludes the Java/PHP/Go rule packs (no such code here) and the
+# broad generic packs whose patterns time out on large data files.
+
+both    official/rust
+both    official/typescript
+both    official/javascript
+both    official/html
+both    official/bash
+both    official/dockerfile
+both    tob/rs
+both    tob/javascript
+both    tob/yaml
+both    tob/generic
+gate    official/yaml/github-actions
+gate    official/generic/ci
+gate    official/generic/dockerfile
+gate    official/generic/secrets
+gate    elttam/rules/generic
+gate    elttam/rules/yaml
+report  official/generic
+report  official/yaml
+report  official/json
+report  official/python
+report  tob/python
+report  elttam/rules

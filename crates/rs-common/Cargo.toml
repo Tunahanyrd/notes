@@ -1,0 +1,13 @@
+[package]
+name = "rs-common"
+license.workspace = true
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+pyo3 = { workspace = true, optional = true }
+
+[features]
+# Helpers for the historical PyO3 extensions only (reference/python); off by default.
+python = ["dep:pyo3"]

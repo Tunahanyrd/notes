@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "synthetic_test_only": true,
+  "provenance": "JDK standard cryptography; independent implementation reference, not Windows golden capture",
+  "inputs": {
+    "chk_do_num": "246813579",
+    "serialized_json": "{\"client_id\":\"synthetic-client\",\"redirect_uri\":\"http://127.0.0.1:43827/callback\",\"state\":\"synthetic-state\",\"label\":\"İstanbul / café ☕\",\"optional\":null}",
+    "plaintext_utf8_base64": "eyJjbGllbnRfaWQiOiJzeW50aGV0aWMtY2xpZW50IiwicmVkaXJlY3RfdXJpIjoiaHR0cDovLzEyNy4wLjAuMTo0MzgyNy9jYWxsYmFjayIsInN0YXRlIjoic3ludGhldGljLXN0YXRlIiwibGFiZWwiOiLEsHN0YW5idWwgLyBjYWbDqSDimJUiLCJvcHRpb25hbCI6bnVsbH0=",
+    "salt_hex": "000102030405060708090a0b0c0d0e0f",
+    "iv_hex": "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+    "pbkdf2_iterations": 200,
+    "derived_key_bytes": 16
+  },
+  "intermediates": {
+    "chk_do_num_sha256_hex": "837e59d0396ab5fcfa64c48dfe989f496ed21386799399a7d43582900871a7a3",
+    "pbkdf2_password_utf8": "g35Z0Dlqtfz6ZMSN/pifSW7SE4Z5k5mn1DWCkAhxp6M="
+  },
+  "derived_key_hex": "76f6d5faf3b3458a0d925ff6ad734e07",
+  "aes_ciphertext_base64": "O09JEZpnmn8fdtZj0lXxYwQl+YJ1jc+QwqxbDbbuTpKlacI81Vpvh2QuWlu37aSX6gO55geehWu0nv0YELU9hPT6Fst73+CE2+TVzwJqnlUoLTl4yESVmrcgE1ef+tKL3h31DR/Dlv4rvT1erv1ipgKtN511mQx0kfLPOFQf2AuOY2UcrQDey8VP6/0O6UrwPUTB1LK0EIVYw5n7muIN/Q==",
+  "rsa_plaintext_ascii": "dvbV+vOzRYoNkl/2rXNOBw==",
+  "rsa_ciphertext_base64": "JEKqYE+3o1kbQBYrrDLZiEU2S5umggAyQmuAxnReHvJG14rKUdKiDjFKO+GX2lOuUoMH5mfTF3msf50dcLm0Kfo2y5ShCtNB+XJazclc5AhfMsOaThgKzOSZK553LagNtd/lDv4DOoNnhFMHCKpZ3ovVQiv/8axmBHES9Ikp48N8mIbFDo+eIlrIR3KhHsXCccrWyQargFyNxLOn+cygmAezDdePFDHOL6Y3TVIYJGvTxyRUwoz8PUHrrtUSdUeY7g2m3Pygn/u8I5v0XZ7JRdDKLzuVhA7IeOakWfkM0C0JZdCHZZzaChbwn9OtII3lxEg0+xslokGRjrv9DVMNfg==",
+  "rsa_public_spki_file": "synthetic-public.spki.pem",
+  "rsa_private_pkcs8_file": "synthetic-private.pkcs8.pem",
+  "algorithms": {"kdf":"PBKDF2WithHmacSHA256","aes":"AES/CBC/PKCS5Padding (PKCS#7 for 16-byte AES blocks)","rsa":"RSA/ECB/PKCS1Padding (RSAES-PKCS1-v1_5)","rsa_bits":2048,"rsa_public_exponent":65537},
+  "java_runtime": "17.0.20.1+1",
+  "providers": {"sha256":"SUN","pbkdf2":"SunJCE","aes":"SunJCE","rsa":"SunJCE"},
+  "checks": {"java_aes_roundtrip":true,"java_rsa_unwrap":true,"live_windows_or_server_validation":false}
+}

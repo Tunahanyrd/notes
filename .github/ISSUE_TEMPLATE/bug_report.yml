@@ -1,0 +1,70 @@
+name: Bug report
+description: Something does not work as described
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Do not paste private data**: no tokens, cookies,
+        signed download URLs, account e-mails, note titles or contents, SQLite
+        files, or screenshots of personal notes. Describe notes generically
+        (e.g. "handwritten note, 3 pages, one PDF page"). Logs must be redacted.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Steps to reproduce, expected and actual behaviour.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Sign-in / session
+        - Sync (download)
+        - Upload / Cloud write
+        - Text / rich text editor
+        - Ink (pen, eraser, lasso)
+        - Pages / PDF / templates
+        - Previews / thumbnails
+        - Folders / favorites / trash
+        - Packaging (AppImage, deb, rpm, Flatpak)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: write
+    attributes:
+      label: Did a Cloud write have an unclear outcome?
+      description: If an upload's result was unknown, do NOT retry it manually; say so here.
+      options:
+        - "No"
+        - "Yes - result unknown, not retried"
+        - "Yes - I retried"
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS, desktop, install method
+      placeholder: e.g. Fedora 43, GNOME, Flatpak
+    validations:
+      required: true
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Engine
+      options:
+        - Default (pure Rust notes-engine)
+        - Embedded engine (in-process, macOS / embedded-engine builds)
+        - Not sure
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs
+      render: text

@@ -1,0 +1,5 @@
+rs-editor: builds; samsung_notes.editor_document has 14/14 public names in Rust and its
+oracle tests pass; scoreboard STRICT. Uses the rs-doc rlib, PYFALLBACK 0. Public pure-Rust API:
+rich::{normalize_model, read_rich_text, encode_rich_text, remap_sections, editor_model_fingerprint},
+edit::{title_content_fingerprint, editor_content_fingerprint, prepare_title_edit,
+editor_projection, prepare_editor_edit, new_editor_document} (doc-area deps via edit::Backend).

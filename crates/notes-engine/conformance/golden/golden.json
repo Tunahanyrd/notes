@@ -1,0 +1,68 @@
+{
+ "note": "Frozen responses of the historical Python reference (NOTES_IMPL=rust python3 -m samsung_notes) over the synthetic library in library/ (reference/python/conformance/gen_library.py). Synthetic data only. Replay: run.py --replay --candidate target/debug/notes-engine",
+ "recordedOn": "2026-10-27",
+ "reference": "target/debug/notes-engine",
+ "rootLength": 160,
+ "scenarios": {
+  "main": {
+   "file": "main.json.gz",
+   "files": 58,
+   "responses": 1693,
+   "tables": 18
+  },
+  "uninit": {
+   "file": "uninit.json.gz",
+   "files": 5,
+   "responses": 275,
+   "tables": 18
+  }
+ },
+ "schemaVersion": 1,
+ "toolVersions": {
+  "bwrap": "bubblewrap 0.13.1",
+  "ink-render": "0b59cff6e10909439e84082d2d34a8747015f35164217f61d3bb3f10592955f7",
+  "magick": "Version: ImageMagick 7.1.2-34 Q16-HDRI x86_64 c5d4ca8a0:20261014 https://imagemagick.org",
+  "pdftoppm": "pdftoppm version 26.10.0",
+  "rsvg-convert": "rsvg-convert version 2.63.3"
+ },
+ "tools": {
+  "bwrap": true,
+  "ink-render": true,
+  "magick": true,
+  "pdfinfo": true,
+  "pdftoppm": true,
+  "xdg-user-dir": true
+ },
+ "variants": {
+  "no-magick": {
+   "hidden": [
+    "magick"
+   ],
+   "scenarios": {
+    "main": {
+     "file": "variants/no-magick/main.json.gz",
+     "responses": 1693
+    },
+    "uninit": {
+     "file": "variants/no-magick/uninit.json.gz",
+     "responses": 275
+    }
+   },
+   "toolVersions": {
+    "bwrap": "bubblewrap 0.13.1",
+    "ink-render": "0b59cff6e10909439e84082d2d34a8747015f35164217f61d3bb3f10592955f7",
+    "magick": null,
+    "pdftoppm": "pdftoppm version 26.10.0",
+    "rsvg-convert": "rsvg-convert version 2.63.3"
+   },
+   "tools": {
+    "bwrap": true,
+    "ink-render": true,
+    "magick": false,
+    "pdfinfo": true,
+    "pdftoppm": true,
+    "xdg-user-dir": true
+   }
+  }
+ }
+}

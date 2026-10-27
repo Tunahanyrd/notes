@@ -1,0 +1,12 @@
+{
+  "appName": "Notes",
+  "appNameTr": "Notlar",
+  "appId": "io.github.tunahanyrd.Notes",
+  "binaryName": "notes",
+  "repository": "https://github.com/Tunahanyrd/notes",
+  "summary": "Samsung Notes compatible · unofficial",
+  "summaryTr": "Samsung Notes uyumlu · resmi değil",
+  "disclaimer": "Unofficial client compatible with Samsung Notes and Samsung Cloud. Not affiliated with, endorsed by, or sponsored by Samsung Electronics Co., Ltd. \"Samsung\", \"Samsung Notes\" and \"Galaxy\" are trademarks of Samsung Electronics Co., Ltd., used only to describe compatibility.",
+  "license": "GPL-3.0-or-later",
+  "developerName": "Tunahanyrd and contributors"
+}

@@ -1,0 +1,248 @@
+# Release builds. A pushed tag vX.Y.Z builds the Linux bundles (AppImage,
+# .deb, .rpm and a Flatpak bundle, each through packaging/build-<format>.sh),
+# writes
+# SHA256SUMS and creates a DRAFT GitHub Release with every file attached; a
+# maintainer reviews and publishes it. workflow_dispatch runs the same builds
+# as a dry run (artifacts only, no release) unless dry_run is unchecked.
+#
+# Product name, application id and binary name come from branding.json
+# (python3 tools/branding.py) — never hardcode them here.
+#
+# No signing secret is used by the Linux jobs. If signing is added later,
+# pass secrets only through `env:` of the single step that needs them and
+# never echo them; GitHub masks registered secrets but not derived values.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build only; do not create a GitHub Release
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  NODE_VERSION: '24'
+  SDOCX_COMMIT: 41e9c1099b29a48dc7320501573d7c4858f09303
+
+jobs:
+  prepare:
+    name: Version and branding
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      app_id: ${{ steps.meta.outputs.app_id }}
+      gnome: ${{ steps.meta.outputs.gnome }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: meta
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then version="${GITHUB_REF_NAME#v}"; else version="0.0.0-dev.${GITHUB_RUN_NUMBER}"; fi
+          case "$version" in *[!0-9A-Za-z.+-]*|'') echo "bad version: $version" >&2; exit 1;; esac
+          app_id="$(python3 tools/branding.py get appId)"
+          # GNOME runtime major version selects the flatpak-builder container.
+          manifest="packaging/flatpak/${app_id}.yml"
+          gnome=""
+          [ -f "$manifest" ] && gnome="$(sed -n "s/^runtime-version: *['\"]\{0,1\}\([0-9][0-9]*\).*/\1/p" "$manifest" | head -1)"
+          [ -n "$gnome" ] || { echo "::warning::no runtime-version in $manifest; defaulting to 48"; gnome=48; }
+          python3 tools/branding.py sync --check
+          {
+            echo "version=$version"
+            echo "app_id=$app_id"
+            echo "gnome=$gnome"
+          } >> "$GITHUB_OUTPUT"
+
+  # Packaging is owned by the packaging scripts under packaging/ (maintained
+  # by the distribution side). Contract for every packaging/build-<format>.sh:
+  #   - called from the repository root as: packaging/build-<format>.sh OUT_DIR
+  #   - env: VERSION (e.g. 1.2.3), APP_ID / BINARY_NAME (from branding.json),
+  #          SDOCX_COMMIT; the toolchains below are already installed and
+  #          references/upstream/sdocx is checked out at SDOCX_COMMIT
+  #   - writes only the final distributable file(s) into OUT_DIR, exits non-zero
+  #     on any failure, never publishes or signs with secrets on its own.
+  linux-bundles:
+    name: ${{ matrix.format }}
+    needs: prepare
+    # Oldest supported Ubuntu with webkit2gtk-4.1: the AppImage and .deb then
+    # run on distributions with this glibc or newer.
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        format: [appimage, deb, rpm]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Packaging script present
+        run: |
+          script="packaging/build-${{ matrix.format }}.sh"
+          test -x "$script" || { echo "::error::$script is missing or not executable (provided by the packaging owner)"; exit 1; }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install Tauri build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libsqlite3-dev \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf file libfuse2 xdg-utils rpm
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Cache sdocx
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: references/upstream/sdocx
+          key: sdocx-${{ env.SDOCX_COMMIT }}
+      - name: Fetch sdocx at the pinned commit
+        run: tools/fetch_sdocx.sh
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: release-linux
+          workspaces: |
+            . -> target
+            tools/ink-renderer -> target
+            desktop/src-tauri -> target
+      - name: Build ${{ matrix.format }}
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          APP_ID: ${{ needs.prepare.outputs.app_id }}
+          # linuxdeploy's bundled strip cannot read .relr.dyn sections.
+          NO_STRIP: 'true'
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          export BINARY_NAME="$(python3 tools/branding.py get binaryName)"
+          mkdir -p out
+          "packaging/build-${{ matrix.format }}.sh" out
+          ls -l out
+          test "$(find out -maxdepth 1 -type f | wc -l)" -ge 1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bundle-${{ matrix.format }}
+          path: out/
+          if-no-files-found: error
+
+  flatpak:
+    name: Flatpak bundle
+    needs: prepare
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-${{ needs.prepare.outputs.gnome }}
+      options: --privileged
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Packaging script present
+        run: |
+          test -x packaging/build-flatpak.sh || { echo "::error::packaging/build-flatpak.sh is missing (provided by the packaging owner)"; exit 1; }
+      # The manifest builds offline from generated cargo/npm source lists;
+      # sdocx is a git source pinned to SDOCX_COMMIT inside the manifest.
+      - name: Build Flatpak bundle
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          APP_ID: ${{ needs.prepare.outputs.app_id }}
+        run: |
+          export BINARY_NAME="$(python3 tools/branding.py get binaryName)"
+          mkdir -p out
+          packaging/build-flatpak.sh out
+          ls -l out
+          test "$(find out -maxdepth 1 -name '*.flatpak' | wc -l)" -ge 1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bundle-flatpak
+          path: out/
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # macOS hook (owned by the macOS port; enable once .github/workflows/macos.yml
+  # exists). Contract the reusable workflow must satisfy:
+  #
+  #   on:
+  #     workflow_call:
+  #       inputs:
+  #         version: { type: string, required: true }   # e.g. 1.2.3
+  #
+  #   and upload exactly one artifact named `macos-dmg` containing the .dmg
+  #   file(s) (signing/notarisation secrets stay inside macos.yml).
+  #
+  # Enabled: macos.yml builds unsigned, not notarized arm64 (+ optional
+  # x86_64) disk images `<AppName>-<version>-<arch>.dmg` with a `.sha256`
+  # each (docs/MACOS_PORT.md, "Gatekeeper").
+  # ---------------------------------------------------------------------------
+  macos:
+    needs: prepare
+    uses: ./.github/workflows/macos.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+    secrets: inherit
+
+  publish:
+    name: Checksums and GitHub Release
+    needs: [prepare, linux-bundles, flatpak, macos]
+    # The macOS dmg is optional until it has been verified on real Macs: a
+    # failed macos job leaves the dmg out instead of blocking the Linux release.
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.linux-bundles.result == 'success' && needs.flatpak.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: bundle-*
+          merge-multiple: true
+          path: dist
+      - name: macOS disk images (.dmg + .sha256, from the macos job; optional)
+        id: macos_dmg
+        if: needs.macos.result == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: macos-dmg
+          path: dist
+      - name: SHA256SUMS
+        working-directory: dist
+        run: |
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' | sort -z | xargs -0 sha256sum > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: dist/
+      - name: Create draft pre-release
+        if: github.event_name == 'push' || inputs.dry_run == false
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          [ "${GITHUB_REF_TYPE}" = tag ] || tag="v${VERSION}"
+          cat > notes.md <<'NOTES'
+          Unofficial client compatible with Samsung Notes; not affiliated with,
+          endorsed by, or sponsored by Samsung Electronics. See README.md and
+          docs/LEGAL.md. Verify downloads against SHA256SUMS.
+          NOTES
+          if ! ls dist/*.dmg >/dev/null 2>&1; then
+            echo "The macOS disk image is not part of this build." >> notes.md
+          fi
+          # 0.x and suffixed versions (1.0.0-rc.1) are published as pre-releases.
+          pre=()
+          case "${VERSION}" in 0.*|*-*) pre=(--prerelease) ;; esac
+          gh release create "$tag" --draft "${pre[@]}" --verify-tag --title "$tag" --notes-file notes.md dist/*

@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=@APP_NAME@
+Name[tr]=@APP_NAME_TR@
+GenericName=Note-taking app
+GenericName[tr]=Not alma uygulaması
+Comment=@SUMMARY@
+Comment[tr]=@SUMMARY_TR@
+Exec={{exec}}
+Icon={{icon}}
+Terminal=false
+StartupNotify=true
+StartupWMClass={{exec}}
+Categories=Office;
+Keywords=notes;handwriting;pen;samsung;notlar;kalem;

@@ -1,0 +1,28 @@
+[package]
+name = "rs-cloud"
+license.workspace = true
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lib]
+name = "_cloud"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { workspace = true, optional = true }
+rs-common = { path = "../rs-common", optional = true }
+base64 = { workspace = true }
+flate2 = { version = "=1.1.10", default-features = false, features = ["zlib"] }
+getrandom = { workspace = true }
+roxmltree = { workspace = true }
+sha1 = { version = "=0.10.7", default-features = false }
+sha2 = { workspace = true }
+rs_doc = { path = "../rs-doc", package = "rs-doc" }
+rs_editor = { path = "../rs-editor", package = "rs-editor" }
+rs_ops = { path = "../rs-ops", package = "rs-ops" }
+
+[features]
+# PyO3 bindings (the historical Python extension `_cloud`, see reference/python).
+# Off by default: the pure engine and the desktop app never compile pyo3.
+python = ["dep:pyo3", "dep:rs-common", "rs-common/python", "rs_doc/python", "rs_editor/python", "rs_ops/python"]

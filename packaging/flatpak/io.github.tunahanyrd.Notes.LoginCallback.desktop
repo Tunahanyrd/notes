@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Notes sign-in
+Comment=Receives the Samsung account sign-in callback
+Exec=notes-engine __notes-login-callback %u
+Icon=io.github.tunahanyrd.Notes
+Terminal=false
+NoDisplay=true
+MimeType=x-scheme-handler/ms-app;

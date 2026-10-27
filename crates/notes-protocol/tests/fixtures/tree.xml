@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CompareForUpsyncView ver="2" encrypted="true" isStrokeGrouped="false" xmlns:future="urn:synthetic:future" unknownAttribute="retained-in-source">
+  <pageList>
+    <page id="page-1" t="-1" h="opaque/page+/=">
+      <layerList>
+        <layer id="layer-1" t="9223372036854775807" h="opaque-layer">
+          <objectList><object id="stroke-1" t="42" h="no-algorithm-assumed"/></objectList>
+        </layer>
+      </layerList>
+      <future:pageExtension enabled="true"/>
+    </page>
+  </pageList>
+  <contentFileList><contentFile id="media-1" t="0" h="metadata-hash"/></contentFileList>
+  <floatingObjectList><object id="floating-1" h=""/></floatingObjectList>
+  <bodyText id="text-1" t="10" h="text-hash"/>
+  <modelName>c3ludGhldGlj</modelName>
+  <commitId> 0001-A&amp;B </commitId>
+  <isUpdatedByDevice>false</isUpdatedByDevice>
+  <future:extension><future:nested/></future:extension>
+</CompareForUpsyncView>

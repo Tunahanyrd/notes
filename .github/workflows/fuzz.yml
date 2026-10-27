@@ -1,0 +1,92 @@
+# Scheduled / manual fuzzing of every parser that consumes data a broken
+# Samsung Cloud response, a hostile local client or a tampered cache could
+# control (see docs/FUZZING.md). Actions are pinned to the same commit SHAs as
+# ci.yml.
+#
+# Nothing here talks to Samsung: the seed corpora are built from the committed
+# synthetic fixtures by fuzz/make_seeds.py, the targets never open a socket
+# and the XDG directories point at an empty temp tree.
+name: Fuzz
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'   # weekly, Monday 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds per target
+        required: false
+        default: '120'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  PYTHON_VERSION: '3.14'
+  CARGO_FUZZ_VERSION: 0.13.2
+  FUZZ_SECONDS: ${{ github.event.inputs.seconds || '120' }}
+
+jobs:
+  fuzz:
+    name: fuzz ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [payload, document, xml, cloud_response, ink_binary, json, api_values,
+                 http_response, login, local_api, png, spi]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Isolated XDG directories
+        run: |
+          for d in config data state cache runtime; do mkdir -p "$RUNNER_TEMP/xdg/$d"; done
+          chmod 700 "$RUNNER_TEMP/xdg/runtime"
+          {
+            echo "XDG_CONFIG_HOME=$RUNNER_TEMP/xdg/config"
+            echo "XDG_DATA_HOME=$RUNNER_TEMP/xdg/data"
+            echo "XDG_STATE_HOME=$RUNNER_TEMP/xdg/state"
+            echo "XDG_CACHE_HOME=$RUNNER_TEMP/xdg/cache"
+            echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg/runtime"
+          } >> "$GITHUB_ENV"
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libsqlite3-dev libssl-dev pkg-config
+      - name: Nightly toolchain and cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly install --locked cargo-fuzz --version "$CARGO_FUZZ_VERSION"
+      - name: Seed corpus (synthetic fixtures only)
+        run: python3 fuzz/make_seeds.py
+      # AddressSanitizer (cargo-fuzz's default) also turns a stack overflow
+      # into a reported crash with a saved input; without a sanitizer the
+      # process dies on SIGSEGV and libFuzzer cannot write the artifact.
+      - name: Build
+        run: cargo +nightly fuzz build ${{ matrix.target }}
+      - name: Regression inputs
+        run: |
+          if [ -d "fuzz/regressions/${{ matrix.target }}" ]; then
+            cargo +nightly fuzz run ${{ matrix.target }} "fuzz/regressions/${{ matrix.target }}" -- -runs=0 -timeout=10 -rss_limit_mb=2048
+          fi
+      - name: Fuzz
+        run: >
+          cargo +nightly fuzz run ${{ matrix.target }} "fuzz/corpus/${{ matrix.target }}" --
+          -max_total_time=${{ env.FUZZ_SECONDS }} -max_len=65536 -timeout=10
+          -rss_limit_mb=2048 -malloc_limit_mb=2048 -print_final_stats=1
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          retention-days: 14

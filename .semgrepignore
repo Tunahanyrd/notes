@@ -1,0 +1,47 @@
+# Paths Semgrep never scans (tools/semgrep.sh, .github/workflows/semgrep.yml).
+# A .semgrepignore replaces Semgrep's built-in list, so its defaults are
+# repeated here. Git-ignored files are skipped as well in a git checkout.
+
+# Semgrep defaults: large/generated trees and test directories.
+node_modules/
+build/
+dist/
+vendor/
+.env/
+.venv/
+.tox/
+*.min.js
+.npm/
+.yarn/
+test/
+tests/
+*_test.go
+.semgrep
+.semgrep_logs/
+
+# Build products.
+target/
+dist-*/
+
+# Research material, third-party reference code and private local data:
+# never shipped, partly not ours, partly not in the public repository.
+reference/
+references/
+artifacts/
+backups/
+tools/vendor/
+tools/android/
+tools/windows/
+tools/wine/
+tools/ghidra/
+
+# Synthetic test data (recorded protocol exchanges, golden HTTP responses).
+# They deliberately contain sample tokens, raw requests and payloads.
+**/golden/
+**/fixtures/
+# cargo-fuzz seed corpus, crash artifacts and logs (generated from the
+# synthetic fixtures above by fuzz/make_seeds.py).
+fuzz/corpus/
+fuzz/artifacts/
+fuzz/regressions/
+fuzz/logs/

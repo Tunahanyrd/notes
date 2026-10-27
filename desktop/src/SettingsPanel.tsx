@@ -1,0 +1,101 @@
+import {useRef, useState, type ReactNode, type Ref} from 'react';
+import {ArrowLeft, Check, CloudOff, Grid2X2, List, RefreshCw} from 'lucide-react';
+import type {Status} from './types';
+import {version as APP_VERSION} from '../package.json';
+import './settings-panel.css';
+
+const OPEN_SOURCE:readonly {name:string;license:string;note?:string}[]=[
+  {name:'sdocx kalem çizici (tools/ink-renderer)',license:'GPL-3.0',note:'Fountain kalem çizgilerini önizlemede çizer. GNU Genel Kamu Lisansı 3.0 altındadır; kaynak kodu ve lisans metni tools/ink-renderer/ klasöründedir (upstream commit 41e9c1099b29a48dc7320501573d7c4858f09303).'},
+  {name:'React, React DOM',license:'MIT'},
+  {name:'Tiptap, ProseMirror',license:'MIT'},
+  {name:'Lucide simgeleri',license:'ISC'},
+  {name:'Tauri',license:'MIT veya Apache-2.0'},
+  {name:'Poppler, ImageMagick',license:'GPL-2.0+ / ImageMagick',note:'Sistemde kurulu araçlar; PDF sayfası çizimi ve dışa aktarma için ayrı süreçte çalıştırılır, uygulamayla dağıtılmaz.'},
+];
+
+export interface SettingsPreferences {
+  galleryMode:'grid'|'list';
+  sortAscending:boolean;
+  toolsOpen:boolean;
+  defaultZoom:75|100|125|150;
+}
+export const SETTINGS_STORAGE_KEY='samsung-notes.preferences.v1';
+export const DEFAULT_SETTINGS:Readonly<SettingsPreferences>={galleryMode:'grid',sortAscending:true,toolsOpen:true,defaultZoom:100};
+/** Device-local display preferences only. Never put account data in this key. */
+export function loadSettingsPreferences():SettingsPreferences {
+  try {
+    const saved:unknown=JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY)||'null');
+    if(!saved||typeof saved!=='object'||!('version' in saved)||saved.version!==1)return {...DEFAULT_SETTINGS};
+    const p=saved as Record<string,unknown>;
+    return {galleryMode:p.galleryMode==='list'?'list':'grid',sortAscending:typeof p.sortAscending==='boolean'?p.sortAscending:DEFAULT_SETTINGS.sortAscending,toolsOpen:typeof p.toolsOpen==='boolean'?p.toolsOpen:DEFAULT_SETTINGS.toolsOpen,defaultZoom:[75,100,125,150].includes(p.defaultZoom as number)?p.defaultZoom as SettingsPreferences['defaultZoom']:100};
+  } catch {return {...DEFAULT_SETTINGS};}
+}
+export function saveSettingsPreferences(preferences:SettingsPreferences):boolean {
+  try {localStorage.setItem(SETTINGS_STORAGE_KEY,JSON.stringify({version:1,...preferences}));return true;}
+  catch {return false;}
+}
+export interface SettingsPanelProps {
+  status:Status|null;
+  foldersInitialized:boolean;
+  offlineView:boolean;
+  busy:boolean;
+  error?:string;
+  preferenceError?:string;
+  onClose:()=>void;
+  onSync:()=>void|Promise<unknown>;
+  sectionRef:Ref<HTMLElement>;
+  accountSlot:ReactNode;
+  shortcutSlot?:ReactNode;
+  preferences:SettingsPreferences;
+  onPreferencesChange:(preferences:SettingsPreferences,patch?:Partial<SettingsPreferences>)=>void;
+}
+function lastSync(value:number|null|undefined) {
+  return value&&Number.isFinite(value)?new Intl.DateTimeFormat('tr-TR',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}).format(value):'Henüz yapılmadı';
+}
+export function SettingsPanel({status,foldersInitialized,offlineView,busy,error,preferenceError,onClose,onSync,sectionRef,accountSlot,shortcutSlot,preferences,onPreferencesChange}:SettingsPanelProps) {
+  const [syncBusy,setSyncBusy]=useState(false);
+  const [syncError,setSyncError]=useState('');
+  const requestInFlight=useRef(false);
+  const syncing=syncBusy||status?.sync.state==='syncing';
+  const syncState=!status?'Durum yükleniyor':!status.connected?'Hesap bağlantısı gerekli':syncing?'Eşitleniyor…':offlineView?'Çevrimdışı görünüm':status.sync.state==='error'?'Eşitleme tamamlanamadı':status.sync.pending?'Bekleyen işlemler var':status.sync.conflicts?'Çakışmalar çözülmeli':!foldersInitialized||!status.sync.lastSyncedAt?'İlk eşitleme bekleniyor':'Son eşitleme tamamlandı';
+  const change=(patch:Partial<SettingsPreferences>)=>onPreferencesChange({...preferences,...patch},patch);
+  const sync=async()=>{
+    if(!status?.connected||busy||syncing||requestInFlight.current)return;
+    requestInFlight.current=true;setSyncBusy(true);setSyncError('');
+    try {await onSync();}catch {setSyncError('Eşitleme başlatılamadı. Bağlantınızı kontrol edip yeniden deneyin.');}
+    finally {requestInFlight.current=false;setSyncBusy(false);}
+  };
+  return <div className="modal-backdrop settings-backdrop" onClick={onClose}>
+    <section ref={sectionRef} className="settings-modal settings-page" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={event=>event.stopPropagation()}>
+      <header className="settings-page-header"><button className="icon-button" aria-label="Ayarları kapat" onClick={onClose}><ArrowLeft size={22}/></button><h2 id="settings-title">Ayarlar</h2></header>
+      <div className="settings-page-scroll">
+        <section className="settings-group" aria-labelledby="settings-account-heading"><h3 id="settings-account-heading">Bulut eşitlemesi</h3>{accountSlot}
+          <div className="settings-card settings-sync-card">
+            <div className="settings-option"><div><span className="settings-option-title">Şimdi eşitle</span><span className="settings-option-description" role="status">{syncState}</span><span className="settings-option-description">Son eşitleme: {lastSync(status?.sync.lastSyncedAt)}</span>{!!status?.sync.pending&&<span className="settings-option-description">Bekleyen işlem: {status.sync.pending}</span>}{!!status?.sync.conflicts&&<span className="settings-option-description">Çakışan not: {status.sync.conflicts}</span>}</div><button className="settings-sync-button" disabled={!status?.connected||busy||syncing} onClick={()=>void sync()}><RefreshCw size={16} className={syncing?'spin':''}/>{syncing?'Eşitleniyor…':'Şimdi eşitle'}</button></div>
+            {syncing&&!!status?.sync.progress.total&&<p className="settings-progress">{status.sync.progress.processed} / {status.sync.progress.total} not işlendi</p>}
+            {(syncError||error||status?.sync.error)&&<p className="settings-inline-error" role="alert">{syncError||error||status?.sync.error}</p>}
+          </div>
+          <p className="settings-group-help"><CloudOff size={15}/><span>Önceden yüklenmiş notları çevrimdışıyken de görüntüleyebilirsiniz. Değişiklikleriniz, bağlantı kurulduğunda eşitlenir.</span></p>
+        </section>
+        <section className="settings-group" aria-labelledby="settings-general-heading"><h3 id="settings-general-heading">Genel</h3>{preferenceError&&<p className="settings-inline-error" role="alert">{preferenceError}</p>}<div className="settings-card">
+          <div className="settings-option settings-view-option"><div><span className="settings-option-title">Not listesi</span><span className="settings-option-description">Notlarınızın nasıl görüneceğini seçin.</span></div><div className="settings-view-choices" role="group" aria-label="Not listesi görünümü">{(['grid','list'] as const).map(mode=><button key={mode} aria-pressed={preferences.galleryMode===mode} onClick={()=>change({galleryMode:mode})}>{mode==='grid'?<Grid2X2 size={23}/>:<List size={23}/>}<span>{mode==='grid'?'Izgara':'Liste'}</span>{preferences.galleryMode===mode&&<Check size={13} className="settings-choice-check"/>}</button>)}</div></div>
+          <label className="settings-option"><span><span className="settings-option-title">Değiştirilme tarihine göre sırala</span><span className="settings-option-description">Not listesinin sıralama yönü.</span></span><select aria-label="Not sıralaması" value={preferences.sortAscending?'oldest':'newest'} onChange={event=>change({sortAscending:event.target.value==='oldest'})}><option value="newest">En yeni önce</option><option value="oldest">En eski önce</option></select></label>
+          <label className="settings-option"><span><span className="settings-option-title">Metin araçları</span><span className="settings-option-description">Düzenleyicide biçimlendirme ve kalem panelini göster.</span></span><input className="settings-toggle" type="checkbox" role="switch" aria-label="Metin araçlarını göster" checked={preferences.toolsOpen} onChange={event=>change({toolsOpen:event.target.checked})}/></label>
+          <label className="settings-option"><span><span className="settings-option-title">Varsayılan yakınlaştırma</span><span className="settings-option-description">Sayfanın ekrandaki boyutu. Not içeriğini değiştirmez.</span></span><select aria-label="Varsayılan yakınlaştırma" value={preferences.defaultZoom} onChange={event=>change({defaultZoom:Number(event.target.value) as SettingsPreferences['defaultZoom']})}>{([75,100,125,150] as const).map(value=><option key={value} value={value}>%{value}</option>)}</select></label>
+        </div><p className="settings-group-help">Bu tercihler yalnız bu cihazda saklanır. Not kilitleme, varsayılan not stili ve not geri yükleme bu sürümde yok.</p></section>
+        {shortcutSlot?<section className="settings-group" aria-labelledby="settings-shortcuts-heading"><h3 id="settings-shortcuts-heading">Klavye kısayolları</h3>{shortcutSlot}</section>:null}
+        <section className="settings-group" aria-labelledby="settings-privacy-heading"><h3 id="settings-privacy-heading">Gizlilik</h3><div className="settings-card">
+          <div className="settings-option"><div><span className="settings-option-title">Hesap parolası</span><span className="settings-option-description">Giriş Samsung’un kendi sayfasında, sistem tarayıcınızda yapılır. Parolanız bu uygulamaya girilmez ve saklanmaz.</span></div></div>
+          <div className="settings-option"><div><span className="settings-option-title">Bu cihazdaki veriler</span><span className="settings-option-description">İndirilen notlar, taslaklar ve ayarlar yalnız bu cihazdaki uygulama klasöründe tutulur ve yalnız Samsung Cloud ile eşitlenir.</span></div></div>
+        </div></section>
+        <section className="settings-about" aria-labelledby="settings-about-heading">
+          <h3 id="settings-about-heading">Linux için Notes</h3>
+          <p>Sürüm {APP_VERSION}</p>
+          <p>Samsung Notes ile çalışan bağımsız Linux istemcisi. Samsung’un resmî uygulaması değildir.</p>
+          <p>Eşitlenmemiş notlar ve taslaklar yalnız bu cihazda durur; uygulama verisini silerseniz bunlar da silinir.</p>
+          <details className="settings-licenses"><summary>Açık kaynak lisansları</summary><ul>{OPEN_SOURCE.map(item=><li key={item.name}><strong>{item.name}</strong> · {item.license}{item.note?<span>{item.note}</span>:null}</li>)}</ul></details>
+        </section>
+      </div>
+    </section>
+  </div>;
+}

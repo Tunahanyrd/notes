@@ -1,0 +1,5 @@
+# The image is a toolchain only (sources are bind-mounted), so the build
+# context needs nothing from the checkout. Ignore everything to keep the
+# context tiny and to make sure private data can never end up in a layer.
+*
+!Dockerfile

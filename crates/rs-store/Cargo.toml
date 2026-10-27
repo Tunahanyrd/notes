@@ -1,0 +1,33 @@
+[package]
+name = "rs-store"
+license.workspace = true
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lib]
+name = "_store"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+base64.workspace = true
+libc = "=0.2.191"
+parking_lot = "=0.12.5"
+pyo3 = { workspace = true, optional = true }
+roxmltree = "=0.21.2"
+rs-common = { path = "../rs-common", optional = true }
+rs-editor = { path = "../rs-editor" }
+rs-ops = { path = "../rs-ops" }
+rs_ink = { path = "../rs-ink", package = "rs-ink" }
+rs_doc = { path = "../rs-doc", package = "rs-doc" }
+rusqlite = "=0.40.1"
+uuid = { version = "=1.29.0", features = ["v4"] }
+
+[features]
+# PyO3 bindings (the historical Python extension `_store`, see reference/python).
+# Off by default: the pure engine and the desktop app never compile pyo3.
+python = ["dep:pyo3", "dep:rs-common", "rs-common/python", "rs-editor/python", "rs-ops/python", "rs_ink/python", "rs_doc/python"]
+# Link SQLite statically (standalone Tauri builds). The Python extension uses the
+# system libsqlite3 that CPython's _sqlite3 also uses, so both share one SQLite
+# copy in-process (two copies break POSIX advisory locks on the same file).
+bundled = ["rusqlite/bundled"]
