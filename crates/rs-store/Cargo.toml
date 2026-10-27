@@ -12,7 +12,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 base64.workspace = true
 libc = "=0.2.191"
-parking_lot = "=0.12.5"
+parking_lot = "=0.13.0"
 pyo3 = { workspace = true, optional = true }
 roxmltree = "=0.21.2"
 rs-common = { path = "../rs-common", optional = true }
