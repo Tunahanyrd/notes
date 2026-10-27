@@ -191,7 +191,8 @@ jobs:
     uses: ./.github/workflows/macos.yml
     with:
       version: ${{ needs.prepare.outputs.version }}
-    secrets: inherit
+    # No secrets: signing/notarization is a disabled stub in macos.yml. When it
+    # is enabled, pass only the APPLE_* secrets explicitly (never `inherit`).
 
   publish:
     name: Checksums and GitHub Release
