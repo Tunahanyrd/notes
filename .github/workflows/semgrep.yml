@@ -28,7 +28,7 @@ concurrency:
 jobs:
   semgrep:
     name: Semgrep (pinned rules)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     # Venv and rule cache live outside the checkout so the scan never sees them.
     # (the runner context is not available in job-level env; set in a step)

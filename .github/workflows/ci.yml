@@ -41,7 +41,7 @@ env:
 jobs:
   meta:
     name: Branding and licenses
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -93,7 +93,7 @@ jobs:
 
   security:
     name: Security lints and advisories
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -150,7 +150,7 @@ jobs:
 
   ink-live:
     name: Live pen preview (notes-ink-live, native tests + wasm32)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -186,7 +186,7 @@ jobs:
 
   rust-crates:
     name: Rust crate tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -232,7 +232,7 @@ jobs:
   engine-conformance:
     name: notes-engine HTTP conformance (golden replay)
     needs: [rust-crates]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -285,7 +285,7 @@ jobs:
 
   desktop:
     name: Desktop UI (tsc + Playwright)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: desktop
@@ -298,6 +298,21 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: desktop/package-lock.json
+      # The live pen loads public/ink-live.wasm (built from source, not
+      # committed); without it the ink-live tests only see the fallback.
+      - name: Rust toolchain (+ wasm32-unknown-unknown)
+        working-directory: .
+        run: |
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          rustup default stable
+      - name: Cache sdocx
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: references/upstream/sdocx
+          key: sdocx-${{ env.SDOCX_COMMIT }}
+      - name: Fetch sdocx and build ink-live.wasm
+        working-directory: .
+        run: tools/fetch_sdocx.sh && tools/build_ink_wasm.sh
       - run: npm ci
       - name: Type check
         run: npx tsc --noEmit

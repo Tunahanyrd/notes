@@ -38,7 +38,7 @@ env:
 jobs:
   prepare:
     name: Version and branding
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       version: ${{ steps.meta.outputs.version }}
       app_id: ${{ steps.meta.outputs.app_id }}
@@ -141,7 +141,7 @@ jobs:
   flatpak:
     name: Flatpak bundle
     needs: prepare
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-${{ needs.prepare.outputs.gnome }}
       options: --privileged
@@ -200,7 +200,7 @@ jobs:
     # The macOS dmg is optional until it has been verified on real Macs: a
     # failed macos job leaves the dmg out instead of blocking the Linux release.
     if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.linux-bundles.result == 'success' && needs.flatpak.result == 'success' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
     steps:

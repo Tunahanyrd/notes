@@ -99,16 +99,34 @@ pub fn pdf_args_for(mode: Mode, source: &str, output: &str, page: u32, width: u3
         return args;
     }
     let page = (page + 1).to_string();
-    [
-        "/usr/bin/bwrap", "--unshare-all", "--die-with-parent", "--new-session",
-        "--ro-bind", "/usr", "/usr", "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib", "/lib64",
+    let mut args = bwrap_root();
+    args.extend([
         "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/etc",
         "--ro-bind", "/etc/fonts", "/etc/fonts", "--ro-bind", source, "/input.pdf",
         "--bind", output, "/output", "--chdir", "/tmp", "--clearenv",
         "--setenv", "HOME", "/tmp", "--setenv", "PATH", "/usr/bin", "--setenv", "LC_ALL", "C",
         "/usr/bin/pdftoppm", "-q", "-f", &page, "-l", &page, "-singlefile",
         "-scale-to-x", &width.to_string(), "-scale-to-y", &height.to_string(), "-cropbox", "/input.pdf", "/output/page",
-    ].iter().map(|s| s.to_string()).collect()
+    ].iter().map(|s| s.to_string()));
+    args
+}
+
+/// `bwrap` with namespaces, read-only `/usr` and this host's top-level
+/// library entries. Merged-/usr layouts differ (Arch: `/lib64 -> usr/lib`;
+/// Debian, Ubuntu, Fedora: `/lib64 -> usr/lib64`, where the dynamic loader
+/// lives), so the links are copied from the host instead of assumed; a real
+/// directory (non-merged systems) is bound read-only.
+fn bwrap_root() -> Vec<String> {
+    let mut args: Vec<String> = ["/usr/bin/bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--ro-bind", "/usr", "/usr"]
+        .iter().map(|s| s.to_string()).collect();
+    for path in ["/lib", "/lib32", "/lib64", "/libx32"] {
+        match std::fs::read_link(path) {
+            Ok(target) => args.extend(["--symlink".to_string(), target.to_string_lossy().into_owned(), path.to_string()]),
+            Err(_) if Path::new(path).is_dir() => args.extend(["--ro-bind".to_string(), path.to_string(), path.to_string()]),
+            Err(_) => {}
+        }
+    }
+    args
 }
 
 /// Renderer/rasterizer argv in the current [`mode`] (see [`pdf_bwrap_args`]).
@@ -125,13 +143,12 @@ pub fn ink_args_for(mode: Mode, binary: &str, png: bool) -> Vec<String> {
         }
         return args;
     }
-    let mut args: Vec<String> = [
-        "/usr/bin/bwrap", "--unshare-all", "--die-with-parent", "--new-session",
-        "--ro-bind", "/usr", "/usr", "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib", "/lib64",
+    let mut args = bwrap_root();
+    args.extend([
         "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--ro-bind", binary, "/renderer",
         "--chdir", "/tmp", "--clearenv", "--setenv", "PATH", "/usr/bin", "--setenv", "HOME", "/tmp",
         "--setenv", "LC_ALL", "C", "/renderer",
-    ].iter().map(|s| s.to_string()).collect();
+    ].iter().map(|s| s.to_string()));
     if png {
         args.push("--format=png".into());
     }
@@ -494,6 +511,20 @@ mod mode_tests {
         assert_eq!(decide(None, false, false, || panic!("no probe without bwrap")).0, Mode::Direct);
         assert_eq!(decide(None, false, true, || true), (Mode::Bwrap, None));
         assert_eq!(decide(Some("bogus"), false, true, || false).0, Mode::Direct);
+    }
+
+    #[test]
+    fn bwrap_mirrors_host_library_links() {
+        // The loader path inside the sandbox must resolve like on the host
+        // (Ubuntu/Fedora /lib64 -> usr/lib64, Arch /lib64 -> usr/lib).
+        let a = bwrap_root();
+        for path in ["/lib", "/lib64"] {
+            if let Ok(target) = std::fs::read_link(path) {
+                let target = target.to_string_lossy().into_owned();
+                assert!(a.windows(3).any(|w| w[0] == "--symlink" && w[1] == target && w[2] == path), "{path} -> {target}");
+            }
+        }
+        assert!(!a.windows(3).any(|w| w[0] == "--symlink" && w[2] == "/lib64" && std::fs::read_link("/lib64").map(|t| t.to_string_lossy() != w[1]).unwrap_or(true)));
     }
 
     #[test]

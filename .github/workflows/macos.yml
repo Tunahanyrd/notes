@@ -1,4 +1,4 @@
-# macOS port CI (Apple Silicon, macos-14) plus a Linux parity job that
+# macOS port CI (Apple Silicon, macos-26) plus a Linux parity job that
 # cross-checks the same code for aarch64-apple-darwin. See docs/MACOS_PORT.md.
 #
 # Actions are pinned to the same commit SHAs as ci.yml. Nothing here talks to
@@ -52,7 +52,7 @@ jobs:
   rust:
     name: macOS engine (cargo test + offline smoke)
     if: ${{ !inputs.version }}
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -114,7 +114,7 @@ jobs:
     name: macOS HTTP conformance (informational)
     if: ${{ !inputs.version }}
     needs: rust
-    runs-on: macos-14
+    runs-on: macos-26
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -174,7 +174,7 @@ jobs:
   desktop:
     name: macOS UI (tsc + Playwright Chromium/WebKit)
     if: ${{ !inputs.version }}
-    runs-on: macos-14
+    runs-on: macos-26
     defaults:
       run:
         working-directory: desktop
@@ -218,9 +218,9 @@ jobs:
       matrix:
         include:
           - arch: arm64
-            runner: macos-14
+            runner: macos-26
           - arch: x86_64
-            runner: macos-15-intel
+            runner: macos-26-intel
     env:
       APP_VERSION: ${{ inputs.version }}
     steps:
@@ -293,7 +293,7 @@ jobs:
   dmg:
     name: macOS disk images (artifact macos-dmg)
     needs: bundle
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -318,7 +318,7 @@ jobs:
   linux-parity:
     name: Linux parity (notes-* tests + darwin cross-check)
     if: ${{ !inputs.version }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
