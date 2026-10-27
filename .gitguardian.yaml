@@ -1,0 +1,9 @@
+# Synthetic test fixtures that look like secrets (checked: none matches a real
+# credential). Keep this list to exact files; never ignore whole directories.
+version: 2
+secret:
+  ignored_paths:
+    - crates/notes-protocol/tests/fixtures/signin/synthetic-private.pkcs8.pem  # synthetic RSA key for a JDK test vector
+    - crates/notes-protocol/tests/pkce.rs                                      # RFC 7636 example values
+    - crates/notes-cli/tests/callback_binding.rs                               # synthetic callback values
+    - crates/notes-login/tests/hostile_fuzz.rs                                 # malformed synthetic URLs
