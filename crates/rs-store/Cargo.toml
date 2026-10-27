@@ -20,7 +20,7 @@ rs-editor = { path = "../rs-editor" }
 rs-ops = { path = "../rs-ops" }
 rs_ink = { path = "../rs-ink", package = "rs-ink" }
 rs_doc = { path = "../rs-doc", package = "rs-doc" }
-rusqlite = "=0.40.1"
+rusqlite = "=0.41.0"
 uuid = { version = "=1.29.0", features = ["v4"] }
 
 [features]
