@@ -142,7 +142,9 @@ PY
     echo "error: the executable links package-manager libraries (not portable)" >&2; return 1
   fi
   # macOS always embeds the pure engine (no notes-engine sidecar, no Python).
-  grep -aq 'Bu yerel arşiv için Notlar hizmeti zaten açık.' "$app/Contents/MacOS/$exe" \
+  # Marker: a local-API route literal of the engine's dispatcher (always
+  # linked when the engine runs in-process; ASCII so BSD grep matches it).
+  grep -aq 'ink-erase' "$app/Contents/MacOS/$exe" \
     || { echo "error: the embedded notes-engine is missing from $exe" >&2; return 1; }
   if [ -e "$app/Contents/MacOS/notes-engine" ]; then echo "error: unexpected notes-engine sidecar" >&2; return 1; fi
   lipo -archs "$app/Contents/MacOS/$exe" | tr ' ' '\n' | grep -qx "$arch" \
