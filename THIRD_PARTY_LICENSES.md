@@ -17,11 +17,11 @@ separate program), bubblewrap (LGPL-2.0+, separate program).
 
 ## Rust: Rust engine workspace
 
-Lock file: `Cargo.lock` (110 packages)
+Lock file: `Cargo.lock` (114 packages)
 
-- MIT OR Apache-2.0: 71
-- MIT: 16
-- Apache-2.0 OR MIT: 9
+- MIT OR Apache-2.0: 75
+- MIT: 15
+- Apache-2.0 OR MIT: 10
 - BSD-3-Clause: 2
 - MIT OR Zlib OR Apache-2.0: 2
 - Unlicense OR MIT: 2
@@ -40,19 +40,23 @@ Lock file: `Cargo.lock` (110 packages)
 | arrayref | 0.3.9 | BSD-2-Clause | crates.io |
 | arrayvec | 0.7.8 | MIT OR Apache-2.0 | crates.io |
 | autocfg | 1.5.1 | Apache-2.0 OR MIT | crates.io |
-| base64 | 0.22.1 | MIT OR Apache-2.0 | crates.io |
 | base64 | 0.23.1 | MIT OR Apache-2.0 | crates.io |
 | bitflags | 2.13.2 | MIT OR Apache-2.0 | crates.io |
 | block-buffer | 0.10.4 | MIT OR Apache-2.0 | crates.io |
+| block-buffer | 0.12.1 | MIT OR Apache-2.0 | crates.io |
 | bumpalo | 3.20.3 | MIT OR Apache-2.0 | crates.io |
 | bytemuck | 1.25.2 | Zlib OR Apache-2.0 OR MIT | crates.io |
 | cc | 1.10.0 | MIT OR Apache-2.0 | crates.io |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 | crates.io |
+| const-oid | 0.10.2 | Apache-2.0 OR MIT | crates.io |
 | cpufeatures | 0.2.17 | MIT OR Apache-2.0 | crates.io |
+| cpufeatures | 0.3.1 | MIT OR Apache-2.0 | crates.io |
 | crc32fast | 1.5.3 | MIT OR Apache-2.0 | crates.io |
 | crypto-common | 0.1.7 | MIT OR Apache-2.0 | crates.io |
+| crypto-common | 0.2.2 | MIT OR Apache-2.0 | crates.io |
 | data-url | 0.3.2 | MIT OR Apache-2.0 | crates.io |
 | digest | 0.10.7 | MIT OR Apache-2.0 | crates.io |
+| digest | 0.11.3 | MIT OR Apache-2.0 | crates.io |
 | euclid | 0.22.14 | MIT OR Apache-2.0 | crates.io |
 | fallible-iterator | 0.3.0 | MIT OR Apache-2.0 | crates.io |
 | fallible-streaming-iterator | 0.1.9 | MIT OR Apache-2.0 | crates.io |
@@ -71,14 +75,15 @@ Lock file: `Cargo.lock` (110 packages)
 | hashbrown | 0.16.1 | MIT OR Apache-2.0 | crates.io |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 | crates.io |
 | hashlink | 0.12.1 | MIT OR Apache-2.0 | crates.io |
-| imagesize | 0.14.0 | MIT | crates.io |
+| hybrid-array | 0.4.15 | MIT OR Apache-2.0 | crates.io |
+| imagesize | 0.15.0 | MIT | crates.io |
 | itoa | 1.0.18 | MIT OR Apache-2.0 | crates.io |
 | js-sys | 0.3.104 | MIT OR Apache-2.0 | crates.io |
 | kurbo | 0.13.1 | Apache-2.0 OR MIT | crates.io |
 | libc | 0.2.191 | MIT OR Apache-2.0 | crates.io |
-| libsqlite3-sys | 0.38.1 | MIT | crates.io |
+| libsqlite3-sys | 0.39.1 | MIT | crates.io |
 | libz-sys | 1.1.30 | MIT OR Apache-2.0 | crates.io |
-| lock_api | 0.4.14 | MIT OR Apache-2.0 | crates.io |
+| lock_api | 0.5.0 | MIT OR Apache-2.0 | crates.io |
 | log | 0.4.34 | MIT OR Apache-2.0 | crates.io |
 | memchr | 2.8.3 | Unlicense OR MIT | crates.io |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 | crates.io |
@@ -88,8 +93,8 @@ Lock file: `Cargo.lock` (110 packages)
 | openssl | 0.10.81 | Apache-2.0 | crates.io |
 | openssl-macros | 0.1.1 | MIT OR Apache-2.0 | crates.io |
 | openssl-sys | 0.9.117 | MIT | crates.io |
-| parking_lot | 0.12.5 | MIT OR Apache-2.0 | crates.io |
-| parking_lot_core | 0.9.12 | MIT OR Apache-2.0 | crates.io |
+| parking_lot | 0.13.0 | MIT OR Apache-2.0 | crates.io |
+| parking_lot_core | 0.10.0 | MIT OR Apache-2.0 | crates.io |
 | pico-args | 0.5.0 | MIT | crates.io |
 | pin-project-lite | 0.2.17 | Apache-2.0 OR MIT | crates.io |
 | pkg-config | 0.3.34 | MIT OR Apache-2.0 | crates.io |
@@ -98,22 +103,22 @@ Lock file: `Cargo.lock` (110 packages)
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 | crates.io |
 | quote | 1.0.47 | MIT OR Apache-2.0 | crates.io |
 | r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | crates.io |
-| redox_syscall | 0.5.18 | MIT | crates.io |
+| redox_syscall | 0.9.5 | MIT | crates.io |
 | regex | 1.13.1 | MIT OR Apache-2.0 | crates.io |
 | regex-automata | 0.4.18 | MIT OR Apache-2.0 | crates.io |
 | regex-syntax | 0.8.11 | MIT OR Apache-2.0 | crates.io |
-| resvg | 0.47.0 | Apache-2.0 OR MIT | crates.io |
+| resvg | 0.49.0 | Apache-2.0 OR MIT | crates.io |
 | rgb | 0.8.53 | MIT | crates.io |
 | roxmltree | 0.21.2 | MIT OR Apache-2.0 | crates.io |
 | rsqlite-vfs | 0.1.1 | MIT | crates.io |
-| rusqlite | 0.40.1 | MIT | crates.io |
+| rusqlite | 0.41.0 | MIT | crates.io |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 | crates.io |
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 | crates.io |
 | serde | 1.0.229 | MIT OR Apache-2.0 | crates.io |
 | serde_core | 1.0.229 | MIT OR Apache-2.0 | crates.io |
 | serde_derive | 1.0.229 | MIT OR Apache-2.0 | crates.io |
 | serde_json | 1.0.154 | MIT OR Apache-2.0 | crates.io |
-| sha1 | 0.10.7 | MIT OR Apache-2.0 | crates.io |
+| sha1 | 0.11.0 | MIT OR Apache-2.0 | crates.io |
 | sha2 | 0.10.9 | MIT OR Apache-2.0 | crates.io |
 | shlex | 2.0.1 | MIT OR Apache-2.0 | crates.io |
 | simd-adler32 | 0.3.10 | MIT | crates.io |
@@ -132,7 +137,7 @@ Lock file: `Cargo.lock` (110 packages)
 | tiny-skia-path | 0.12.0 | BSD-3-Clause | crates.io |
 | typenum | 1.20.1 | MIT OR Apache-2.0 | crates.io |
 | unicode-ident | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 | crates.io |
-| usvg | 0.47.0 | Apache-2.0 OR MIT | crates.io |
+| usvg | 0.49.0 | Apache-2.0 OR MIT | crates.io |
 | uuid | 1.29.0 | Apache-2.0 OR MIT | crates.io |
 | vcpkg | 0.2.15 | MIT OR Apache-2.0 | crates.io |
 | version_check | 0.9.5 | MIT OR Apache-2.0 | crates.io |
@@ -141,18 +146,17 @@ Lock file: `Cargo.lock` (110 packages)
 | wasm-bindgen-macro-support | 0.2.127 | MIT OR Apache-2.0 | crates.io |
 | wasm-bindgen-shared | 0.2.127 | MIT OR Apache-2.0 | crates.io |
 | windows-link | 0.2.1 | MIT OR Apache-2.0 | crates.io |
-| xmlwriter | 0.1.0 | MIT | crates.io |
 | zeroize | 1.9.1 | Apache-2.0 OR MIT | crates.io |
 | zlib-rs | 0.6.8 | Zlib | crates.io |
 | zmij | 1.0.23 | MIT | crates.io |
 
 ## Rust: Tauri desktop shell
 
-Lock file: `desktop/src-tauri/Cargo.lock` (446 packages)
+Lock file: `desktop/src-tauri/Cargo.lock` (455 packages)
 
-- MIT OR Apache-2.0: 216
+- MIT OR Apache-2.0: 224
 - MIT: 109
-- Apache-2.0 OR MIT: 39
+- Apache-2.0 OR MIT: 40
 - Unicode-3.0: 18
 - Zlib OR Apache-2.0 OR MIT: 17
 - Unlicense OR MIT: 11
@@ -197,6 +201,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (446 packages)
 | bitflags | 1.3.2 | MIT OR Apache-2.0 | crates.io |
 | bitflags | 2.13.2 | MIT OR Apache-2.0 | crates.io |
 | block-buffer | 0.10.4 | MIT OR Apache-2.0 | crates.io |
+| block-buffer | 0.12.1 | MIT OR Apache-2.0 | crates.io |
 | block2 | 0.6.2 | MIT | crates.io |
 | brotli | 9.1.0 | BSD-3-Clause AND MIT | crates.io |
 | brotli-decompressor | 6.2.0 | BSD-3-Clause OR MIT | crates.io |
@@ -218,16 +223,19 @@ Lock file: `desktop/src-tauri/Cargo.lock` (446 packages)
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 | crates.io |
 | chrono | 0.4.45 | MIT OR Apache-2.0 | crates.io |
 | combine | 4.6.9 | MIT | crates.io |
+| const-oid | 0.10.2 | Apache-2.0 OR MIT | crates.io |
 | cookie | 0.18.2 | MIT OR Apache-2.0 | crates.io |
 | core-foundation | 0.10.1 | MIT OR Apache-2.0 | crates.io |
 | core-foundation-sys | 0.8.7 | MIT OR Apache-2.0 | crates.io |
 | core-graphics | 0.25.0 | MIT OR Apache-2.0 | crates.io |
 | core-graphics-types | 0.2.0 | MIT OR Apache-2.0 | crates.io |
 | cpufeatures | 0.2.17 | MIT OR Apache-2.0 | crates.io |
+| cpufeatures | 0.3.1 | MIT OR Apache-2.0 | crates.io |
 | crc32fast | 1.5.3 | MIT OR Apache-2.0 | crates.io |
 | crossbeam-channel | 0.5.17 | MIT OR Apache-2.0 | crates.io |
 | crossbeam-utils | 0.8.23 | MIT OR Apache-2.0 | crates.io |
 | crypto-common | 0.1.7 | MIT OR Apache-2.0 | crates.io |
+| crypto-common | 0.2.2 | MIT OR Apache-2.0 | crates.io |
 | cssparser | 0.37.0 | MPL-2.0 | crates.io |
 | cssparser-macros | 0.7.1 | MPL-2.0 | crates.io |
 | ctor | 1.0.13 | Apache-2.0 OR MIT | crates.io |
@@ -243,6 +251,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (446 packages)
 | derive_more | 2.1.1 | MIT | crates.io |
 | derive_more-impl | 2.1.1 | MIT | crates.io |
 | digest | 0.10.7 | MIT OR Apache-2.0 | crates.io |
+| digest | 0.11.3 | MIT OR Apache-2.0 | crates.io |
 | dirs | 7.0.0 | MIT OR Apache-2.0 | crates.io |
 | dirs-sys | 0.5.0 | MIT OR Apache-2.0 | crates.io |
 | dispatch2 | 0.3.1 | Zlib OR Apache-2.0 OR MIT | crates.io |
@@ -317,6 +326,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (446 packages)
 | http-body | 1.0.1 | MIT | crates.io |
 | http-body-util | 0.1.3 | MIT | crates.io |
 | httparse | 1.10.1 | MIT OR Apache-2.0 | crates.io |
+| hybrid-array | 0.4.15 | MIT OR Apache-2.0 | crates.io |
 | hyper | 1.10.1 | MIT | crates.io |
 | hyper-util | 0.1.20 | MIT | crates.io |
 | iana-time-zone | 0.1.65 | MIT OR Apache-2.0 | crates.io |
@@ -332,7 +342,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (446 packages)
 | ident_case | 1.0.1 | MIT OR Apache-2.0 | crates.io |
 | idna | 1.1.0 | MIT OR Apache-2.0 | crates.io |
 | idna_adapter | 1.2.2 | Apache-2.0 OR MIT | crates.io |
-| imagesize | 0.14.0 | MIT | crates.io |
+| imagesize | 0.15.0 | MIT | crates.io |
 | indexmap | 1.9.3 | Apache-2.0 OR MIT | crates.io |
 | indexmap | 2.14.2 | Apache-2.0 OR MIT | crates.io |
 | infer | 0.22.0 | MIT | crates.io |
@@ -360,11 +370,12 @@ Lock file: `desktop/src-tauri/Cargo.lock` (446 packages)
 | libdbus-sys | 0.2.7 | Apache-2.0 OR MIT | crates.io |
 | libloading | 0.7.4 | ISC | crates.io |
 | libredox | 0.1.25 | MIT | crates.io |
-| libsqlite3-sys | 0.38.1 | MIT | crates.io |
+| libsqlite3-sys | 0.39.1 | MIT | crates.io |
 | libz-sys | 1.1.30 | MIT OR Apache-2.0 | crates.io |
 | linux-raw-sys | 0.12.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | crates.io |
 | litemap | 0.8.3 | Unicode-3.0 | crates.io |
 | lock_api | 0.4.14 | MIT OR Apache-2.0 | crates.io |
+| lock_api | 0.5.0 | MIT OR Apache-2.0 | crates.io |
 | log | 0.4.34 | MIT OR Apache-2.0 | crates.io |
 | markup5ever | 0.39.0 | MIT OR Apache-2.0 | crates.io |
 | memchr | 2.8.3 | Unlicense OR MIT | crates.io |
@@ -407,6 +418,8 @@ Lock file: `desktop/src-tauri/Cargo.lock` (446 packages)
 | pango | 0.18.3 | MIT | crates.io |
 | pango-sys | 0.18.0 | MIT | crates.io |
 | parking_lot | 0.12.5 | MIT OR Apache-2.0 | crates.io |
+| parking_lot | 0.13.0 | MIT OR Apache-2.0 | crates.io |
+| parking_lot_core | 0.10.0 | MIT OR Apache-2.0 | crates.io |
 | parking_lot_core | 0.9.12 | MIT OR Apache-2.0 | crates.io |
 | percent-encoding | 2.3.2 | MIT OR Apache-2.0 | crates.io |
 | phf | 0.13.1 | MIT | crates.io |
@@ -437,6 +450,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (446 packages)
 | r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | crates.io |
 | raw-window-handle | 0.6.2 | MIT OR Apache-2.0 OR Zlib | crates.io |
 | redox_syscall | 0.5.18 | MIT | crates.io |
+| redox_syscall | 0.9.5 | MIT | crates.io |
 | redox_users | 0.5.3 | MIT | crates.io |
 | ref-cast | 1.0.27 | MIT OR Apache-2.0 | crates.io |
 | ref-cast-impl | 1.0.27 | MIT OR Apache-2.0 | crates.io |
@@ -444,11 +458,11 @@ Lock file: `desktop/src-tauri/Cargo.lock` (446 packages)
 | regex-automata | 0.4.18 | MIT OR Apache-2.0 | crates.io |
 | regex-syntax | 0.8.11 | MIT OR Apache-2.0 | crates.io |
 | reqwest | 0.13.4 | MIT OR Apache-2.0 | crates.io |
-| resvg | 0.47.0 | Apache-2.0 OR MIT | crates.io |
+| resvg | 0.49.0 | Apache-2.0 OR MIT | crates.io |
 | rgb | 0.8.53 | MIT | crates.io |
 | roxmltree | 0.21.2 | MIT OR Apache-2.0 | crates.io |
 | rsqlite-vfs | 0.1.1 | MIT | crates.io |
-| rusqlite | 0.40.1 | MIT | crates.io |
+| rusqlite | 0.41.0 | MIT | crates.io |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT | crates.io |
 | rustc_version | 0.4.1 | MIT OR Apache-2.0 | crates.io |
 | rustix | 1.1.5 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | crates.io |
@@ -475,7 +489,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (446 packages)
 | serialize-to-javascript | 0.1.2 | MIT OR Apache-2.0 | crates.io |
 | serialize-to-javascript-impl | 0.1.2 | MIT OR Apache-2.0 | crates.io |
 | servo_arc | 0.4.3 | MIT OR Apache-2.0 | crates.io |
-| sha1 | 0.10.7 | MIT OR Apache-2.0 | crates.io |
+| sha1 | 0.11.0 | MIT OR Apache-2.0 | crates.io |
 | sha2 | 0.10.9 | MIT OR Apache-2.0 | crates.io |
 | shlex | 2.0.1 | MIT OR Apache-2.0 | crates.io |
 | simd-adler32 | 0.3.10 | MIT | crates.io |
@@ -551,7 +565,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (446 packages)
 | unicode-segmentation | 1.13.3 | MIT OR Apache-2.0 | crates.io |
 | url | 2.5.8 | MIT OR Apache-2.0 | crates.io |
 | urlpattern | 0.6.0 | MIT | crates.io |
-| usvg | 0.47.0 | Apache-2.0 OR MIT | crates.io |
+| usvg | 0.49.0 | Apache-2.0 OR MIT | crates.io |
 | utf8_iter | 1.0.4 | Apache-2.0 OR MIT | crates.io |
 | uuid | 1.29.0 | Apache-2.0 OR MIT | crates.io |
 | vcpkg | 0.2.15 | MIT OR Apache-2.0 | crates.io |
@@ -612,7 +626,6 @@ Lock file: `desktop/src-tauri/Cargo.lock` (446 packages)
 | wry | 0.57.1 | Apache-2.0 OR MIT | crates.io |
 | x11 | 2.21.0 | MIT | crates.io |
 | x11-dl | 2.21.0 | MIT | crates.io |
-| xmlwriter | 0.1.0 | MIT | crates.io |
 | yoke | 0.8.4 | Unicode-3.0 | crates.io |
 | yoke-derive | 0.8.4 | Unicode-3.0 | crates.io |
 | zerofrom | 0.1.8 | Unicode-3.0 | crates.io |
@@ -626,10 +639,10 @@ Lock file: `desktop/src-tauri/Cargo.lock` (446 packages)
 
 ## Rust: ink-render CLI (GPL-3.0, links sdocx)
 
-Lock file: `tools/ink-renderer/Cargo.lock` (99 packages)
+Lock file: `tools/ink-renderer/Cargo.lock` (105 packages)
 
-- MIT OR Apache-2.0: 54
-- MIT: 17
+- MIT OR Apache-2.0: 57
+- MIT: 20
 - Apache-2.0 OR MIT: 10
 - MPL-2.0: 3
 - Zlib OR Apache-2.0 OR MIT: 3
@@ -650,6 +663,7 @@ Lock file: `tools/ink-renderer/Cargo.lock` (99 packages)
 | arrayvec | 0.7.8 | MIT OR Apache-2.0 | crates.io |
 | autocfg | 1.5.1 | Apache-2.0 OR MIT | crates.io |
 | base64 | 0.22.1 | MIT OR Apache-2.0 | crates.io |
+| base64 | 0.23.1 | MIT OR Apache-2.0 | crates.io |
 | bitflags | 2.13.2 | MIT OR Apache-2.0 | crates.io |
 | block-buffer | 0.10.4 | MIT OR Apache-2.0 | crates.io |
 | bumpalo | 3.20.3 | MIT OR Apache-2.0 | crates.io |
@@ -676,9 +690,12 @@ Lock file: `tools/ink-renderer/Cargo.lock` (99 packages)
 | font-types | 0.11.3 | MIT OR Apache-2.0 | crates.io |
 | font-types | 0.12.4 | MIT OR Apache-2.0 | crates.io |
 | fontdb | 0.23.0 | MIT | crates.io |
+| fontdb | 0.24.0 | MIT | crates.io |
 | generic-array | 0.14.7 | MIT | crates.io |
+| harfrust | 0.12.0 | MIT | crates.io |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 | crates.io |
 | imagesize | 0.14.0 | MIT | crates.io |
+| imagesize | 0.15.0 | MIT | crates.io |
 | indexmap | 2.14.2 | Apache-2.0 OR MIT | crates.io |
 | itoa | 1.0.18 | MIT OR Apache-2.0 | crates.io |
 | kurbo | 0.13.1 | Apache-2.0 OR MIT | crates.io |
@@ -700,6 +717,7 @@ Lock file: `tools/ink-renderer/Cargo.lock` (99 packages)
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 | crates.io |
 | quote | 1.0.47 | MIT OR Apache-2.0 | crates.io |
 | read-fonts | 0.39.2 | MIT OR Apache-2.0 | crates.io |
+| read-fonts | 0.41.0 | MIT OR Apache-2.0 | crates.io |
 | read-fonts | 0.43.3 | MIT OR Apache-2.0 | crates.io |
 | roxmltree | 0.21.2 | MIT OR Apache-2.0 | crates.io |
 | rustybuzz | 0.20.1 | MIT | crates.io |
@@ -713,6 +731,7 @@ Lock file: `tools/ink-renderer/Cargo.lock` (99 packages)
 | simplecss | 0.2.2 | Apache-2.0 OR MIT | crates.io |
 | siphasher | 1.0.4 | MIT OR Apache-2.0 | crates.io |
 | skrifa | 0.42.1 | MIT OR Apache-2.0 | crates.io |
+| skrifa | 0.44.0 | MIT OR Apache-2.0 | crates.io |
 | slotmap | 1.1.1 | Zlib | crates.io |
 | smallvec | 1.16.4 | MIT OR Apache-2.0 | crates.io |
 | strict-num | 0.1.1 | MIT | crates.io |
@@ -736,7 +755,7 @@ Lock file: `tools/ink-renderer/Cargo.lock` (99 packages)
 | unicode-script | 0.5.8 | MIT OR Apache-2.0 | crates.io |
 | unicode-segmentation | 1.13.3 | MIT OR Apache-2.0 | crates.io |
 | unicode-vo | 0.1.0 | MIT OR Apache-2.0 | crates.io |
-| usvg | 0.47.0 | Apache-2.0 OR MIT | crates.io |
+| usvg | 0.49.0 | Apache-2.0 OR MIT | crates.io |
 | version_check | 0.9.5 | MIT OR Apache-2.0 | crates.io |
 | write-fonts | 0.48.1 | MIT OR Apache-2.0 | crates.io |
 | xmlwriter | 0.1.0 | MIT | crates.io |
@@ -800,6 +819,7 @@ Lock file: `crates/notes-ink-live/Cargo.lock` (101 packages)
 | generic-array | 0.14.7 | MIT | crates.io |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 | crates.io |
 | imagesize | 0.14.0 | MIT | crates.io |
+| imagesize | 0.15.0 | MIT | crates.io |
 | indexmap | 2.14.2 | Apache-2.0 OR MIT | crates.io |
 | itoa | 1.0.18 | MIT OR Apache-2.0 | crates.io |
 | kurbo | 0.13.1 | Apache-2.0 OR MIT | crates.io |
@@ -822,7 +842,7 @@ Lock file: `crates/notes-ink-live/Cargo.lock` (101 packages)
 | quote | 1.0.47 | MIT OR Apache-2.0 | crates.io |
 | read-fonts | 0.39.2 | MIT OR Apache-2.0 | crates.io |
 | read-fonts | 0.43.3 | MIT OR Apache-2.0 | crates.io |
-| resvg | 0.47.0 | Apache-2.0 OR MIT | crates.io |
+| resvg | 0.49.0 | Apache-2.0 OR MIT | crates.io |
 | rgb | 0.8.53 | MIT | crates.io |
 | roxmltree | 0.21.2 | MIT OR Apache-2.0 | crates.io |
 | rustybuzz | 0.20.1 | MIT | crates.io |
@@ -859,10 +879,9 @@ Lock file: `crates/notes-ink-live/Cargo.lock` (101 packages)
 | unicode-properties | 0.1.4 | MIT OR Apache-2.0 | crates.io |
 | unicode-script | 0.5.8 | MIT OR Apache-2.0 | crates.io |
 | unicode-segmentation | 1.13.3 | MIT OR Apache-2.0 | crates.io |
-| usvg | 0.47.0 | Apache-2.0 OR MIT | crates.io |
+| usvg | 0.49.0 | Apache-2.0 OR MIT | crates.io |
 | version_check | 0.9.5 | MIT OR Apache-2.0 | crates.io |
 | write-fonts | 0.48.1 | MIT OR Apache-2.0 | crates.io |
-| xmlwriter | 0.1.0 | MIT | crates.io |
 | zip | 8.2.0 | MIT | crates.io |
 | zlib-rs | 0.6.8 | Zlib | crates.io |
 | zmij | 1.0.23 | MIT | crates.io |
@@ -870,12 +889,12 @@ Lock file: `crates/notes-ink-live/Cargo.lock` (101 packages)
 
 ## npm: desktop UI
 
-Lock file: `desktop/package-lock.json` (115 packages)
+Lock file: `desktop/package-lock.json` (135 packages)
 
 - MIT: 83
+- Apache-2.0: 25
 - Apache-2.0 OR MIT: 12
 - MPL-2.0: 12
-- Apache-2.0: 5
 - ISC: 2
 - BSD-3-Clause: 1
 
@@ -945,6 +964,26 @@ Lock file: `desktop/package-lock.json` (115 packages)
 | @types/react | 19.3.0 | MIT | runtime (bundled into the UI) |
 | @types/react-dom | 19.3.0 | MIT | runtime (bundled into the UI) |
 | @types/use-sync-external-store | 0.0.6 | MIT | runtime (bundled into the UI) |
+| @typescript/typescript-aix-ppc64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-darwin-arm64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-darwin-x64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-freebsd-arm64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-freebsd-x64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-linux-arm | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-linux-arm64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-linux-loong64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-linux-mips64el | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-linux-ppc64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-linux-riscv64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-linux-s390x | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-linux-x64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-netbsd-arm64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-netbsd-x64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-openbsd-arm64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-openbsd-x64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-sunos-x64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-win32-arm64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
+| @typescript/typescript-win32-x64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
 | @vitejs/plugin-react | 6.1.2 | MIT | dev |
 | csstype | 3.2.3 | MIT | runtime (bundled into the UI) |
 | detect-libc | 2.1.2 | Apache-2.0 | dev |
@@ -964,7 +1003,7 @@ Lock file: `desktop/package-lock.json` (115 packages)
 | lightningcss-win32-arm64-msvc | 1.33.0 | MPL-2.0 | dev, optional/platform |
 | lightningcss-win32-x64-msvc | 1.33.0 | MPL-2.0 | dev, optional/platform |
 | linkifyjs | 4.4.0 | MIT | runtime (bundled into the UI) |
-| lucide-react | 0.577.0 | ISC | runtime (bundled into the UI) |
+| lucide-react | 1.61.0 | ISC | runtime (bundled into the UI) |
 | nanoid | 3.3.20 | MIT | dev |
 | orderedmap | 2.1.1 | MIT | runtime (bundled into the UI) |
 | picocolors | 1.1.1 | ISC | dev |
@@ -992,7 +1031,7 @@ Lock file: `desktop/package-lock.json` (115 packages)
 | scheduler | 0.28.0 | MIT | runtime (bundled into the UI) |
 | source-map-js | 1.2.2 | BSD-3-Clause | dev |
 | tinyglobby | 0.2.17 | MIT | dev |
-| typescript | 5.9.3 | Apache-2.0 | dev |
+| typescript | 7.0.2 | Apache-2.0 | dev |
 | use-sync-external-store | 1.7.0 | MIT | runtime (bundled into the UI) |
 | vite | 8.3.5 | MIT | dev |
 | w3c-keyname | 2.2.8 | MIT | runtime (bundled into the UI) |

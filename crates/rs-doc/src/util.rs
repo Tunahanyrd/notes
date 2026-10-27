@@ -135,7 +135,7 @@ pub fn uuid_bytes(canonical: &str) -> Option<[u8; 16]> {
 
 /// `str(uuid.uuid5(uuid.UUID(namespace), name))` for a canonical namespace.
 pub fn uuid5(namespace: &str, name: &str) -> Option<String> {
-    use sha1::Sha1;
+    use sha1::{Digest as _, Sha1};
     let ns = uuid_bytes(namespace)?;
     let mut hasher = Sha1::new();
     hasher.update(ns);

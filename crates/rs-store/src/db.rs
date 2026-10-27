@@ -419,7 +419,7 @@ impl Db {
         for (i, p) in params.iter().enumerate() {
             stmt.raw_bind_parameter(i + 1, p)?;
         }
-        let cols: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+        let cols: Vec<String> = stmt.column_names().map(|s| s.to_string()).collect();
         let n = cols.len();
         let mut out = Vec::new();
         {

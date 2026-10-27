@@ -48,7 +48,7 @@ misbehaves, `NOTES_MACOS_SANDBOX_EXEC=0` disables only the Seatbelt layer.
 - macOS 13 or 14+ on Apple Silicon (the bundle declares 11.0 as minimum; only
   arm64 is exercised in CI).
 - Xcode Command Line Tools: `xcode-select --install`
-- Rust via rustup (stable, >= 1.85): <https://rustup.rs>
+- Rust via rustup (stable, >= 1.95): <https://rustup.rs>
 - Node.js 24 + npm (e.g. `brew install node@24`)
 - Python 3 (standard library only, for the conformance harness):
   `brew install python`

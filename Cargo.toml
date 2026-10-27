@@ -7,7 +7,7 @@ exclude = ["fuzz"]
 [workspace.package]
 license = "GPL-3.0-or-later"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.95"
 publish = false
 
 [workspace.dependencies]

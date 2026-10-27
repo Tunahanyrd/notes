@@ -16,7 +16,7 @@ base64 = { workspace = true }
 flate2 = { version = "=1.1.10", default-features = false, features = ["zlib"] }
 getrandom = { workspace = true }
 roxmltree = { workspace = true }
-sha1 = { version = "=0.10.7", default-features = false }
+sha1 = { version = "=0.11.0", default-features = false }
 sha2 = { workspace = true }
 rs_doc = { path = "../rs-doc", package = "rs-doc" }
 rs_editor = { path = "../rs-editor", package = "rs-editor" }

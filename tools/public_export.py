@@ -57,6 +57,7 @@ TREE_DIRS = [
 ]
 # Individual files outside TREE_DIRS.
 EXTRA_FILES = [
+    '.gitguardian.yaml',
     # Public docs: format/interop descriptions and contributor docs.
     'docs/ARCHITECTURE.md', 'docs/DOCKER.md', 'docs/MACOS_PORT.md', 'docs/LEGAL.md',
     'docs/EDITOR_FORMAT.md', 'docs/INK_APPLICATION.md', 'docs/INK_CAPTURE_V2.md',
@@ -93,6 +94,7 @@ EXCLUDE_GLOBS = [
     'packaging/autostart/*', 'packaging/systemd/*',  # local examples bound to the old package name
     'packaging/flatpak/.flatpak-builder/*', 'packaging/*/build/*', 'packaging/*/repo/*',
     '*.flatpak', '*.AppImage', '*.deb', '*.rpm', '*.pkg.tar.*',
+    'crates/notes-engine/conformance/golden.old/*',  # backup left by run.py --record
     'reference/*', 'references/*',        # historical Python spec/tests; upstream checkout
     '*/.venv/*', '*/node_modules/*',
     '*.orig', '*.rej', '*.swp', '*~',

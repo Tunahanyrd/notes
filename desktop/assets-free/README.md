@@ -2,7 +2,7 @@
 
 Drop-in replacement for the icon files the UI loads from
 `/windows-assets/<name>.svg` (see `WinIcon` in `src/WindowsChrome.tsx`).
-Every file is rendered from [Lucide](https://lucide.dev) 0.577 (ISC, with
+Every file is rendered from [Lucide](https://lucide.dev) 1.61 (ISC, with
 portions from Feather under MIT; see `LICENSE` in this directory). The file
 names are kept so components do not change. The public repository ships
 these files as `desktop/public/windows-assets/`.

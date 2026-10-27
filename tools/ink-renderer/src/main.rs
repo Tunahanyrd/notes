@@ -178,10 +178,22 @@ fn outline_text(svg:String)->Result<String,&'static str>{
         if faces.resolve(name).is_none(){return Err("text face unavailable");}
         rest=&rest[at+name.len().max(1)..];
     }
+    // sdocx (pinned) builds its database with fontdb 0.23; usvg needs its own
+    // fontdb version. Load the same face bytes into usvg's database and map
+    // each upstream face ID to the face at the same collection index.
+    let mut text_database=usvg::fontdb::Database::new();
+    let mut face_ids=std::collections::HashMap::new();
+    for face in database.faces(){
+        let loaded=database.with_face_data(face.id,|data,index|{
+            let ids=text_database.load_font_source(usvg::fontdb::Source::Binary(std::sync::Arc::new(data.to_vec())));
+            ids.get(index as usize).copied()
+        }).flatten().ok_or("text face unavailable")?;
+        face_ids.insert(face.id,loaded);
+    }
     let mut options=usvg::Options::default();
-    options.fontdb=database.clone();
+    options.fontdb=std::sync::Arc::new(text_database);
     options.font_resolver=usvg::FontResolver{
-        select_font:Box::new(move|font,_|match font.families().first(){Some(usvg::FontFamily::Named(name))=>faces.resolve(name),_=>None}),
+        select_font:Box::new(move|font,_|match font.families().first(){Some(usvg::FontFamily::Named(name))=>faces.resolve(name).and_then(|id|face_ids.get(&id).copied()),_=>None}),
         select_fallback:Box::new(|_,_,_|None),
     };
     let tree=usvg::Tree::from_str(&svg,&options).map_err(|_|"text outline unavailable")?;

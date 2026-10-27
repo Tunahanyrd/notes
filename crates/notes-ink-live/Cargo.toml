@@ -21,7 +21,7 @@ sdocx = { path = "../../references/upstream/sdocx/crates/sdocx", features = ["re
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.149"
 # Same rasterizer and version as the saved-page ink PNGs (crates/rs-render).
-resvg = { version = "=0.47.0", default-features = false }
+resvg = { version = "=0.49.0", default-features = false }
 # Empty font database: strokes need no text, and sdocx's default book would
 # embed its fonts in the WebAssembly module.
 fontdb = { version = "=0.23.0", default-features = false }

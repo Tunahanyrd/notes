@@ -3,7 +3,7 @@
 Canlı kalem önizlemesi, GPL-3.0. Kalemin altındaki çizgi, kayıtlı sayfaların
 kullandığı çiziciyle çizilir: sabitlenmiş **twangodev/sdocx** commit
 `41e9c1099b29a48dc7320501573d7c4858f09303` (`references/upstream/sdocx`,
-`tools/fetch_sdocx.sh`) ve aynı resvg sürümü (`=0.47.0`, crates/rs-render ile
+`tools/fetch_sdocx.sh`) ve aynı resvg sürümü (`=0.49.0`, crates/rs-render ile
 aynı). Algoritma yeniden yazılmadı; burada yalnız yazıcının girdisi taklit edilir:
 
 - `rs-ink` capture nicelemesi (Q5 konum, Q12 basınç, float32 birikim);

@@ -4,6 +4,7 @@
 //! urllib.parse quoting, uuid4/uuid5, secrets).
 use crate::pyjson::{self, Value};
 use sha1::Digest as _;
+use sha2::Digest as _;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};

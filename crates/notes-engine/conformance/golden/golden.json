@@ -20,7 +20,7 @@
  "schemaVersion": 1,
  "toolVersions": {
   "bwrap": "bubblewrap 0.13.1",
-  "ink-render": "0b59cff6e10909439e84082d2d34a8747015f35164217f61d3bb3f10592955f7",
+  "ink-render": "abe097a028c947766589452333f89403de57348b739119261dd24903d1641f51",
   "magick": "Version: ImageMagick 7.1.2-34 Q16-HDRI x86_64 c5d4ca8a0:20261014 https://imagemagick.org",
   "pdftoppm": "pdftoppm version 26.10.0",
   "rsvg-convert": "rsvg-convert version 2.63.3"
@@ -50,7 +50,7 @@
    },
    "toolVersions": {
     "bwrap": "bubblewrap 0.13.1",
-    "ink-render": "0b59cff6e10909439e84082d2d34a8747015f35164217f61d3bb3f10592955f7",
+    "ink-render": "abe097a028c947766589452333f89403de57348b739119261dd24903d1641f51",
     "magick": null,
     "pdftoppm": "pdftoppm version 26.10.0",
     "rsvg-convert": "rsvg-convert version 2.63.3"

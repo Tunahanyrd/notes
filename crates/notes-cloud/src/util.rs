@@ -5,6 +5,7 @@
 use crate::json;
 use notes_host::{Fail, Kind, Val};
 use sha1::Digest as _;
+use sha2::Digest as _;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};

@@ -295,6 +295,20 @@
     },
     {
         "type": "file",
+        "url": "https://registry.npmjs.org/@typescript/typescript-linux-arm64/-/typescript-linux-arm64-7.0.2.tgz",
+        "sha512": "421e1e538ff2df20e39df8e3c8f62284c8f9fce0c8966b7e073bb5ece23e7e24910d6e7b4265394a237addec4f44d24f294cdc73520d6b535776b27e32a1e351",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_typescript_typescript-linux-arm64-7.0.2.tgz"
+    },
+    {
+        "type": "file",
+        "url": "https://registry.npmjs.org/@typescript/typescript-linux-x64/-/typescript-linux-x64-7.0.2.tgz",
+        "sha512": "11875fd9c360eeb8025899f109d27e177577f4ef2285bdfb78702ed4b2bca00162ce04d06cf38aef31c75db3edf2b5f6e023aa3835de237b087f47c25c6ec7fc",
+        "dest": "flatpak-node/tarballs",
+        "dest-filename": "_typescript_typescript-linux-x64-7.0.2.tgz"
+    },
+    {
+        "type": "file",
         "url": "https://registry.npmjs.org/@vitejs/plugin-react/-/plugin-react-6.1.2.tgz",
         "sha512": "7e124d19476c7106b81e4234c45c70a275b28675517823c36d723b147ee39b3a67542ac5408ecf46b85679c3b6eb7eb5d2f3abb3db6bd98e3171ff2e01d1716f",
         "dest": "flatpak-node/tarballs",
@@ -358,10 +372,10 @@
     },
     {
         "type": "file",
-        "url": "https://registry.npmjs.org/lucide-react/-/lucide-react-0.577.0.tgz",
-        "sha512": "e0b8e816fd9e10fc180cf83f0947412504837cfcb35c246b556d57ee3af1fedae0c67c641c58e755920d6f3bf3c6337bd1dc7272139f83e1536300624b7a50e4",
+        "url": "https://registry.npmjs.org/lucide-react/-/lucide-react-1.61.0.tgz",
+        "sha512": "bf64903cf3cd8e7afe06584bf52a6ece6a39c91fa12e47ed7ee1381378dac5d34f8121f484928f70b2413fbc80b5af3b8d034fb121114b9f4f263089fc2a2b04",
         "dest": "flatpak-node/tarballs",
-        "dest-filename": "lucide-react-0.577.0.tgz"
+        "dest-filename": "lucide-react-1.61.0.tgz"
     },
     {
         "type": "file",
@@ -554,10 +568,10 @@
     },
     {
         "type": "file",
-        "url": "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz",
-        "sha512": "8e5d6f6733c38a72ebf5e52ddc9feded5e8580d130f508ef04f772b33f4a7d00c3e357d0ac2d98e2f290762694a454f86d795bd511e12e9a7cc2d9ba3394e04b",
+        "url": "https://registry.npmjs.org/typescript/-/typescript-7.0.2.tgz",
+        "sha512": "f0561abbdea8dcd28e85b8ca8bfa8dbc6fd6e63873c646dd9b9b23f406d9ff94f9b16aa7de12602df1b1dbbb11299593bf2cc23fc74b4414dfe6d05349155434",
         "dest": "flatpak-node/tarballs",
-        "dest-filename": "typescript-5.9.3.tgz"
+        "dest-filename": "typescript-7.0.2.tgz"
     },
     {
         "type": "file",

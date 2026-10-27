@@ -77,7 +77,7 @@ librsvg and ImageMagick are optional runtime tools:
 
 ## Build from source
 
-Requirements: Rust (stable, 1.92+), Node.js 22+, Python 3 (standard library
+Requirements: Rust (stable, 1.95+), Node.js 22+, Python 3 (standard library
 only, for helper scripts such as the conformance harness and branding/license
 checks — the application itself contains no Python), and the Tauri 2 system
 libraries (webkit2gtk-4.1, gtk3,

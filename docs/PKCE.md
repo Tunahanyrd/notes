@@ -41,7 +41,9 @@ algoritma yeniden yazılmadı. `sha2` 0.11.1'in paket manifesti Rust 1.88
 istediğinden projenin 1.85 hedefi için 0.10.9 seçildi. Linux bağımlılıklarının
 bildirdiği MSRV'ler 1.85'i aşmıyor; bazı eski geçişli paketler MSRV bildirmiyor.
 Derleme/test mevcut Rust **1.99.1** ile yapıldı; **Rust 1.85 üzerinde derleme
-henüz doğrulanmadı**. Workspace `rust-version = "1.85"` korunuyor.
+henüz doğrulanmadı**. Workspace `rust-version = "1.85"` korunuyordu.
+2026-10-27 bağımlılık güncellemesinde (parking_lot 0.13 → Rust 1.95, rusqlite 0.41 →
+1.89) workspace `rust-version` 1.95'e çıkarıldı; `sha2` 0.10.9'da kalıyor (ayrı karar).
 
 Doğrulama: altı PKCE testi RFC Appendix B vektörünü, sınır uzunlukları,
 unreserved karakterleri, geçersiz girdi reddini, üretilen değerin boyutunu ve

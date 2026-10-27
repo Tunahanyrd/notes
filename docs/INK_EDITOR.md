@@ -195,7 +195,7 @@ silme/yenileme sözleşmesini kanıtlamaz. Cached belgeler hâlâ reddedilir.
 ## Canlı kalem önizlemesi (2026-10-27)
 
 Çizilen çizgi artık sabit kalınlıklı SVG `polyline` değil: `crates/notes-ink-live`
-(GPL-3.0, sabitlenmiş sdocx + resvg 0.47, WebAssembly) yazıcının saklayacağı
+(GPL-3.0, sabitlenmiş sdocx + resvg 0.49, WebAssembly) yazıcının saklayacağı
 kaydı taklit eder (rs-ink Q5/Q12 nicelemesi, şablon kalem + recipe 3, boş
 sayfada recipe 4) ve sayfa çizicisinin yoluyla ekran ölçeğinde çizer. Arayüz
 modülü Web Worker'da çalıştırır; işlenmemiş son örnekler ve tahmini uç
