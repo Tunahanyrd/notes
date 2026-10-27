@@ -112,7 +112,7 @@ cat > "$config" <<JSON
 {"version":"$version","build":{"beforeBuildCommand":""},"bundle":{"resources":{"../dist/":"desktop/dist/","../../LICENSE":"licenses/LICENSE","../../NOTICE":"licenses/NOTICE"${extra_resources}}}}
 JSON
 debug_flag=(); [ "$profile" = debug ] && debug_flag=(--debug)
-npx tauri build "${debug_flag[@]}" --bundles app --config "$config"
+npx tauri build ${debug_flag[@]+"${debug_flag[@]}"} --bundles app --config "$config"
 
 # --- verification (applied to the built .app and to the copy inside the .dmg)
 verify_app() {

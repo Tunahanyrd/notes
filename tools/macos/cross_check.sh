@@ -59,9 +59,9 @@ export PKG_CONFIG_ALLOW_CROSS=1
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$root/target/xcheck-darwin}
 test_args=(); [ "$tests" = 1 ] && test_args=(--tests)
 echo "==> engine workspace ($target)"
-"$cargo" check --target "$target" --workspace "${test_args[@]}" --manifest-path "$root/Cargo.toml" "${extra[@]}"
+"$cargo" check --target "$target" --workspace ${test_args[@]+"${test_args[@]}"} --manifest-path "$root/Cargo.toml" ${extra[@]+"${extra[@]}"}
 if [ "$desktop" = 1 ]; then
   echo "==> desktop shell ($target)"
-  "$cargo" check --target "$target" --manifest-path "$root/desktop/src-tauri/Cargo.toml" "${extra[@]}"
+  "$cargo" check --target "$target" --manifest-path "$root/desktop/src-tauri/Cargo.toml" ${extra[@]+"${extra[@]}"}
 fi
 echo "macOS cross-check passed (compile only)."
