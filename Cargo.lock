@@ -37,12 +37,6 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "base64"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
-
-[[package]]
-name = "base64"
 version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
@@ -289,9 +283,9 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "imagesize"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09e54e57b4c48b40f7aec75635392b12b3421fa26fe8b4332e63138ed278459c"
+checksum = "65b27460c2c92b037f3f94c538ed9a3342f3fdf923606781629ccb35f82d042a"
 
 [[package]]
 name = "itoa"
@@ -404,7 +398,7 @@ dependencies = [
 name = "notes-cloud"
 version = "0.1.0"
 dependencies = [
- "base64 0.23.1",
+ "base64",
  "flate2",
  "getrandom",
  "libc",
@@ -453,7 +447,7 @@ dependencies = [
 name = "notes-login"
 version = "0.1.0"
 dependencies = [
- "base64 0.23.1",
+ "base64",
  "flate2",
  "getrandom",
  "libc",
@@ -502,7 +496,7 @@ dependencies = [
 name = "notes-protocol"
 version = "0.1.0"
 dependencies = [
- "base64 0.23.1",
+ "base64",
  "getrandom",
  "openssl",
  "roxmltree",
@@ -754,10 +748,11 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "resvg"
-version = "0.47.0"
+version = "0.49.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9be183ad6a216aa96f33e4c8033b0988b8b3ea6fd2359d19af5bac4643fd8e81"
+checksum = "1572844b6727a1bf842190e9947641a68ac44bed83f50afb4bd1407a2564bee8"
 dependencies = [
+ "bytemuck",
  "log",
  "pico-args",
  "rgb",
@@ -788,7 +783,7 @@ dependencies = [
 name = "rs-auth"
 version = "0.1.0"
 dependencies = [
- "base64 0.23.1",
+ "base64",
  "flate2",
  "getrandom",
  "libc",
@@ -803,7 +798,7 @@ dependencies = [
 name = "rs-cloud"
 version = "0.1.0"
 dependencies = [
- "base64 0.23.1",
+ "base64",
  "flate2",
  "getrandom",
  "pyo3",
@@ -827,7 +822,7 @@ dependencies = [
 name = "rs-doc"
 version = "0.1.0"
 dependencies = [
- "base64 0.23.1",
+ "base64",
  "flate2",
  "getrandom",
  "pyo3",
@@ -842,7 +837,7 @@ dependencies = [
 name = "rs-editor"
 version = "0.1.0"
 dependencies = [
- "base64 0.23.1",
+ "base64",
  "pyo3",
  "roxmltree",
  "rs-common",
@@ -867,7 +862,7 @@ dependencies = [
 name = "rs-ink"
 version = "0.1.0"
 dependencies = [
- "base64 0.23.1",
+ "base64",
  "pyo3",
  "roxmltree",
  "rs-common",
@@ -880,7 +875,7 @@ dependencies = [
 name = "rs-ops"
 version = "0.1.0"
 dependencies = [
- "base64 0.23.1",
+ "base64",
  "getrandom",
  "pyo3",
  "roxmltree",
@@ -914,7 +909,7 @@ dependencies = [
 name = "rs-store"
 version = "0.1.0"
 dependencies = [
- "base64 0.23.1",
+ "base64",
  "libc",
  "parking_lot",
  "pyo3",
@@ -1188,13 +1183,11 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 
 [[package]]
 name = "usvg"
-version = "0.47.0"
+version = "0.49.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d46cf96c5f498d36b7a9693bc6a7075c0bb9303189d61b2249b0dc3d309c07de"
+checksum = "d09b73ee83641d390ad7ffd9000f347b16eb128e437675b6ff277ea5c7fcf22c"
 dependencies = [
- "base64 0.22.1",
  "data-url",
- "flate2",
  "imagesize",
  "kurbo",
  "log",
@@ -1205,7 +1198,6 @@ dependencies = [
  "strict-num",
  "svgtypes",
  "tiny-skia-path",
- "xmlwriter",
 ]
 
 [[package]]
@@ -1281,12 +1273,6 @@ name = "windows-link"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
-
-[[package]]
-name = "xmlwriter"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "zeroize"
