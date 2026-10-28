@@ -58,7 +58,8 @@ const exactFrames=(page:Page,points:number)=>page.evaluate(n=>((window as any)._
 test('the live pen stroke is drawn by the renderer: pressure widens it while drawing',async({page})=>{
   await fixture(page);const points=ramp(40);
   const release=await penStroke(page,points,{release:false});
-  await expect.poll(()=>exactFrames(page,points.length),{timeout:10000}).toBeGreaterThan(0);
+  // First stroke of the run: includes compiling the 5 MB renderer module in the worker (slow on CI macOS runners).
+  await expect.poll(()=>exactFrames(page,points.length),{timeout:30000}).toBeGreaterThan(0);
   const light=await liveColumn(page,220),heavy=await liveColumn(page,800);
   expect(light).toBeGreaterThan(0);expect(heavy).toBeGreaterThan(light*1.1);
   // Nothing is drawn as a fixed-width SVG line for this stroke.

@@ -78,6 +78,13 @@ echo "==> engine workspace ($target)"
 "$cargo" check --target "$target" --workspace ${test_args[@]+"${test_args[@]}"} --manifest-path "$root/Cargo.toml" ${extra[@]+"${extra[@]}"}
 if [ "$desktop" = 1 ]; then
   echo "==> desktop shell ($target)"
+  # tauri's build script requires the frontend dir (frontendDist ../dist) to
+  # exist; a CI checkout has no frontend build, and `cargo check` never
+  # bundles it, so a placeholder is enough (removed again afterwards).
+  if [ ! -e "$root/desktop/dist" ]; then
+    mkdir -p "$root/desktop/dist" && : > "$root/desktop/dist/index.html"
+    trap 'rm -rf "$work" "$root/desktop/dist"' EXIT
+  fi
   "$cargo" check --target "$target" --manifest-path "$root/desktop/src-tauri/Cargo.toml" ${extra[@]+"${extra[@]}"}
 fi
 echo "macOS cross-check passed (compile only)."
