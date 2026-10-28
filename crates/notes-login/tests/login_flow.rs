@@ -165,9 +165,21 @@ fn full_sign_in_produces_an_adoptable_session() {
     assert_eq!(profile.get("deviceUniqueID").unwrap().as_str(), Some(format!("PCID:{id}").as_str()));
     let cloud_profile = json::loads(&std::fs::read(session.join("app-cloud-profile.json")).unwrap()).unwrap();
     assert_eq!(cloud_profile.get("clientDeviceId").unwrap().as_str(), Some(id.as_str()));
-    // Handler: engine binary, browser opened on the local landing page.
-    let desktop = std::fs::read_to_string(run.sb.layout.data_home.join("applications/samsung-notes-research-callback.desktop")).unwrap();
-    assert!(desktop.contains("Exec=/usr/lib/samsung-notes/notes-engine __notes-login-callback %u\n"));
+    // Handler: Linux installs the XDG desktop entry running the engine binary;
+    // macOS declares ms-app in the app bundle (Info.plist) and installs nothing
+    // (notes_platform::url_scheme::REGISTRATION). Browser opened on the local
+    // landing page either way (xdg-open / open, both logged as "xdg-open").
+    let entry = run.sb.layout.data_home.join("applications/samsung-notes-research-callback.desktop");
+    match notes_platform::url_scheme::REGISTRATION {
+        notes_platform::url_scheme::Registration::XdgDesktopEntry => {
+            let desktop = std::fs::read_to_string(&entry).unwrap();
+            assert!(desktop.contains("Exec=/usr/lib/samsung-notes/notes-engine __notes-login-callback %u\n"));
+        }
+        notes_platform::url_scheme::Registration::AppBundle => {
+            assert!(!entry.exists(), "no desktop entry on macOS");
+            assert!(run.sb.log("xdg-mime").is_empty(), "no xdg-mime on macOS");
+        }
+    }
     for _ in 0..200 {
         if !run.sb.log("xdg-open").is_empty() {
             break;

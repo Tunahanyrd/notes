@@ -80,7 +80,7 @@ jobs:
       - name: Platform layer contract (incl. Seatbelt write test)
         run: cargo test --locked -p notes-platform
       - name: cargo test (notes-* crates)
-        run: cargo test --locked $ENGINE_CRATES
+        run: cargo test --locked --no-fail-fast $ENGINE_CRATES  # every macOS failure in one run
       - name: cargo test (rs-* crates, PyO3 port cores)
         # Informational until the first green run on macOS: the rs-* unit
         # tests were written on Linux.
@@ -187,6 +187,24 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: desktop/package-lock.json
+      # The live pen tests need desktop/public/ink-live.wasm (same as ci.yml).
+      - name: Rust toolchain (+ wasm32-unknown-unknown)
+        working-directory: .
+        run: |
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          rustup default stable
+      - name: Cache sdocx
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: references/upstream/sdocx
+          key: sdocx-${{ env.SDOCX_COMMIT }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: macos-ink-live
+          workspaces: crates/notes-ink-live -> target
+      - name: Build the live pen WASM (desktop/public/ink-live.wasm)
+        working-directory: .
+        run: tools/fetch_sdocx.sh && tools/build_ink_wasm.sh
       - run: npm ci
       - name: Type check
         run: npx tsc --noEmit

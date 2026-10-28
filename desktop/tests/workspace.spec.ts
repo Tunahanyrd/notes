@@ -71,9 +71,10 @@ test('Windows surfaces use restrained corners and reduced-motion respects naviga
   await page.screenshot({path:'/tmp/notes-settings-corners.png'});
   await page.getByRole('button',{name:'Ayarları kapat'}).click();
   await openNote(page,/Aklımda kalanlar/);
-  await expect(page.locator('.editor-panel')).toHaveCSS('animation-name','editor-enter');
+  // Switching between the list and a note is instant: no panel slide (it read as surfaces "going and coming back").
+  await expect(page.locator('.editor-panel')).toHaveCSS('animation-name','none');
   await page.getByRole('button',{name:'Not listesine dön'}).click();
-  await expect(page.locator('.note-list')).toHaveCSS('animation-name','library-enter');
+  await expect(page.locator('.note-list')).toHaveCSS('animation-name','none');
   await page.emulateMedia({reducedMotion:'reduce'});
   await page.getByRole('button',{name:'Ayarlar',exact:true}).click();
   await expect(dialog).toHaveCSS('animation-name','none');
@@ -134,7 +135,7 @@ test('polling refreshes clean content but preserves dirty drafts when remote rev
   await page.getByLabel('Not içeriği').fill('Korunacak taslak');Object.assign(note,{body:'Daha yeni bulut içeriği',revision:3});
   await page.waitForResponse(async response=>response.url().endsWith('/api/notes/one')&&response.request().method()==='GET'&&(await response.json()).note.revision===3);await expect(page.getByLabel('Not içeriği')).toHaveValue('Korunacak taslak');
   await page.getByRole('button',{name:'Not seçenekleri'}).click();await expect(page.getByRole('button',{name:'Favorilere ekle',exact:true})).toBeDisabled();await expect(page.getByRole('button',{name:'Klasöre taşı',exact:true})).toBeDisabled();await page.getByRole('button',{name:'Not seçenekleri'}).click();
-  await page.keyboard.press('Control+s');await expect(page.getByText(/Notun başka bir sürümü kaydedildi/)).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+s');await expect(page.getByText(/Notun başka bir sürümü kaydedildi/)).toBeVisible();
   await expect(page.getByLabel('Not içeriği')).toHaveValue('Korunacak taslak');
 });
 test('partial bulk failure keeps only failed notes selected and never claims cloud completion',async({page})=>{
@@ -159,19 +160,19 @@ test('secure session, real list/detail and draft survives switching and polling'
   await expect(page.getByLabel('Not içeriği')).toHaveValue('Kaydedilmeyen Türkçe düşünce 🌱');
   await page.waitForTimeout(4200);
   await expect(page.getByLabel('Not içeriği')).toHaveValue('Kaydedilmeyen Türkçe düşünce 🌱');
-  await page.keyboard.press('Control+s');
+  await page.keyboard.press('ControlOrMeta+s');
   await expect(page.getByText('Buluta gönderilmeyi bekliyor',{exact:true})).toBeVisible();
   expect(requests.find(r=>r.method==='PUT')?.data.expectedRevision).toBe(1);
   await page.screenshot({path:'tests/artifacts/workspace-desktop.png',fullPage:true});
 });
 test('typing during serialized save stays dirty and uses updated revision',async({page})=>{
   const {requests}=await setup(page);await openNote(page,/Aklımda kalanlar/);
-  await page.getByLabel('Not içeriği').fill('Birinci');await page.keyboard.press('Control+s');
+  await page.getByLabel('Not içeriği').fill('Birinci');await page.keyboard.press('ControlOrMeta+s');
   await page.getByRole('button',{name:'Not seçenekleri'}).click();
   await expect(page.getByRole('button',{name:'Favorilere ekle',exact:true})).toBeDisabled();
   await page.getByRole('button',{name:'Not seçenekleri'}).click();
   await page.getByLabel('Not içeriği').fill('İkinci');await expect(page.getByRole('button',{name:'Kaydet',exact:true})).toBeEnabled();
-  await page.keyboard.press('Control+s');await expect(page.getByText('Yerel kayıt tamam')).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+s');await expect(page.getByText('Yerel kayıt tamam')).toBeVisible();
   expect(requests.filter(r=>r.method==='PUT').map(r=>r.data.expectedRevision)).toEqual([1,2]);
 });
 test('readonly copy leaves original untouched, favorite and recoverable trash work',async({page})=>{
@@ -253,7 +254,7 @@ test('Windows reference layout captures use synthetic content and local font fac
   const card=await page.locator('.note-thumbnail').first().boundingBox();expect(card?.x).toBe(305);expect(card?.y).toBe(88);expect(card?.width).toBe(125);
   await openNote(page,/LinuxSync-Probe-001/);await expect(page.getByLabel('Not içeriği')).toHaveValue('Android test 001');
   await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:'tests/artifacts/windows-clone-editor.png',fullPage:true});
-  const paper=await page.locator('.document').boundingBox();expect(paper?.width).toBe(718);
+  const paper=await page.locator('.document').boundingBox();expect(paper?.width).toBeCloseTo(718,2); // macOS reports 718.00006 (float layout rounding)
   await expect(page.getByRole('button',{name:'Kalem',exact:true})).toBeDisabled();
   await expect(page.getByLabel('Yazı boyutu')).toHaveCount(0);await expect(page.getByText('Biçimlendirme bu notta henüz kullanılamıyor.',{exact:true})).toBeVisible();
 });
@@ -303,7 +304,7 @@ test('bulk favorites advance existing draft revision without losing unsaved text
   await page.getByRole('button',{name:'Favorilere ekle',exact:true}).click();
   await expect(page.getByRole('button',{name:'Düzenle',exact:true})).toBeVisible();
   await openNote(page,/Aklımda kalanlar/);await expect(page.getByLabel('Not içeriği')).toHaveValue('Toplu seçimden önce korunacak taslak');
-  await page.keyboard.press('Control+s');await expect(page.getByText('Yerel kayıt tamam',{exact:true})).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+s');await expect(page.getByText('Yerel kayıt tamam',{exact:true})).toBeVisible();
   expect(requests.find(r=>r.method==='PUT')?.data.expectedRevision).toBe(2);
 });
 
@@ -351,7 +352,7 @@ test('ink and PDF title editing uses the title-only API and preserves draft acro
   await page.waitForResponse(response=>response.url().endsWith('/api/notes/rich')&&response.request().method()==='GET');
   await expect(page.getByLabel('Not başlığı')).toHaveValue('Düzenlenen kitap başlığı');
   // Ctrl+S only acts once the reopened note's details are loaded (the Save button is enabled then).
-  await expect(page.getByRole('button',{name:'Kaydet',exact:true})).toBeEnabled();await page.keyboard.press('Control+s');
+  await expect(page.getByRole('button',{name:'Kaydet',exact:true})).toBeEnabled();await page.keyboard.press('ControlOrMeta+s');
   await expect(page.getByText('Kaydedilmedi',{exact:true})).toHaveCount(0);
   // The save is asynchronous after Ctrl+S: wait for the request instead of reading the log at once.
   await expect.poll(()=>requests.filter(r=>r.method==='PATCH'&&r.path.endsWith('/title')).map(r=>r.data)).toEqual([{title:'Düzenlenen kitap başlığı',expectedRevision:1}]);
@@ -373,16 +374,16 @@ test('real rich editor selection, formatting, lists, history and revisioned API 
   await page.getByLabel('Yazı boyutu').selectOption('17');await page.getByLabel('Yazı boyutu').selectOption('');await expect(editor.locator('[data-samsung-kind="fontSize"]')).toHaveCount(0);await page.getByLabel('Yazı boyutu').selectOption('17');await page.getByRole('button',{name:'Ortala',exact:true}).click();await page.getByRole('button',{name:'Onay kutusu',exact:true}).click();await page.getByRole('button',{name:'Girintiyi artır',exact:true}).click();
   await expect(editor.locator('p').first()).toHaveAttribute('data-native-bullet','check');await expect(editor.locator('p').first()).toHaveCSS('text-align','center');
   await page.getByRole('button',{name:'Geri al',exact:true}).click();await page.getByRole('button',{name:'Yinele',exact:true}).click();
-  await page.keyboard.press('Control+s');await expect(page.getByText('Kaydedilmedi',{exact:true})).toHaveCount(0);expect(writes).toHaveLength(1);expect(writes[0]).not.toHaveProperty('body');expect(writes[0].expectedRevision).toBe(1);
+  await page.keyboard.press('ControlOrMeta+s');await expect(page.getByText('Kaydedilmedi',{exact:true})).toHaveCount(0);expect(writes).toHaveLength(1);expect(writes[0]).not.toHaveProperty('body');expect(writes[0].expectedRevision).toBe(1);
   expect(model.text).toBe('Merhaba 🌱\nİkinci satır');expect(model.spans).toContainEqual({start:0,end:7,kind:'bold',value:true,interval:3});expect(model.spans).toContainEqual({start:0,end:7,kind:'foregroundColor',value:'#FFFF343B',interval:3});expect(model.spans).toContainEqual({start:0,end:7,kind:'fontSize',value:17,interval:3});expect(model.paragraphs[0]).toMatchObject({index:0,alignment:'center',bullet:{kind:'check',checked:false},indentLevel:{level:1,direction:'ltr'}});
-  await editor.press('Control+End');await page.screenshot({path:'/tmp/notes-rich-editor.png'});await page.reload();await openNote(page,/Aklımda kalanlar/);await expect(page.locator('.rich-document-body span[data-samsung-kind="bold"]')).toHaveText('Merhaba');await expect(page.locator('.rich-document-body p').first()).toHaveAttribute('data-native-bullet','check');
+  await editor.press('ControlOrMeta+End');await page.screenshot({path:'/tmp/notes-rich-editor.png'});await page.reload();await openNote(page,/Aklımda kalanlar/);await expect(page.locator('.rich-document-body span[data-samsung-kind="bold"]')).toHaveText('Merhaba');await expect(page.locator('.rich-document-body p').first()).toHaveAttribute('data-native-bullet','check');
   const beforeZoom=await editor.locator('[data-samsung-kind="fontSize"]').first().boundingBox();await page.getByRole('button',{name:'Yakınlaştır',exact:true}).click();await expect.poll(async()=>{const box=await editor.locator('[data-samsung-kind="fontSize"]').first().boundingBox();return box!.width/beforeZoom!.width;}).toBeGreaterThan(1.09);await page.getByRole('button',{name:'Uzaklaştır',exact:true}).click();
   await page.getByRole('checkbox',{name:'Yapılacak öğesini tamamla'}).click();await expect(page.getByRole('checkbox')).toHaveAttribute('aria-checked','true');
-  await editor.click();await page.keyboard.press('Control+End');await page.keyboard.press('Enter');await page.keyboard.type('Yeni satır');await expect(editor).toHaveAttribute('contenteditable','true');
-  await page.keyboard.press('Control+s');await expect(page.getByText('Kaydedilmedi',{exact:true})).toHaveCount(0);expect(model.paragraphs[0].bullet.checked).toBe(true);expect(model.text).toBe('Merhaba 🌱\nİkinci satır\nYeni satır');
-  await editor.click();await page.keyboard.press('Control+End');await page.keyboard.type(' taslak');unavailable=true;
+  await editor.click();await page.keyboard.press('ControlOrMeta+End');await page.keyboard.press('Enter');await page.keyboard.type('Yeni satır');await expect(editor).toHaveAttribute('contenteditable','true');
+  await page.keyboard.press('ControlOrMeta+s');await expect(page.getByText('Kaydedilmedi',{exact:true})).toHaveCount(0);expect(model.paragraphs[0].bullet.checked).toBe(true);expect(model.text).toBe('Merhaba 🌱\nİkinci satır\nYeni satır');
+  await editor.click();await page.keyboard.press('ControlOrMeta+End');await page.keyboard.type(' taslak');unavailable=true;
   await page.waitForResponse(response=>response.url().endsWith('/api/notes/one/editor')&&response.status()===503);await expect(editor).toHaveAttribute('contenteditable','true');await expect(editor).toContainText('Yeni satır taslak');
-  unavailable=false;await page.keyboard.press('Control+s');await expect(page.getByText('Kaydedilmedi',{exact:true})).toHaveCount(0);expect(model.text).toContain('Yeni satır taslak');expect(writes).toHaveLength(3);
+  unavailable=false;await page.keyboard.press('ControlOrMeta+s');await expect(page.getByText('Kaydedilmedi',{exact:true})).toHaveCount(0);expect(model.text).toContain('Yeni satır taslak');expect(writes).toHaveLength(3);
 });
 test('unsupported native typing anchors keep original rich content read-only instead of flattening it',async({page})=>{
   const {notes,requests}=await setup(page);const note=notes.find(n=>n.id==='rich');note.titleEditable=true;
@@ -394,11 +395,11 @@ test('numbered selections continue on Enter and completed checklists create unch
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   const {notes}=await setup(page);const note=notes.find(n=>n.id==='one');note.body='Bir\nİki';
   await page.route('**/api/notes/one/editor',route=>route.fulfill({json:{schemaVersion:1,capabilities:{titleEdit:true,textEdit:true,richStyle:true,inkEdit:false},model:{schemaVersion:1,text:note.body,spans:[],paragraphs:[]},reason:null,revision:1}}));
-  await openNote(page,/Aklımda kalanlar/);const editor=page.getByLabel('Not içeriği');await expect(editor).toHaveAttribute('contenteditable','true');await editor.click();await page.keyboard.press('Control+a');await page.getByRole('button',{name:'Numaralı liste',exact:true}).click();
+  await openNote(page,/Aklımda kalanlar/);const editor=page.getByLabel('Not içeriği');await expect(editor).toHaveAttribute('contenteditable','true');await editor.click();await page.keyboard.press('ControlOrMeta+a');await page.getByRole('button',{name:'Numaralı liste',exact:true}).click();
   await expect(editor.locator('p').nth(0)).toHaveAttribute('data-native-number','1');await expect(editor.locator('p').nth(1)).toHaveAttribute('data-native-number','2');await expect(editor).toBeFocused();
-  await page.keyboard.press('Control+End');await page.keyboard.press('Enter');await page.keyboard.type('Üç');expect(errors).toEqual([]);await expect(editor.locator('p').nth(2)).toHaveAttribute('data-native-number','3');
+  await page.keyboard.press('ControlOrMeta+End');await page.keyboard.press('Enter');await page.keyboard.type('Üç');expect(errors).toEqual([]);await expect(editor.locator('p').nth(2)).toHaveAttribute('data-native-number','3');
   await page.getByRole('button',{name:'Onay kutusu',exact:true}).click();await page.getByRole('checkbox').click();await expect(page.getByRole('checkbox')).toHaveAttribute('aria-checked','true');
-  await editor.click();await page.keyboard.press('Control+End');await page.keyboard.press('Enter');await expect(editor.locator('p').nth(3)).toHaveAttribute('data-native-checked','false');await expect(editor).toHaveAttribute('contenteditable','true');
+  await editor.click();await page.keyboard.press('ControlOrMeta+End');await page.keyboard.press('Enter');await expect(editor.locator('p').nth(3)).toHaveAttribute('data-native-checked','false');await expect(editor).toHaveAttribute('contenteditable','true');
   await page.keyboard.press('Enter');await expect(editor.locator('p')).toHaveCount(4);await expect(editor.locator('p').nth(3)).toHaveAttribute('data-native-bullet','none');await page.keyboard.type('Normal metin');await expect(editor.locator('p').nth(3)).toHaveText('Normal metin');
 });
 
@@ -484,7 +485,7 @@ test('note right click acts on clicked record without opening it or losing anoth
   const {requests}=await setup(page,async notes=>{notes.find(note=>note.id==='one').folderId='work';notes.find(note=>note.id==='two').folderId='ideas';});
   await openNote(page,/Aklımda kalanlar/);await page.getByLabel('Not içeriği').fill('Başka notta korunacak taslak');await page.getByRole('button',{name:'Not listesine dön'}).click();
   const card=page.getByRole('button',{name:/Hafta sonu için/});await card.click({button:'right'});const menu=page.getByRole('menu',{name:'Not menüsü'});await expect(menu).toBeVisible();await expect(page.locator('.editor-panel')).toBeHidden();
-  await page.keyboard.press('Control+s');await page.keyboard.press('Control+n');await expect(menu).toBeVisible();expect(requests.filter(request=>['PUT','POST','PATCH'].includes(request.method))).toHaveLength(0);
+  await page.keyboard.press('ControlOrMeta+s');await page.keyboard.press('ControlOrMeta+n');await expect(menu).toBeVisible();expect(requests.filter(request=>['PUT','POST','PATCH'].includes(request.method))).toHaveLength(0);
   expect(requests.filter(request=>request.path==='/api/notes/two'&&request.method==='GET')).toHaveLength(0);await expect(menu.getByRole('menuitem')).toHaveText(['Taşı','Paylaş','Sil','Dosya olarak kaydet','Notu çoğalt','Favorilerden çıkar']);await expect(menu.getByRole('menuitem',{name:/Kilitle/})).toHaveCount(0);await menu.getByRole('menuitem',{name:'Taşı',exact:true}).click();await expect(page.getByLabel('Hedef klasör')).toHaveValue('ideas');await page.getByRole('button',{name:'Vazgeç',exact:true}).click();
   expect(requests.filter(request=>request.method==='PATCH')).toHaveLength(0);await card.click({button:'right'});await menu.getByRole('menuitem',{name:'Favorilerden çıkar'}).click();
   await expect.poll(()=>requests.filter(request=>request.method==='PATCH').length).toBe(1);expect(requests.find(request=>request.method==='PATCH')).toMatchObject({path:'/api/notes/two',data:{favorite:false,expectedRevision:1}});
@@ -510,7 +511,7 @@ test('editor completes Samsung editing actions: justify, duplicate with formatti
   await openNote(page,/Aklımda kalanlar/);const editor=page.getByRole('textbox',{name:'Not içeriği'});await expect(editor).toHaveAttribute('contenteditable','true');
   await editor.locator('p').first().click();await page.getByRole('button',{name:'İki yana yasla',exact:true}).click();
   await expect(editor.locator('p').first()).toHaveCSS('text-align','justify');await expect(page.getByRole('button',{name:'İki yana yasla',exact:true})).toHaveAttribute('aria-pressed','true');
-  await page.keyboard.press('Control+s');await expect.poll(()=>writes.length).toBe(1);expect(writes[0].model.paragraphs[0]).toMatchObject({index:0,alignment:'justify'});
+  await page.keyboard.press('ControlOrMeta+s');await expect.poll(()=>writes.length).toBe(1);expect(writes[0].model.paragraphs[0]).toMatchObject({index:0,alignment:'justify'});
   await page.getByRole('button',{name:'Paylaş'}).click();await page.getByRole('button',{name:'Metni panoya kopyala',exact:true}).click();
   await expect(page.getByRole('button',{name:'Metni panoya kopyala',exact:true})).toHaveCount(0);
   expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe('Aklımda kalanlar\n\nMerhaba 🌱\nİkinci satır');

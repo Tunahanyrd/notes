@@ -201,7 +201,7 @@ Without `--no-browser` it opens the UI in your default browser.
 - [ ] open notes: text note, handwriting note, PDF-backed note — page previews appear
       (PDF pages need Poppler; handwriting needs `ink-render`)
 - [ ] thumbnails on cards
-- [ ] right-click menu, keyboard shortcuts (they are **Ctrl**-based, not Cmd — known)
+- [ ] right-click menu, keyboard shortcuts: **⌘** is the primary modifier (⌘N, ⌘S, ⌘B…; Settings shows ⌘⇧F style); physical Control does nothing for app shortcuts
 - [ ] Save as file: TXT and PDF land in `~/Downloads`
 - [ ] draw a stroke and save in the handwriting note (offline: it is queued locally only)
 - [ ] stop with Ctrl+C; restart; the drawing is still pending
@@ -256,7 +256,11 @@ Without `--no-browser` it opens the UI in your default browser.
 - Preview isolation is weaker than on Linux (see above).
 - No parent-death signal; helpers end by timeout if the app crashes.
 - `RLIMIT_AS` and CPU pinning are not applied on macOS.
-- Keyboard shortcuts use Ctrl; macOS users expect Cmd (UI change, not done).
+- Keyboard shortcuts use ⌘ as the primary modifier (stored bindings keep the
+  portable `Ctrl+…` form, so a library moved between Linux and macOS keeps its
+  bindings; Settings displays `⌘⇧F`). Physical Control is left to macOS text
+  navigation. Ctrl/pinch + wheel still zooms. Default ⌘M (indent) and any
+  binding to ⌘H/⌘Q may be taken by the macOS app menu first — report it.
 - The URL scheme works only from the bundled `.app` (not `cargo run`); the
   callback URL passes through `url::Url` before dispatch (normalisation of
   unusual characters is a theoretical risk — report a failed sign-in).

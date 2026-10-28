@@ -17,15 +17,11 @@
 .note-thumbnail{transition:box-shadow 140ms ease,border-color 140ms ease}
 .dropdown{transform-origin:top right;animation:menu-enter 130ms ease-out}
 .modal-backdrop{animation:surface-fade 140ms ease-out}
-.settings-modal{animation:dialog-enter 170ms cubic-bezier(.2,.7,.2,1)}
-.workspace:not(.show-editor) .note-list{animation:library-enter 160ms ease-out}
-.show-editor .editor-panel{animation:editor-enter 170ms ease-out}
+.settings-modal{animation:dialog-enter 150ms cubic-bezier(.2,0,0,1)}
 .document-search,.selection-bar{animation:surface-fade 120ms ease-out}
 @keyframes surface-fade{from{opacity:0}to{opacity:1}}
-@keyframes menu-enter{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
-@keyframes dialog-enter{from{opacity:0;transform:translateY(8px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
-@keyframes library-enter{from{opacity:.55;transform:translateX(-5px)}to{opacity:1;transform:translateX(0)}}
-@keyframes editor-enter{from{opacity:.55;transform:translateX(5px)}to{opacity:1;transform:translateX(0)}}
+@keyframes menu-enter{from{opacity:0}to{opacity:1}}
+@keyframes dialog-enter{from{opacity:0}to{opacity:1}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
 @media print{.page-navigation,.preview-progress,.document-search{display:none!important}.page-document{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
@@ -41,32 +37,32 @@
 .folder-twisty{position:absolute;top:0;height:36px;width:26px;display:grid;place-items:center;color:#777;z-index:1;padding:0}.folder-twisty svg{transition:transform .12s}.folder-twisty svg.expanded{transform:rotate(90deg)}
 body{-webkit-user-select:none;user-select:none;cursor:default}input,textarea,select,[contenteditable="true"],.document-body,.rich-document-body{-webkit-user-select:text;user-select:text}img{-webkit-user-drag:none}
 
-/* elevation + motion: Windows 11 / WinUI values (83ms faster, 167ms fast, 250ms normal; decelerate 0,0,0,1). Only transform, opacity, box-shadow and colours animate. */
-:root{--ease-decel:cubic-bezier(0,0,0,1);--ease-std:cubic-bezier(.33,0,.67,1);--dur-faster:83ms;--dur-fast:167ms;--dur-normal:250ms;--shadow-card:0 1px 2px rgba(0,0,0,.1),0 0 2px rgba(0,0,0,.08);--shadow-card-hover:0 4px 8px rgba(0,0,0,.12),0 0 2px rgba(0,0,0,.1);--shadow-flyout:0 8px 16px rgba(0,0,0,.14),0 0 2px rgba(0,0,0,.12);--shadow-dialog:0 32px 64px rgba(0,0,0,.18),0 0 8px rgba(0,0,0,.12);--shadow-toast:0 8px 16px rgba(0,0,0,.2),0 0 2px rgba(0,0,0,.16);--shadow-paper:0 0 1px rgba(0,0,0,.16),0 2px 6px rgba(0,0,0,.07);--stroke-flyout:rgba(0,0,0,.1)}
+/* elevation + motion: short fades only (83 ms flyouts); nothing slides, lifts or shrinks on open, hover or press — the user felt the earlier slide/scale motion as surfaces "going and coming back". */
+:root{--ease-decel:cubic-bezier(.2,0,0,1);--ease-std:cubic-bezier(.33,0,.67,1);--dur-faster:83ms;--dur-fast:167ms;--dur-normal:250ms;--shadow-card:0 1px 2px rgba(0,0,0,.1),0 0 2px rgba(0,0,0,.08);--shadow-card-hover:0 4px 8px rgba(0,0,0,.12),0 0 2px rgba(0,0,0,.1);--shadow-flyout:0 8px 16px rgba(0,0,0,.14),0 0 2px rgba(0,0,0,.12);--shadow-dialog:0 32px 64px rgba(0,0,0,.18),0 0 8px rgba(0,0,0,.12);--shadow-toast:0 8px 16px rgba(0,0,0,.2),0 0 2px rgba(0,0,0,.16);--shadow-paper:0 0 1px rgba(0,0,0,.16),0 2px 6px rgba(0,0,0,.07);--stroke-flyout:rgba(0,0,0,.1)}
 .icon-button,.command-button,.nav-item,.small-button,.dropdown button,.context-menu button,.text-action,.rail-button,.format-button,.sort-button,.save-button,.selection-bar button,.zoom-controls button,.folder-twisty,.ink-controls button,.settings-sync-button,.settings-view-choices button,.account-login,.account-disconnect,.shortcut-actions button{transition:background-color var(--dur-faster) var(--ease-std),color var(--dur-faster) var(--ease-std),opacity var(--dur-faster) var(--ease-std)}
-.icon-button:active:not(:disabled),.command-button:active:not(:disabled),.nav-item:active:not(:disabled),.small-button:active:not(:disabled),.dropdown button:active:not(:disabled),.context-menu button:active:not(:disabled),.rail-button:active:not(:disabled),.format-button:active:not(:disabled),.sort-button:active:not(:disabled),.selection-bar button:active:not(:disabled),.zoom-controls button:active:not(:disabled),.folder-twisty:active,.ink-controls button:active:not(:disabled),.settings-sync-button:active:not(:disabled),.shortcut-actions button:active:not(:disabled),.account-disconnect:active:not(:disabled){background-color:#00000006;opacity:.8}
+.icon-button:active:not(:disabled),.command-button:active:not(:disabled),.nav-item:active:not(:disabled),.small-button:active:not(:disabled),.dropdown button:active:not(:disabled),.context-menu button:active:not(:disabled),.rail-button:active:not(:disabled),.format-button:active:not(:disabled),.sort-button:active:not(:disabled),.selection-bar button:active:not(:disabled),.zoom-controls button:active:not(:disabled),.folder-twisty:active,.ink-controls button:active:not(:disabled),.settings-sync-button:active:not(:disabled),.shortcut-actions button:active:not(:disabled),.account-disconnect:active:not(:disabled){background-color:#0000000d}
 .nav-item.active:active:not(:disabled),.command-button.active:active:not(:disabled){background-color:#ececed}
-.dropdown{border-color:var(--stroke-flyout);box-shadow:var(--shadow-flyout);animation:flyout-enter var(--dur-fast) var(--ease-decel)}
-.context-menu{box-shadow:var(--shadow-flyout);border-color:var(--stroke-flyout);transform-origin:top left;animation:flyout-enter var(--dur-fast) var(--ease-decel)}
+.dropdown{border-color:var(--stroke-flyout);box-shadow:var(--shadow-flyout);animation:flyout-enter 120ms var(--ease-decel)}
+.context-menu{box-shadow:var(--shadow-flyout);border-color:var(--stroke-flyout);animation:flyout-enter 120ms var(--ease-decel)}
 .modal-backdrop{animation:surface-fade var(--dur-fast) linear}
 .settings-modal,.settings-page.settings-modal{box-shadow:var(--shadow-dialog);animation:dialog-enter var(--dur-normal) var(--ease-decel)}
-@keyframes flyout-enter{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
-@keyframes dialog-enter{from{opacity:0;transform:scale(1.03)}40%{opacity:1}to{opacity:1;transform:none}}
-.workspace:not(.show-editor) .note-list{animation:library-enter var(--dur-fast) var(--ease-decel)}
-.show-editor .editor-panel{animation:editor-enter var(--dur-fast) var(--ease-decel)}
+@keyframes flyout-enter{from{opacity:0}to{opacity:1}}
+@keyframes dialog-enter{from{opacity:0}to{opacity:1}}
+
+
 .note-thumbnail{box-shadow:var(--shadow-card);transition:box-shadow var(--dur-fast) var(--ease-decel),transform var(--dur-fast) var(--ease-decel),border-color var(--dur-faster) var(--ease-std)}
-.note-row:hover:not(:disabled) .note-thumbnail{box-shadow:0 0 0 2px #d4d4d8,var(--shadow-card-hover);transform:translateY(-1px)}
-.note-row:active:not(:disabled) .note-thumbnail{box-shadow:0 0 0 2px #cfcfd3,var(--shadow-card);transform:scale(.97);transition-duration:var(--dur-faster)}
+.note-row:hover:not(:disabled) .note-thumbnail{box-shadow:0 0 0 2px #d4d4d8,var(--shadow-card-hover)}
+.note-row:active:not(:disabled) .note-thumbnail{box-shadow:0 0 0 2px #cfcfd3,var(--shadow-card);transition-duration:var(--dur-faster)}
 .page-sheet{box-shadow:var(--shadow-paper)}
 .folder-twisty svg{transition:transform var(--dur-fast) var(--ease-decel)}
 .folder-entry{animation:folder-enter var(--dur-fast) var(--ease-decel)}
-@keyframes folder-enter{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@keyframes folder-enter{from{opacity:0}to{opacity:1}}
 .toast{box-shadow:var(--shadow-toast);animation:toast-enter var(--dur-normal) var(--ease-decel)}
-@keyframes toast-enter{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}
+@keyframes toast-enter{from{opacity:0;transform:translate(-50%,0)}to{opacity:1;transform:translate(-50%,0)}}
 .alert,.conflict-panel,.editor-format-reason{animation:surface-fade var(--dur-fast) linear}
 .zoom-controls{box-shadow:var(--shadow-card)}
 .text-tools:not(.closed)>*{animation:panel-enter var(--dur-fast) var(--ease-decel)}
-@keyframes panel-enter{from{opacity:0;transform:translateX(6px)}to{opacity:1;transform:none}}
+@keyframes panel-enter{from{opacity:0}to{opacity:1}}
 .pen-styles button{transition:border-color var(--dur-faster) var(--ease-std),box-shadow var(--dur-faster) var(--ease-std),background-color var(--dur-faster) var(--ease-std)}
 .pen-styles button:hover:not(:disabled):not(.selected){border-color:#c4c4c8}
 .color-palette button{transition:opacity var(--dur-faster) var(--ease-std),box-shadow var(--dur-faster) var(--ease-std)}

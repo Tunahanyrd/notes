@@ -69,9 +69,9 @@ test('undo right after a drag cancels the unsaved move without any Cloud request
   await expect(page.locator('.editor-footer')).toContainText('taşınmak üzere');
   await rail(page).getByRole('button',{name:'Geri al',exact:true}).click();
   await expect(page.locator('.editor-footer')).not.toContainText('taşınmak üzere');
-  const redo=rail(page).getByRole('button',{name:'Yinele',exact:true});await expect(redo).toBeEnabled();await expect(redo).toHaveAttribute('title','Yinele (Ctrl+Y)');
-  await page.keyboard.press('Control+y');await expect(page.locator('.editor-footer')).toContainText('taşınmak üzere');
-  await page.keyboard.press('Control+z');await expect(page.locator('.editor-footer')).not.toContainText('taşınmak üzere');
+  const redo=rail(page).getByRole('button',{name:'Yinele',exact:true});await expect(redo).toBeEnabled();await expect(redo).toHaveAttribute('title',process.platform==='darwin'?'Yinele (⌘⇧Z)':'Yinele (Ctrl+Y)');
+  await page.keyboard.press('ControlOrMeta+y');await expect(page.locator('.editor-footer')).toContainText('taşınmak üzere');
+  await page.keyboard.press('ControlOrMeta+z');await expect(page.locator('.editor-footer')).not.toContainText('taşınmak üzere');
   await page.waitForTimeout(2200);expect(requests.filter(r=>r.method==='PUT')).toHaveLength(0);
 });
 test('Delete erases the lasso selection through the erase job',async({page})=>{

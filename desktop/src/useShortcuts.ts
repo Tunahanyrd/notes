@@ -37,6 +37,12 @@ export const SHORTCUT_ACTIONS=[
 export type ShortcutAction=typeof SHORTCUT_ACTIONS[number]['id'];
 export type ShortcutBindings=Record<ShortcutAction,string>;
 export interface ShortcutDocument {schemaVersion:2;bindings:ShortcutBindings}
+/**
+ * macOS: the stored "Ctrl+" prefix means the platform's primary modifier, which
+ * is Command (⌘) there; the physical Control key is left to macOS text
+ * navigation (Ctrl+A/E/K…). Bindings stay one portable format on every OS.
+ */
+export const IS_MAC=typeof navigator!=='undefined'&&/Mac|iPhone|iPad|iPod/.test(navigator.platform||'');
 export const DEFAULT_SHORTCUTS:Readonly<ShortcutBindings>={
   newNote:'Ctrl+N',searchNotes:'Ctrl+K',saveNote:'Ctrl+S',
   zoomIn:'Ctrl+Plus',zoomOut:'Ctrl+Minus',readingMode:'Alt+Enter',fullScreen:'Alt+F',penSettings:'Ctrl+T',pageSettings:'Alt+P',printNote:'Ctrl+Shift+P',
@@ -48,7 +54,7 @@ export const FIXED_SHORTCUTS=[
   {keys:'Tab / Shift+Tab',label:'Sonraki / önceki düğmeyi seç'},
   {keys:'Enter',label:'Okuma modundan düzenlemeye geç'},
   {keys:'Ctrl + fare tekerleği',label:'Yakınlaştır / uzaklaştır'},
-  {keys:'Ctrl+Z / Ctrl+Y',label:'Geri al / yinele (metin ve çizim)'},
+  {keys:IS_MAC?'⌘Z / ⌘⇧Z':'Ctrl+Z / Ctrl+Y',label:'Geri al / yinele (metin ve çizim)'},
   {keys:'Menü tuşu / Shift+F10',label:'Seçili kartın sağ tık menüsü'},
   {keys:'Esc',label:'Menüyü veya pencereyi kapat'},
 ] as const;
@@ -56,13 +62,18 @@ export const FIXED_SHORTCUTS=[
 const RESERVED=new Set(['Ctrl+A','Ctrl+C','Ctrl+V','Ctrl+X','Ctrl+Z','Ctrl+Y','Ctrl+Shift+Z','Ctrl+Q','Ctrl+W','Ctrl+Shift+N','Ctrl+Shift+K','Ctrl+Shift+I','Ctrl+Shift+V']);
 const CHORD=/^(?:Ctrl\+(?:Alt\+)?|Alt\+)(?:Shift\+)?(?:[A-Z0-9]|Plus|Minus|Slash|BracketLeft|BracketRight|Comma|Period|Quote|Semicolon|Enter)$/;
 const SYMBOLS:Record<string,string>={Plus:'+',Minus:'-',Slash:'/',BracketLeft:'[',BracketRight:']',Comma:',',Period:'.',Quote:"'",Semicolon:';'};
-export function formatShortcut(value:string):string {
+const MAC_MODIFIERS:Record<string,string>={Ctrl:'⌘',Alt:'⌥',Shift:'⇧'};
+/** Display form: "Ctrl+Shift+F" (Linux/Windows) or "⌘⇧F" (macOS). */
+export function formatShortcut(value:string,mac=IS_MAC):string {
   if(!value)return 'Atanmadı';
   const parts=value.split('+');const key=parts.pop()!;
+  if(mac)return parts.map(p=>MAC_MODIFIERS[p]??p).join('')+(SYMBOLS[key]??key);
   return [...parts,SYMBOLS[key]??key].join('+');
 }
-export function validateShortcut(value:string):string|null {
-  if(!CHORD.test(value))return 'Ctrl veya Alt ile bir harf, rakam ya da + - / [ ] , . ; \' Enter tuşu kullanın. İsterseniz Shift ekleyebilirsiniz.';
+/** "Ctrl veya Alt" / "⌘ veya ⌥" for help and error texts. */
+export function modifierWords(mac=IS_MAC):string {return mac?'⌘ veya ⌥':'Ctrl veya Alt';}
+export function validateShortcut(value:string,mac=IS_MAC):string|null {
+  if(!CHORD.test(value))return `${modifierWords(mac)} ile bir harf, rakam ya da + - / [ ] , . ; ' Enter tuşu kullanın. İsterseniz Shift ekleyebilirsiniz.`;
   if(RESERVED.has(value))return 'Bu birleşim sistem, pano veya geri alma için ayrılmış. Başka bir birleşim seçin.';
   return null;
 }
@@ -89,8 +100,10 @@ export function readShortcutDocument(value:unknown):ShortcutBindings {
 // Character first (layout aware) for symbols; physical position for letters/digits, as Windows virtual keys.
 const BY_KEY:Record<string,string>={'=':'Plus','-':'Minus','/':'Slash','[':'BracketLeft',']':'BracketRight',',':'Comma','.':'Period',"'":'Quote',';':'Semicolon'};
 const BY_CODE:Record<string,string>={Equal:'Plus',NumpadAdd:'Plus',Minus:'Minus',NumpadSubtract:'Minus',Slash:'Slash',NumpadDivide:'Slash',BracketLeft:'BracketLeft',BracketRight:'BracketRight',Comma:'Comma',Period:'Period',Quote:'Quote',Semicolon:'Semicolon',Enter:'Enter',NumpadEnter:'Enter'};
-export function shortcutFromEvent(event:Pick<KeyboardEvent,'key'|'code'|'ctrlKey'|'shiftKey'|'altKey'|'metaKey'|'getModifierState'>):string {
-  if(event.metaKey||event.getModifierState('AltGraph'))return '';
+export function shortcutFromEvent(event:Pick<KeyboardEvent,'key'|'code'|'ctrlKey'|'shiftKey'|'altKey'|'metaKey'|'getModifierState'>,mac=IS_MAC):string {
+  // Primary modifier: Ctrl (Linux/Windows) or ⌘ (macOS); the other one never matches.
+  const primary=mac?event.metaKey:event.ctrlKey,other=mac?event.ctrlKey:event.metaKey;
+  if(other||event.getModifierState('AltGraph'))return '';
   let shift=event.shiftKey,key='';
   const physical=/^Key([A-Z])$/.exec(event.code)||/^Digit([0-9])$/.exec(event.code);
   // "+" is a shifted key on most layouts; Windows treats Ctrl + "+" the same way.
@@ -100,7 +113,7 @@ export function shortcutFromEvent(event:Pick<KeyboardEvent,'key'|'code'|'ctrlKey
   else if(BY_CODE[event.code])key=BY_CODE[event.code];
   else if(/^[a-z0-9]$/i.test(event.key))key=event.key.toUpperCase();
   if(!key)return '';
-  return `${event.ctrlKey?'Ctrl+':''}${event.altKey?'Alt+':''}${shift?'Shift+':''}${key}`;
+  return `${primary?'Ctrl+':''}${event.altKey?'Alt+':''}${shift?'Shift+':''}${key}`;
 }
 // The rich editor's own formatting chords; when re-bound they must not fall through to native contenteditable formatting.
 const NATIVE_FORMAT=new Set(['Ctrl+B','Ctrl+I','Ctrl+U']);

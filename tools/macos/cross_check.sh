@@ -9,8 +9,8 @@
 #   CROSS_TARGET=x86_64-apple-darwin tools/macos/cross_check.sh --desktop   # Intel
 #
 # Needs: a rustup toolchain with `rustup target add aarch64-apple-darwin`
-# (override with CARGO=/path/to/cargo RUSTC=/path/to/rustc), clang, and
-# OpenSSL headers (only for openssl-sys version detection).
+# (override with CARGO=/path/to/cargo RUSTC=/path/to/rustc) and clang. No
+# OpenSSL for the Apple target is needed (stub version headers, see below).
 # This is a compile check only; real behaviour is tested on macOS
 # (.github/workflows/macos.yml, docs/MACOS_PORT.md).
 set -euo pipefail
@@ -49,11 +49,27 @@ for a in "\$@"; do [ "\$prev" = "-o" ] && out="\$a"; prev="\$a"; done
 exec clang --target=$clang_target "\$@"
 WRAP
 chmod +x "$cc"
-openssl_inc=${OPENSSL_INCLUDE_DIR:-/usr/include}
+# openssl-sys only preprocesses <openssl/opensslv.h> + <openssl/opensslconf.h>
+# to learn the version (nothing is linked by `cargo check`). Host headers are
+# not usable for an Apple target (Debian/Ubuntu keep opensslconf.h in the
+# multiarch dir), so describe the OpenSSL 3.x a macOS build links (Homebrew
+# openssl@3) with two stub headers. Override with OPENSSL_INCLUDE_DIR.
+stub="$work/openssl-stub"
+mkdir -p "$stub/include/openssl" "$stub/lib"
+cat > "$stub/include/openssl/opensslv.h" <<'H'
+#define OPENSSL_VERSION_MAJOR 3
+#define OPENSSL_VERSION_MINOR 0
+#define OPENSSL_VERSION_PATCH 0
+#define OPENSSL_VERSION_NUMBER 0x30000000L
+H
+: > "$stub/include/openssl/opensslconf.h"
+# openssl-sys also requires the library files to exist (never linked here).
+for lib in libssl libcrypto; do : > "$stub/lib/$lib.dylib"; : > "$stub/lib/$lib.a"; done
+openssl_inc=${OPENSSL_INCLUDE_DIR:-$stub/include}
 export RUSTC="$rustc"
 triple_env=$(printf %s "$target" | tr - _)
 export "CC_$triple_env=$cc" "AR_$triple_env=ar"
-export OPENSSL_DIR=${OPENSSL_DIR:-/usr} OPENSSL_INCLUDE_DIR="$openssl_inc" OPENSSL_LIB_DIR=${OPENSSL_LIB_DIR:-/usr/lib}
+export OPENSSL_DIR=${OPENSSL_DIR:-$stub} OPENSSL_INCLUDE_DIR="$openssl_inc" OPENSSL_LIB_DIR=${OPENSSL_LIB_DIR:-$stub/lib}
 export PYO3_CROSS=1 PYO3_CROSS_PYTHON_VERSION=${PYO3_CROSS_PYTHON_VERSION:-3.12}
 export PKG_CONFIG_ALLOW_CROSS=1
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$root/target/xcheck-darwin}

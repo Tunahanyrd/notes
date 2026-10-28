@@ -57,6 +57,9 @@ test('settings narrow layout stays bounded, keyboard close restores focus',async
   const dialog=page.getByRole('dialog',{name:'Ayarlar',exact:true});
   await expect(page.getByRole('button',{name:'Şimdi eşitle',exact:true})).toBeDisabled();
   await expect(page.getByRole('button',{name:'Izgara',exact:true})).toHaveAttribute('aria-pressed','true');
+  // Measure the settled layout: dialog-enter starts at scale(1.03), so a box read
+  // mid-animation is 3 % larger (seen on slower macOS runners).
+  await dialog.evaluate(el=>Promise.all(el.getAnimations().map(animation=>animation.finished)));
   const bounds=await dialog.boundingBox();expect(bounds).not.toBeNull();expect(bounds!.x).toBeGreaterThanOrEqual(0);expect(bounds!.x+bounds!.width).toBeLessThanOrEqual(390);expect(bounds!.height).toBeLessThanOrEqual(844);
   expect(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
   await page.getByLabel('Varsayılan yakınlaştırma',{exact:true}).scrollIntoViewIfNeeded();

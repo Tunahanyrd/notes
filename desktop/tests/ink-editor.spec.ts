@@ -72,7 +72,7 @@ test('unsupported writer never becomes enabled',async({page})=>{
 
 test('pointer cancellation discards only the unfinished stroke and keeps completed draft strokes',async({page})=>{
   const {requests}=await fixture(page);await page.locator('.tool-rail').getByRole('button',{name:'Kalem',exact:true}).click();await expect(page.getByLabel('Çizim alanı')).toHaveClass(/drawing/);await page.locator('.tool-rail').getByRole('button',{name:'Metin modu',exact:true}).click();await expect(page.getByLabel('Çizim alanı')).not.toHaveClass(/drawing/);await draw(page);const svg=page.getByLabel('Çizim alanı'),box=(await svg.boundingBox())!;
-  await page.mouse.move(box.x+80,box.y+90);await page.mouse.down();await page.mouse.move(box.x+120,box.y+130);await page.keyboard.press('Control+s');await expect(page.locator('.save-button')).toBeDisabled();
+  await page.mouse.move(box.x+80,box.y+90);await page.mouse.down();await page.mouse.move(box.x+120,box.y+130);await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.save-button')).toBeDisabled();
   await svg.dispatchEvent('pointercancel',{pointerId:99});await expect(page.locator('.save-button')).toBeDisabled();
   await svg.dispatchEvent('pointercancel',{pointerId:1});await page.mouse.up();await expect(page.getByText('1 çizgi kaydedilmedi')).toBeVisible();await expect(svg.locator('polyline')).toHaveCount(1);expect(requests.filter(request=>request.method==='PUT')).toHaveLength(0);
 });

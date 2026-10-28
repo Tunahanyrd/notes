@@ -1,5 +1,10 @@
 import {test,expect,type Page} from '@playwright/test';
-import {DEFAULT_SHORTCUTS,formatShortcut,shortcutFromEvent,validateBindings,validateShortcut} from '../src/useShortcuts';
+import {DEFAULT_SHORTCUTS,formatShortcut,modifierWords,shortcutFromEvent,validateBindings,validateShortcut} from '../src/useShortcuts';
+// The browser runs on the test host: macOS uses ⌘ as the primary modifier
+// (stored bindings keep the portable "Ctrl+" form; display is ⌘⇧…).
+// Key presses use Playwright's ControlOrMeta for the same reason.
+const MAC=process.platform==='darwin';
+const shown=(binding:string)=>formatShortcut(binding,MAC);
 const TOKEN='synthetic_shortcut_test_session_123456';
 async function setup(page:Page,options:{rich?:boolean;statusDelay?:number}={}){
   let bindings={...DEFAULT_SHORTCUTS};let statusDelay=options.statusDelay??0;let saves=0,creates=0,writes=0;let failWrite=false;let shortcutReads=0;
@@ -46,80 +51,86 @@ test('shortcut validation rejects conflicts, text keys and reserved chords',()=>
   for(const binding of ['Ctrl+Shift+F','Ctrl+Shift+G','Ctrl+Shift+S','Ctrl+Alt+N','Alt+Enter','Ctrl+Plus','Ctrl+Shift+7','Ctrl+BracketLeft','Ctrl+1'])expect(validateShortcut(binding)).toBeNull();
   expect(validateBindings({...DEFAULT_SHORTCUTS,bold:'',italic:''})).toBeNull();
   expect(Object.values(DEFAULT_SHORTCUTS).filter(Boolean)).toHaveLength(new Set(Object.values(DEFAULT_SHORTCUTS)).size);
-  expect(formatShortcut('Ctrl+BracketRight')).toBe('Ctrl+]');expect(formatShortcut('')).toBe('Atanmadı');
-  const key=(init:Partial<KeyboardEvent>)=>shortcutFromEvent({ctrlKey:false,shiftKey:false,altKey:false,metaKey:false,getModifierState:()=>false,key:'',code:'',...init} as any);
+  expect(formatShortcut('Ctrl+BracketRight',false)).toBe('Ctrl+]');expect(formatShortcut('',false)).toBe('Atanmadı');
+  expect(formatShortcut('Ctrl+BracketRight',true)).toBe('⌘]');expect(formatShortcut('Ctrl+Shift+F',true)).toBe('⌘⇧F');expect(formatShortcut('Alt+Enter',true)).toBe('⌥Enter');
+  const key=(init:Partial<KeyboardEvent>)=>shortcutFromEvent({ctrlKey:false,shiftKey:false,altKey:false,metaKey:false,getModifierState:()=>false,key:'',code:'',...init} as any,false);
+  // Linux/Windows: Meta never matches. macOS: ⌘ is the primary modifier, physical Control never matches.
+  expect(key({key:'n',code:'KeyN',metaKey:true})).toBe('');
+  const mac=(init:Partial<KeyboardEvent>)=>shortcutFromEvent({ctrlKey:false,shiftKey:false,altKey:false,metaKey:false,getModifierState:()=>false,key:'',code:'',...init} as any,true);
+  expect(mac({key:'b',code:'KeyB',metaKey:true})).toBe('Ctrl+B');expect(mac({key:'s',code:'KeyS',metaKey:true,shiftKey:true})).toBe('Ctrl+Shift+S');
+  expect(mac({key:'b',code:'KeyB',ctrlKey:true})).toBe('');expect(mac({key:'Enter',code:'Enter',altKey:true})).toBe('Alt+Enter');
   expect(key({key:'=',code:'Equal',ctrlKey:true})).toBe('Ctrl+Plus');expect(key({key:'+',code:'Equal',ctrlKey:true,shiftKey:true})).toBe('Ctrl+Plus');
   expect(key({key:'-',code:'Equal',ctrlKey:true})).toBe('Ctrl+Minus');expect(key({key:'/',code:'Digit7',ctrlKey:true,shiftKey:true})).toBe('Ctrl+Shift+7');
   expect(key({key:'ğ',code:'BracketLeft',ctrlKey:true})).toBe('Ctrl+BracketLeft');expect(key({key:'Enter',code:'Enter',altKey:true})).toBe('Alt+Enter');
 });
 test('remapped create and search persist after reload and original shortcut no longer creates',async({page})=>{
   const fixture=await setup(page);await fixture.settings();
-  await remap(page,'Yeni not oluştur','Control+Shift+F');
-  await remap(page,'Notlarda ara','Control+Shift+G');
+  await remap(page,'Yeni not oluştur','ControlOrMeta+Shift+F');
+  await remap(page,'Notlarda ara','ControlOrMeta+Shift+G');
   expect(fixture.counts().creates).toBe(0);
   await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();
   await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toBeVisible();
   expect(fixture.bindings().newNote).toBe('Ctrl+Shift+F');
   await page.reload();await fixture.settings();
-  await expect(page.getByLabel('Yeni not oluştur kısayolu')).toHaveValue('Ctrl+Shift+F');
+  await expect(page.getByLabel('Yeni not oluştur kısayolu')).toHaveValue(shown('Ctrl+Shift+F'));
   await page.locator('.settings-page-scroll').evaluate(e=>{e.scrollTop=e.scrollHeight;});
   await page.locator('.settings-page').evaluate(e=>Promise.all(e.getAnimations().map(a=>a.finished)));
   await page.screenshot({path:'/tmp/samsung-shortcuts-synthetic.png'});
   await page.getByRole('button',{name:'Ayarları kapat'}).click();
-  await page.evaluate(()=>window.dispatchEvent(new KeyboardEvent('keydown',{key:'n',code:'KeyN',ctrlKey:true,bubbles:true,cancelable:true})));
+  await page.evaluate(mac=>window.dispatchEvent(new KeyboardEvent('keydown',{key:'n',code:'KeyN',ctrlKey:!mac,metaKey:mac,bubbles:true,cancelable:true})),MAC);
   expect(fixture.counts().creates).toBe(0);
-  await page.keyboard.press('Control+Shift+F');await expect(page.getByRole('textbox',{name:'Not başlığı'})).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+Shift+F');await expect(page.getByRole('textbox',{name:'Not başlığı'})).toBeVisible();
   expect(fixture.counts().creates).toBe(1);
-  await page.keyboard.press('Control+Shift+G');
+  await page.keyboard.press('ControlOrMeta+Shift+G');
   await expect(page.getByRole('textbox',{name:'Notlarında ara'})).toBeFocused();
 });
 test('remapped save writes the actual current note and displays its shortcut',async({page})=>{
   const fixture=await setup(page);await fixture.settings();
-  await remap(page,'Notu bu cihaza kaydet','Control+Shift+S');
+  await remap(page,'Notu bu cihaza kaydet','ControlOrMeta+Shift+S');
   await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();
   await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toBeVisible();
   await page.getByRole('button',{name:'Ayarları kapat'}).click();
-  await page.keyboard.press('Control+N');
+  await page.keyboard.press('ControlOrMeta+N');
   await expect(page.getByRole('textbox',{name:'Not başlığı'})).toBeEditable();
   await page.getByRole('textbox',{name:'Not başlığı'}).fill('Kısayolla kaydedilen test notu');
-  await expect(page.getByRole('button',{name:'Kaydet',exact:true})).toHaveAttribute('title',/Ctrl\+Shift\+S/);
-  await page.keyboard.press('Control+Shift+S');
+  await expect(page.getByRole('button',{name:'Kaydet',exact:true})).toHaveAttribute('title',new RegExp(shown('Ctrl+Shift+S').replace(/[+]/g,'\\+')));
+  await page.keyboard.press('ControlOrMeta+Shift+S');
   await expect.poll(()=>fixture.counts().saves).toBe(1);
 });
 test('shortcut editor rejects duplicate, single letter and system keys without sending preferences',async({page})=>{
   const fixture=await setup(page);await fixture.settings();
-  await remap(page,'Yeni not oluştur','Control+K');await expect(page.locator('.shortcut-error')).toContainText('kullanılıyor');
-  await expect(page.getByLabel('Yeni not oluştur kısayolu')).toHaveValue('Ctrl+N');
-  await remap(page,'Yeni not oluştur','n');await expect(page.locator('.shortcut-error')).toContainText('Ctrl veya Alt ile');
-  await remap(page,'Yeni not oluştur','Control+Q');await expect(page.locator('.shortcut-error')).toContainText('ayrılmış');
+  await remap(page,'Yeni not oluştur','ControlOrMeta+K');await expect(page.locator('.shortcut-error')).toContainText('kullanılıyor');
+  await expect(page.getByLabel('Yeni not oluştur kısayolu')).toHaveValue(shown('Ctrl+N'));
+  await remap(page,'Yeni not oluştur','n');await expect(page.locator('.shortcut-error')).toContainText(`${modifierWords(MAC)} ile`);
+  await remap(page,'Yeni not oluştur','ControlOrMeta+Q');await expect(page.locator('.shortcut-error')).toContainText('ayrılmış');
   expect(fixture.counts()).toEqual({saves:0,creates:0,writes:0});
 });
 test('restore defaults is explicit, saved and persists through a reload',async({page})=>{
   const fixture=await setup(page);await fixture.settings();
-  await remap(page,'Yeni not oluştur','Control+Shift+F');await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();
+  await remap(page,'Yeni not oluştur','ControlOrMeta+Shift+F');await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();
   await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toBeVisible();
   await page.getByRole('button',{name:'Varsayılanları kullan',exact:true}).click();
   expect(fixture.bindings().newNote).toBe('Ctrl+Shift+F');
   await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();
   await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toBeVisible();
   await page.reload();await fixture.settings();
-  await expect(page.getByLabel('Yeni not oluştur kısayolu')).toHaveValue('Ctrl+N');
+  await expect(page.getByLabel('Yeni not oluştur kısayolu')).toHaveValue(shown('Ctrl+N'));
   expect(fixture.counts().writes).toBe(2);
 });
 test('failed write is never shown as saved and can reload authoritative settings',async({page})=>{
   const fixture=await setup(page);await fixture.settings();fixture.fail();
-  await remap(page,'Yeni not oluştur','Control+Shift+F');await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();
+  await remap(page,'Yeni not oluştur','ControlOrMeta+Shift+F');await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();
   await expect(page.locator('.shortcut-error')).toContainText('kaydı doğrulanamadı');
   await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toHaveCount(0);
   await page.getByRole('button',{name:'Yeniden yükle',exact:true}).click();
-  await expect(page.getByLabel('Yeni not oluştur kısayolu')).toHaveValue('Ctrl+N');
+  await expect(page.getByLabel('Yeni not oluştur kısayolu')).toHaveValue(shown('Ctrl+N'));
   expect(fixture.counts().writes).toBe(1);
 });
 
 test('settings list every Windows shortcut group and unassigning a binding is saved',async({page})=>{
   const fixture=await setup(page);await fixture.settings();
   for(const name of ['Genel','Not görünümü','Metin biçimlendirme','Sabit kısayollar'])await expect(page.locator('.keyboard-shortcuts').getByRole('region',{name,exact:true})).toBeVisible();
-  await expect(page.getByLabel('Kalın kısayolu')).toHaveValue('Ctrl+B');await expect(page.getByLabel('Yakınlaştır kısayolu')).toHaveValue('Ctrl++');
+  await expect(page.getByLabel('Kalın kısayolu')).toHaveValue(shown('Ctrl+B'));await expect(page.getByLabel('Yakınlaştır kısayolu')).toHaveValue(shown('Ctrl+Plus'));
   await page.getByRole('button',{name:'Kısayolu kaldır: Notu yazdır'}).click();await expect(page.getByLabel('Notu yazdır kısayolu')).toHaveValue('Atanmadı');
   await remap(page,'Okuma modunu aç/kapat','Alt+Shift+R');
   await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toBeVisible();
@@ -128,39 +139,54 @@ test('settings list every Windows shortcut group and unassigning a binding is sa
 test('Windows view shortcuts toggle reading mode, zoom, tools and print in the open note',async({page})=>{
   const fixture=await setup(page);
   await page.evaluate(()=>{(window as any).printed=0;window.print=()=>{(window as any).printed++;};});
-  await page.keyboard.press('Control+N');await expect(page.getByRole('textbox',{name:'Not başlığı'})).toBeEditable();expect(fixture.counts().creates).toBe(1);
+  await page.keyboard.press('ControlOrMeta+N');await expect(page.getByRole('textbox',{name:'Not başlığı'})).toBeEditable();expect(fixture.counts().creates).toBe(1);
   const zoom=page.locator('.zoom-controls span');await expect(zoom).toHaveText('100%');
-  await page.keyboard.press('Control+Equal');await expect(zoom).toHaveText('110%');
-  await page.keyboard.press('Control+Minus');await page.keyboard.press('Control+Minus');await expect(zoom).toHaveText('90%');
+  await page.keyboard.press('ControlOrMeta+Equal');await expect(zoom).toHaveText('110%');
+  await page.keyboard.press('ControlOrMeta+Minus');await page.keyboard.press('ControlOrMeta+Minus');await expect(zoom).toHaveText('90%');
   await page.locator('.canvas-scroll').hover();await page.keyboard.down('Control');await page.mouse.wheel(0,-100);await page.keyboard.up('Control');await expect(zoom).toHaveText('100%');
   await page.keyboard.press('Alt+Enter');await expect(page.locator('.editor-panel')).toHaveClass(/reading-mode/);
   await page.locator('.list-title h1').evaluate(()=>{(document.activeElement as HTMLElement|null)?.blur();});
   await page.keyboard.press('Enter');await expect(page.locator('.editor-panel')).not.toHaveClass(/reading-mode/);
-  await expect(page.locator('.text-tools')).not.toHaveClass(/closed/);await page.keyboard.press('Control+T');await expect(page.locator('.text-tools')).toHaveClass(/closed/);
-  await page.keyboard.press('Control+Shift+P');await expect.poll(()=>page.evaluate(()=>(window as any).printed)).toBe(1);
+  await expect(page.locator('.text-tools')).not.toHaveClass(/closed/);await page.keyboard.press('ControlOrMeta+T');await expect(page.locator('.text-tools')).toHaveClass(/closed/);
+  await page.keyboard.press('ControlOrMeta+Shift+P');await expect.poll(()=>page.evaluate(()=>(window as any).printed)).toBe(1);
   expect(fixture.counts().saves).toBe(0);
+});
+test('macOS uses Command as the primary modifier and shows ⌘ (emulated platform)',async({page})=>{
+  // The app reads navigator.platform once at start; emulate a Mac so the ⌘ path
+  // is covered on Linux CI too. Physical Control is left to macOS text navigation.
+  await page.addInitScript(()=>Object.defineProperty(Navigator.prototype,'platform',{get:()=>'MacIntel'}));
+  const fixture=await setup(page);await fixture.settings();
+  await expect(page.getByLabel('Yeni not oluştur kısayolu')).toHaveValue('⌘N');await expect(page.getByLabel('Notu yazdır kısayolu')).toHaveValue('⌘⇧P');
+  await expect(page.locator('#shortcut-key-help')).toContainText('⌘ veya ⌥ ile');
+  await remap(page,'Yeni not oluştur','Meta+Shift+F');await expect(page.getByLabel('Yeni not oluştur kısayolu')).toHaveValue('⌘⇧F');
+  await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toBeVisible();
+  expect(fixture.bindings().newNote).toBe('Ctrl+Shift+F');
+  await page.getByRole('button',{name:'Ayarları kapat'}).click();
+  await page.keyboard.press('Control+Shift+F');expect(fixture.counts().creates).toBe(0);
+  await page.keyboard.press('Meta+Shift+F');await expect(page.getByRole('textbox',{name:'Not başlığı'})).toBeVisible();
+  expect(fixture.counts().creates).toBe(1);
 });
 test('a new note waits for the first status before choosing plain or rich',async({page})=>{
   // Ctrl+N before the first /api/status answer used to create a plain note on a rich-capable engine.
   await setup(page,{rich:true,statusDelay:1500});
-  await page.keyboard.press('Control+N');await expect(page.getByRole('textbox',{name:'Not içeriği'})).toHaveAttribute('contenteditable','true');
+  await page.keyboard.press('ControlOrMeta+N');await expect(page.getByRole('textbox',{name:'Not içeriği'})).toHaveAttribute('contenteditable','true');
 });
 test('formatting shortcuts edit the rich model and follow remapping',async({page})=>{
   const fixture=await setup(page,{rich:true});
-  await page.keyboard.press('Control+N');const editor=page.getByRole('textbox',{name:'Not içeriği'});await expect(editor).toHaveAttribute('contenteditable','true');
-  await editor.click();await page.keyboard.type('Kalın satır');await page.keyboard.press('Control+a');
-  await page.keyboard.press('Control+B');await expect(editor.locator('span[data-samsung-kind="bold"]')).toHaveText('Kalın satır');
-  await page.keyboard.press('Control+E');await expect(editor.locator('p').first()).toHaveAttribute('style',/text-align: ?center/);
-  await page.keyboard.press('Control+Shift+Digit8');await expect(editor.locator('p').first()).toHaveAttribute('data-native-bullet','disc');
-  await page.keyboard.press('Control+BracketRight');await expect(editor.locator('span[data-samsung-kind="fontSize"]').first()).toHaveAttribute('style',/font-size: ?36px/);
-  await page.keyboard.press('Control+M');await expect(editor.locator('p').first()).toHaveAttribute('style',/margin-inline-start: ?1.5em/);
-  await page.keyboard.press('Control+S');await expect.poll(()=>fixture.counts().saves).toBe(1);
+  await page.keyboard.press('ControlOrMeta+N');const editor=page.getByRole('textbox',{name:'Not içeriği'});await expect(editor).toHaveAttribute('contenteditable','true');
+  await editor.click();await page.keyboard.type('Kalın satır');await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('ControlOrMeta+B');await expect(editor.locator('span[data-samsung-kind="bold"]')).toHaveText('Kalın satır');
+  await page.keyboard.press('ControlOrMeta+E');await expect(editor.locator('p').first()).toHaveAttribute('style',/text-align: ?center/);
+  await page.keyboard.press('ControlOrMeta+Shift+Digit8');await expect(editor.locator('p').first()).toHaveAttribute('data-native-bullet','disc');
+  await page.keyboard.press('ControlOrMeta+BracketRight');await expect(editor.locator('span[data-samsung-kind="fontSize"]').first()).toHaveAttribute('style',/font-size: ?36px/);
+  await page.keyboard.press('ControlOrMeta+M');await expect(editor.locator('p').first()).toHaveAttribute('style',/margin-inline-start: ?1.5em/);
+  await page.keyboard.press('ControlOrMeta+S');await expect.poll(()=>fixture.counts().saves).toBe(1);
   await page.getByRole('button',{name:'Not listesine dön'}).click();await fixture.settings();
-  await remap(page,'İtalik','Control+Shift+Y');await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toBeVisible();
+  await remap(page,'İtalik','ControlOrMeta+Shift+Y');await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toBeVisible();
   await page.getByRole('button',{name:'Ayarları kapat'}).click();await page.getByRole('button',{name:/Kalın satır|Metin notu/}).first().click();
   // Focus without a pointer click: Chrome reports a click's caret asynchronously
   // (selectionchange), and when that lands after Ctrl+A it collapses the selection.
-  await editor.focus();await page.keyboard.press('Control+a');await expect.poll(()=>page.evaluate(()=>String(getSelection()))).toBe('Kalın satır');
-  await page.keyboard.press('Control+I');await expect(editor.locator('span[data-samsung-kind="italic"]')).toHaveCount(0);
-  await page.keyboard.press('Control+Shift+Y');await expect(editor.locator('span[data-samsung-kind="italic"]')).toHaveText('Kalın satır');
+  await editor.focus();await page.keyboard.press('ControlOrMeta+a');await expect.poll(()=>page.evaluate(()=>String(getSelection()))).toBe('Kalın satır');
+  await page.keyboard.press('ControlOrMeta+I');await expect(editor.locator('span[data-samsung-kind="italic"]')).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+Shift+Y');await expect(editor.locator('span[data-samsung-kind="italic"]')).toHaveText('Kalın satır');
 });
