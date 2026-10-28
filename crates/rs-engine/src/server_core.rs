@@ -722,6 +722,26 @@ fn pure_name(relative: &str) -> &str {
     relative.split('/').filter(|p| !p.is_empty() && *p != ".").last().unwrap_or("")
 }
 
+/// A regular file under `root` whose every path component matches a
+/// directory entry byte for byte. Case-insensitive file systems (APFS) would
+/// otherwise serve `/ASSETS/APP.JS` as `assets/app.js`.
+fn exact_file(root: &Path, path: &Path) -> bool {
+    let Ok(rel) = path.strip_prefix(root) else { return false };
+    if !path.is_file() {
+        return false;
+    }
+    let mut dir = root.to_path_buf();
+    for c in rel.components() {
+        let Component::Normal(name) = c else { return false };
+        let listed = std::fs::read_dir(&dir).is_ok_and(|mut it| it.any(|e| e.is_ok_and(|e| e.file_name() == name)));
+        if !listed {
+            return false;
+        }
+        dir.push(name);
+    }
+    true
+}
+
 /// `Handler.static`
 fn static_file<R: BufRead, W: Write>(cfg: &Config, conn: &mut Conn<R, W>, request_path: &str) -> Result<(), Failure> {
     let unquoted = urlparse::unquote(request_path, false).unwrap_or_default();
@@ -734,11 +754,11 @@ fn static_file<R: BufRead, W: Write>(cfg: &Config, conn: &mut Conn<R, W>, reques
     if !path.starts_with(&cfg.static_dir) {
         return Err(Failure::store("not_found", "Dosya bulunamadı.", 404));
     }
-    if !path.is_file() {
+    if !exact_file(&cfg.static_dir, &path) {
         if !pure_name(relative).contains('.') {
             path = cfg.static_dir.join("index.html");
         }
-        if !path.is_file() {
+        if !exact_file(&cfg.static_dir, &path) {
             return Err(Failure::store("frontend_missing", "Arayüz derlenmemiş. desktop dizininde npm run build çalıştır.", 503));
         }
     }
@@ -803,4 +823,22 @@ pub fn read_to_end<Rd: Read>(r: &mut Rd) -> io::Result<Vec<u8>> {
     let mut v = Vec::new();
     r.read_to_end(&mut v)?;
     Ok(v)
+}
+
+#[cfg(test)]
+mod static_tests {
+    use super::exact_file;
+
+    #[test]
+    fn static_paths_match_directory_entries_exactly() {
+        let root = std::env::temp_dir().join(format!("notes-static-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::write(root.join("assets/app.js"), b"x").unwrap();
+        assert!(exact_file(&root, &root.join("assets/app.js")));
+        // On a case-insensitive file system this path opens assets/app.js.
+        assert!(!exact_file(&root, &root.join("ASSETS/APP.JS")));
+        assert!(!exact_file(&root, &root.join("assets")));
+        assert!(!exact_file(&root.join("assets"), &root.join("assets/../assets/app.js")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
