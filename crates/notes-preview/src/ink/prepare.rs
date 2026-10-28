@@ -749,9 +749,28 @@ fn text_object(obj: &Element, page_box: bool, lenient: bool) -> P<Option<Flow>> 
                 }
             }
         }
+        // Lenient reading: an object anchored in the text (`objectSpan`, e.g.
+        // a phone picture whose frame lives in `floatingObjectList`) is drawn
+        // from that frame by the page composite; its annotation is dropped
+        // and its U+FFFC placeholder becomes a space (same UTF-16 offsets).
+        let mut anchored = false;
+        if lenient {
+            for item in items.iter_mut() {
+                if let Item::Tokens(_, t) = item {
+                    for token in t.iter_mut().filter(|t| t[1].as_deref() == Some("objectSpan")) {
+                        token[0] = Some(String::new());
+                        anchored = true;
+                    }
+                }
+            }
+        }
         let mut out = String::new();
         for item in &items {
             match item {
+                Item::Text(s) if anchored => {
+                    let decoded = rs_editor::rich::decode(s).map_err(editor_fail)?;
+                    out.push_str(&rs_editor::rich::b64(&decoded.replace('\u{fffc}', " ")));
+                }
                 Item::Text(s) => out.push_str(s),
                 Item::Raw(s) => {
                     out.push_str("<?a");
@@ -1053,6 +1072,12 @@ struct Prepared {
     /// Some page carries objects, a PDF or a canvas cache: a handwritten /
     /// page-based note whose empty pages are shown as blank sheets.
     page_based: bool,
+    /// Free-floating objects (`floatingObjectList`, e.g. a picture inserted
+    /// on a phone) by the page their `pageIndex` names, in list order.
+    floating: Vec<Vec<Element>>,
+    /// Some floating object names no page of the note (not drawn; the first
+    /// page says so).
+    floating_lost: bool,
 }
 
 static PREPARED: Mutex<VecDeque<(SourceKey, Arc<Prepared>)>> = Mutex::new(VecDeque::new());
@@ -1079,11 +1104,19 @@ fn prepare_source(snapshot: &rs_doc::doc::DocumentSnapshot, key: &SourceKey) -> 
         return fail("Bu not başka içerikler de taşıyor.");
     }
     let body = one(&root, "bodytext")?;
-    let floating = one(&root, "floatingobjectlist")?;
-    if !floating.children.is_empty() {
-        return fail("Bu not eklenmiş nesneler taşıyor.");
-    }
+    let floating_list = one(&root, "floatingobjectlist")?;
     let pages = one(&root, "pagelist")?;
+    // Free-floating objects are drawn on the page their `pageIndex` names
+    // (page-local frame, as observed on a phone-made note), over that page's
+    // layer objects; an unplaceable one is flagged, never moved elsewhere.
+    let mut floating: Vec<Vec<Element>> = vec![Vec::new(); pages.children.len()];
+    let mut floating_lost = false;
+    for o in floating_list.children.iter() {
+        match o.get("pageIndex").and_then(|i| i.parse::<usize>().ok()).filter(|i| *i < pages.children.len()) {
+            Some(i) if o.tag == "object" => floating[i].push(o.clone()),
+            _ => floating_lost = true,
+        }
+    }
     let (mut flow, mut trailing, mut flow_approximate) = (None, None, false);
     if !empty_body_for_ink(body)? {
         // Body text whose formatting the renderer does not take is shown with
@@ -1101,13 +1134,14 @@ fn prepare_source(snapshot: &rs_doc::doc::DocumentSnapshot, key: &SourceKey) -> 
             trailing = t;
         }
     }
-    let page_based = pages.children.iter().any(|p| {
+    let page_based = !floating_list.children.is_empty() || pages.children.iter().any(|p| {
         p.iter().any(|n| n.tag == "object" || n.tag == "pdfDataList" || (n.tag == "canvasCacheDataMap" && !n.children.is_empty()))
     });
     let bodies: Vec<Vec<u8>> = parts.into_iter().filter(|(name, _)| name.as_deref() == Some("strokeResource")).map(|(_, b)| b).collect();
     let records = decode_records(&snapshot.resource_xml, &bodies)?;
     let files = super::objects::content_files(&root);
-    let prepared = Arc::new(Prepared { pages: pages.clone(), flow, flow_approximate, trailing, records, files, page_based });
+    let prepared = Arc::new(Prepared { pages: pages.clone(), flow, flow_approximate, trailing, records, files, page_based, floating,
+                                       floating_lost });
     let mut guard = PREPARED.lock().unwrap();
     guard.push_back((key.clone(), prepared.clone()));
     while guard.len() > 2 {
@@ -1146,6 +1180,10 @@ fn page_inputs(prepared: &Prepared, only_index: Option<i64>, build: bool) -> P<V
         let (shapes, objects): (Vec<&Element>, Vec<&Element>) =
             all_objects.iter().copied().partition(|o| rs_ops::page_shapes::renderer_skippable_shape(o));
         let has_shape = !shapes.is_empty();
+        // Floating objects anchored here (or a lost one, flagged on page 1)
+        // need the page composite.
+        let has_floating = prepared.floating.get(index as usize).is_some_and(|f| !f.is_empty())
+            || (index == 0 && prepared.floating_lost);
         let pdf = page.iter().any(|n| n.tag == "pdfDataList" || n.tag == "pdfData");
         if width as i128 * height as i128 > MAX_PIXELS as i128 || page.get_or("orientation", "0") != "0" {
             continue;
@@ -1154,7 +1192,7 @@ fn page_inputs(prepared: &Prepared, only_index: Option<i64>, build: bool) -> P<V
             // PDF pages get their background from Poppler; the page's own
             // objects become a local layer over it (`overPdf`), used when
             // Samsung's canvas overlay is not available.
-            if !all_objects.is_empty() {
+            if !all_objects.is_empty() || has_floating {
                 if let Some(page) = composite_layer(prepared, page, index, width, height, page_color(page).ok(), build, false, true)? {
                     output.push(page);
                 }
@@ -1192,12 +1230,12 @@ fn page_inputs(prepared: &Prepared, only_index: Option<i64>, build: bool) -> P<V
         } else {
             page_color(page).ok()
         };
-        let blank = prepared.flow.is_none() && all_objects.is_empty();
+        let blank = prepared.flow.is_none() && all_objects.is_empty() && !has_floating;
         if blank && !prepared.page_based {
             continue;
         }
         let dark_of = |c: u32| ((c >> 16) & 255) + ((c >> 8) & 255) + (c & 255) < 384;
-        if strict && !has_shape && !blank && !prepared.flow_approximate {
+        if strict && !has_shape && !has_floating && !blank && !prepared.flow_approximate {
             let color = color.unwrap();
             let dark = dark_of(color);
             if !build {
@@ -1292,6 +1330,17 @@ fn composite_layer(prepared: &Prepared, page: &Element, index: i64, width: i64, 
         // containers): drawn where possible, flagged as incomplete.
         note(&mut notices, objects::NOTICE_HIDDEN);
         ordered = iter_tag(page, "object").filter(|o| o.get("type").is_some()).collect();
+    }
+    // Free-floating objects of this page, drawn after (over) its layer
+    // objects; one whose frame misses the page is flagged, not drawn.
+    if index == 0 && prepared.floating_lost {
+        note(&mut notices, objects::NOTICE_HIDDEN);
+    }
+    for o in prepared.floating.get(index as usize).map(|f| f.as_slice()).unwrap_or(&[]) {
+        match objects::rect_of(o.find("rect")) {
+            Some([l, t, r, b]) if r > 0.0 && b > 0.0 && l < width as f64 && t < height as f64 => ordered.push(o),
+            _ => note(&mut notices, objects::NOTICE_HIDDEN),
+        }
     }
     let mut items: Vec<Item> = Vec::new();
     if over_pdf {

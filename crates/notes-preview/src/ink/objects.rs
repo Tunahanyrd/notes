@@ -66,7 +66,8 @@ fn f(v: Option<&str>) -> Option<f64> {
     v.and_then(|s| s.trim().parse::<f64>().ok()).filter(|x| x.is_finite() && x.abs() < 1e7)
 }
 
-fn rect_of(e: Option<&Element>) -> Option<[f64; 4]> {
+/// An `l t r b` frame element as numbers (None: absent, unreadable or inverted).
+pub fn rect_of(e: Option<&Element>) -> Option<[f64; 4]> {
     let e = e?;
     let r = [f(e.get("l"))?, f(e.get("t"))?, f(e.get("r"))?, f(e.get("b"))?];
     (r[2] >= r[0] && r[3] >= r[1]).then_some(r)

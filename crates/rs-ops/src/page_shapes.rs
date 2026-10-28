@@ -608,8 +608,10 @@ fn note_gate(deps: &dyn Deps, snap: &Snapshot) -> R<Element> {
     if root.iter().any(|n| matches!(n.tag.as_str(), "strokeGroup" | "voiceDataList" | "attachedFileMap")) {
         return shape_err("Bu notta ses, ek veya gruplanmış çizgi var; şekil eklenemiyor.");
     }
+    // Free-floating pictures/shapes/text boxes are carried through untouched
+    // (util::floating_objects); anything else in the list stays refused.
     let floating = children(&root, "floatingObjectList");
-    if floating.len() > 1 || floating.first().is_some_and(|f| !f.is_empty()) {
+    if floating.len() > 1 || floating_objects(&root).is_err() {
         return shape_err("Bu notta serbest yerleşimli nesne var; şekil eklenemiyor.");
     }
     let stroke_parts: Vec<&Part> = parsed.parts.iter().filter(|p| p.name.as_deref() == Some("strokeResource")).collect();

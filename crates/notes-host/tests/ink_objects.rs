@@ -495,3 +495,281 @@ fn first_stroke_and_highlighter_on_an_image_only_page() {
         Some(0x73ffeb3bu32 as i128), Some(4.0), Some(1_800_000_000_000), Some(Some(NEW))).unwrap();
     assert_eq!(carried(&xml::parse_bytes(&marker.full_xml).unwrap()), carried(&before));
 }
+
+// ---------------------------------------------------------------- floating
+//
+// A picture inserted on a phone is a *free-floating* object: note-level
+// `floatingObjectList/object type="image"` placed on page `pageIndex`, its
+// tree entry `noteTree/floatingObjectList/object id t h`, its content file at
+// refCount 1 (structure of the Notes 4.4.45 test note of 2026-10-28; every
+// value here is synthetic). Before `ink-projection-v8:floating-objects` every
+// writer refused such a note ("serbest yerleşimli nesne").
+
+const FLOATING: &str = "c0000000-0000-4000-8000-0000000000f1";
+
+fn point(x: &str, y: &str) -> Element {
+    Element::new("point", &[("x", x), ("y", y)])
+}
+
+fn floating_picture(id: &str, file: &str, page_index: &str) -> Element {
+    let mut connection = Element::new("connectionPointList", &[]);
+    connection.children = vec![point("300.0", "200.0"), point("500.0", "400.0"), point("300.0", "600.0"), point("100.0", "400.0")];
+    let mut color = Element::new("lineColorEffect", &[("angle", "0.0"), ("colorType", "2"), ("gradientRotatable", "true"),
+        ("gradientType", "0"), ("solidColor", "-16777216")]);
+    color.children.push(point("0.5", "0.5"));
+    color.children[0].tag = "radialGradientPosition".into();
+    let style = Element::new("lineStyleEffect", &[("beginArrowSize", "1"), ("beginArrowType", "0"), ("capType", "0"),
+        ("compoundType", "0"), ("dashType", "0"), ("endArrowSize", "1"), ("endArrowType", "0"), ("joinType", "0"), ("width", "0.0")]);
+    let mut path = Element::new("path", &[]);
+    let segments = path.sub_element("segmentList", &[]);
+    for (kind, x, y) in [("1", "100.0", "200.0"), ("2", "500.0", "200.0"), ("2", "500.0", "600.0"), ("2", "100.0", "600.0")] {
+        segments.children.push(Element::new("segment", &[("type", kind), ("x", x), ("y", y)]));
+    }
+    segments.children.push(Element::new("segment", &[("type", "6")]));
+    let mut fill = Element::new("fillEffect", &[("imageId", file), ("imageType", "0"), ("ninePatchWidth", "1080"), ("rotatable", "false"),
+        ("tilingScaleX", "100.0"), ("tilingScaleY", "100.0"), ("transparency", "0.0"), ("type", "image")]);
+    fill.children = vec![rect("stretchOffset", "0.0", "0.0", "0.0", "0.0"), Element::new("tilingOffset", &[("x", "0.0"), ("y", "0.0")]),
+                         rect("ninePatchRect", "0.0", "0.0", "0.0", "0.0")];
+    object("image", id, &[("pageIndex", page_index), ("layoutType", "3"), ("ownerPageWidth", "1080"), ("ownerPageHeight", "1440"),
+        ("shapeType", "4"), ("originalDegree", "0.0"), ("isHorizontalFlipped", "false"), ("isVerticalFlipped", "false"),
+        ("lockState", "false"), ("visible", "true")],
+        vec![rect("rect", "100.0", "200.0", "500.0", "600.0"), connection, color, style, rect("originalRect", "100.0", "200.0", "500.0", "600.0"),
+             path, fill])
+}
+
+/// `objects_resource` (page 1: picture, strokes, shape, line, text box; page
+/// 2: picture; page 3: empty) plus a Samsung canvas cache on page 1, a phone
+/// text box with `spanOrderDataList`/`path` on page 1, and one free-floating
+/// picture on page `page_index`.
+fn floating_resource(page_index: &str) -> Element {
+    let mut root = objects_resource(&sha("synthetic image 1"), &sha("synthetic image 2"), true);
+    let ti = root.find_index("noteTree").unwrap();
+    let pi = root.find_index("pageList").unwrap();
+    let fi = root.find_index("contentFileList").unwrap();
+    // Page 1: the phone's text box shape (empty, as on the test note).
+    {
+        let list = root.children[pi].children[0].find_mut("layerList").unwrap().children[0].find_mut("objectList").unwrap();
+        let tb = list.children.iter_mut().find(|o| o.get("id") == Some(TEXT)).unwrap();
+        let mut spans = Element::new("spanOrderDataList", &[]);
+        spans.children.push(Element::new("spanOrderData", &[("val", &rs_doc::util::b64encode(b"1,0,0,0,0"))]));
+        let mut path = Element::new("path", &[]);
+        path.sub_element("segmentList", &[]);
+        let mut connection = Element::new("connectionPointList", &[]);
+        connection.children.push(point("50.0", "1000.0"));
+        tb.children.insert(1, connection);
+        tb.children.push(path);
+        tb.children.push(spans);
+    }
+    // Page 1's Samsung canvas cache (released by a write on that page).
+    let cache = sha("synthetic canvas cache 015");
+    let mut map = Element::new("canvasCacheDataMap", &[]);
+    map.sub_element("pair", &[("key", "0"), ("fileId", "6"), ("width", "1080"), ("height", "1527"), ("isDarkMode", "false")]);
+    root.children[pi].children[0].children.push(map);
+    let (entry, tree) = content_file(&cache, "6");
+    root.children[fi].children.push(entry);
+    root.children[ti].children.iter_mut().find(|c| c.tag == "contentFileList").unwrap().children.push(tree);
+    add_floating(&mut root, &sha("synthetic floating picture"), page_index);
+    root
+}
+
+/// Appends the floating picture (content file `file`, bind 7) on page
+/// `page_index`, its content-file entry and both tree entries.
+fn add_floating(root: &mut Element, file: &str, page_index: &str) {
+    let ti = root.find_index("noteTree").unwrap();
+    let fi = root.find_index("contentFileList").unwrap();
+    let picture = floating_picture(FLOATING, file, page_index);
+    let (entry, tree) = content_file(file, "7");
+    root.children[fi].children.push(entry);
+    root.children[ti].children.iter_mut().find(|c| c.tag == "contentFileList").unwrap().children.push(tree);
+    let tree_entry = tree_entry(&picture);
+    let list = root.children.iter_mut().find(|c| c.tag == "floatingObjectList").unwrap();
+    list.children.push(picture);
+    let tl = match root.children[ti].children.iter().position(|c| c.tag == "floatingObjectList") {
+        Some(i) => i,
+        None => {
+            let at = root.children[ti].children.iter().position(|c| c.tag == "bodyText").unwrap_or(root.children[ti].children.len());
+            root.children[ti].children.insert(at, Element::new("floatingObjectList", &[]));
+            at
+        }
+    };
+    root.children[ti].children[tl].children.push(tree_entry);
+}
+
+/// Regenerates `crates/notes-preview/tests/fixtures/floating_note.json`: the
+/// `objects_resource` note (pictures as real synthetic PNGs, empty page 3)
+/// plus a free-floating green picture on page 3 that the body text anchors
+/// with an `objectSpan` around U+FFFC (as on the phone test note), with the
+/// Cloud's download URL entries. Synthetic data only.
+#[test]
+#[ignore = "fixture generator"]
+fn regen_preview_floating_fixture() {
+    let png = |rgba: [u8; 4]| rs_render::pixels::rgba_png(4, 4, &rgba.repeat(16)).unwrap();
+    let (red, blue, green) = (png([230, 30, 30, 255]), png([30, 60, 230, 255]), png([20, 160, 60, 255]));
+    let [file1, file2, file3] = [&red, &blue, &green].map(|b| rs_ink::core::sha256_hex(b));
+    let mut root = objects_resource(&file1, &file2, true);
+    add_floating(&mut root, &file3, "2");
+    {
+        let body = root.find_mut("bodyText").unwrap().find_mut("object").unwrap();
+        let chunk = |t: &str| rs_doc::util::b64encode(t.as_bytes());
+        let stream = format!("{}<?a 'objectSpan/objectSpan'='{FLOATING},0,0'?>{}<?a 'objectSpan/objectSpan'?>{}", chunk("\n"), chunk("\u{fffc}"), chunk("\n"));
+        body.children.retain(|c| c.tag != "text");
+        let mut text = Element::new("text", &[]);
+        text.text = Some(rs_doc::util::b64encode(stream.as_bytes()));
+        body.children.push(text);
+    }
+    let note = two_strokes();
+    let mut view = b"<CompareNoteView>".to_vec();
+    view.extend_from_slice(&without_declaration(&xml::xml_bytes(&root)));
+    view.extend_from_slice(b"<commitId>synthetic-commit-7</commitId><downloadUrls>");
+    for f in [&file1, &file2, &file3] {
+        view.extend_from_slice(format!("<downloadUrl><id>{f}</id><url>https://ew1a-api.samsungcloud.com/file?signature={}</url></downloadUrl>", &f[..8]).as_bytes());
+    }
+    view.extend_from_slice(b"</downloadUrls></CompareNoteView>");
+    let mut out: Vec<Part> = vec![("noteResource".into(), None, "application/xml".into(), view)];
+    out.extend(stroke_parts(&note));
+    let content_type = format!("multipart/form-data;boundary={BOUNDARY}");
+    let doc = snapshot::to_dict(&snapshot::parse_document(&multipart(&out), &content_type, Some("synthetic-server")).unwrap());
+    let images = [(&file1, &red), (&file2, &blue), (&file3, &green)].map(|(f, b)| (f.as_str(), Val::s(rs_doc::util::b64encode(b))));
+    let fixture = Val::dict(vec![("snapshot", doc), ("images", Val::dict(images.to_vec()))]);
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../notes-preview/tests/fixtures/floating_note.json");
+    std::fs::write(path, rs_store::val::dumps(&fixture, true, true).unwrap()).unwrap();
+}
+
+fn with_floating(page_index: &str) -> Val {
+    document(&xml::xml_bytes(&floating_resource(page_index)), stroke_parts(&two_strokes()), "synthetic-commit-5")
+}
+
+/// The floating list, its tree mirror and the picture's content-file entries.
+fn floating_parts(root: &Element) -> Vec<Vec<u8>> {
+    let tree = root.find("noteTree").unwrap();
+    let file = sha("synthetic floating picture");
+    let mut out = vec![xml::xml_bytes(root.find("floatingObjectList").unwrap()), xml::xml_bytes(tree.find("floatingObjectList").unwrap())];
+    for list in [root.find("contentFileList").unwrap(), tree.find("contentFileList").unwrap()] {
+        out.extend(list.children.iter().filter(|f| f.get("id") == Some(file.as_str())).map(xml::xml_bytes));
+    }
+    assert_eq!(out.len(), 4);
+    out
+}
+
+fn no_floating_upload(upload: &[u8]) {
+    let root = xml::parse_bytes(upload).unwrap();
+    assert!(root.find("floatingObjectList").is_none(), "the floating list is never uploaded");
+    let file = sha("synthetic floating picture");
+    assert!(root.find("contentFileList").is_none_or(|l| l.children.iter().all(|f| f.get("id") != Some(file.as_str()))));
+}
+
+#[test]
+fn projection_opens_the_pen_beside_a_free_floating_picture() {
+    // Before: "Bu notta serbest yerleşimli nesne var; kalem henüz desteklenmiyor."
+    let p = areas::project_ink(&with_floating("0"), false).unwrap();
+    assert_eq!(p.get("reason"), Some(&Val::Null), "{p:?}");
+    for key in ["appendInk", "eraseInk", "firstStroke", "highlighter"] {
+        assert!(on(&caps(&p), key), "{key}: {p:?}");
+    }
+    assert!(on(&page_ink(&p, 0), "appendInk") && on(&page_ink(&p, 2), "firstStroke"));
+    assert_eq!(areas::PROJECTION_RECIPE, "ink-projection-v8:floating-objects");
+}
+
+#[test]
+fn every_ink_writer_carries_the_floating_picture_byte_identically() {
+    let note = with_floating("0");
+    let before = resource(&note);
+    let snap = snapshot::from_dict(&note).unwrap();
+    let cache = sha("synthetic canvas cache 015");
+    let source = first_stroke(&before);
+    let raw = samples(&[(150.0, 250.0), (700.0, 900.0)]);
+    let now = 1_800_000_000_000i64;
+    let mut edits: Vec<(String, Vec<u8>, Vec<u8>, Vec<String>)> = Vec::new();
+    // Append (recipes 2 and 3) on page 1, which also releases its canvas cache.
+    for recipe in [AppendRecipe::V2, AppendRecipe::V3 { color_argb: 0xffff0000, pen_size: 3.5 }] {
+        let e = prepare_append(&AppendSnapshot::from_doc(&snap), &source, NEW, &samples(&[(200.0, 300.0), (260.0, 330.0)]), now, recipe, None)
+            .unwrap_or_else(|e| panic!("{recipe:?}: {e:?}"));
+        edits.push((format!("{recipe:?}"), e.full_xml, e.upload_xml, e.content_file_ids));
+    }
+    // First stroke on the empty page 3, highlighter on page 1.
+    let page3 = before.find("pageList").unwrap().children[2].get("id").unwrap().to_string();
+    let first = rs_ops::ink_first_stroke::prepare_first_stroke(&deps(), &snap, Some(&page3), Some(&raw as &dyn std::any::Any),
+        Some(0xff000000u32 as i128), Some(4.0), Some(now as i128), Some(Some(NEW))).unwrap();
+    edits.push(("first stroke".into(), first.full_xml, first.upload_xml, first.content_file_ids));
+    let page1 = before.find("pageList").unwrap().children[0].get("id").unwrap().to_string();
+    let marker = rs_ops::ink_highlighter::prepare_highlighter_stroke(&deps(), &snap, Some(&page1), Some(&raw as &dyn std::any::Any),
+        Some(0x73ffeb3bu32 as i128), Some(4.0), Some(now as i128), Some(Some(NEW))).unwrap();
+    edits.push(("highlighter".into(), marker.full_xml, marker.upload_xml, marker.content_file_ids));
+    // Erase and move one stroke of page 1.
+    let layer = before.find("pageList").unwrap().children[0].find("layerList").unwrap().children[0].get("id").unwrap().to_string();
+    let strokes: Vec<String> = before.find("pageList").unwrap().children[0].iter_tag("object")
+        .filter(|o| o.get("type") == Some("stroke")).map(|o| o.get("id").unwrap().to_string()).collect();
+    let one = Some(vec![Some(strokes[1].clone())]);
+    let erase = rs_ops::ink_erase::prepare_ink_delete(&deps(), &snap, Some(&page1), Some(&layer), &one, Some(now as i128)).unwrap();
+    edits.push(("erase".into(), erase.full_xml, erase.upload_xml, erase.content_file_ids));
+    let moved = rs_ops::ink_erase::prepare_ink_move(&deps(), &snap, Some(&page1), Some(&layer), &one, Some(5.0), Some(7.0), Some(now as i128)).unwrap();
+    edits.push(("move".into(), moved.full_xml, moved.upload_xml, moved.content_file_ids));
+    for (label, full, upload, released) in &edits {
+        let after = xml::parse_bytes(full).unwrap();
+        assert_eq!(floating_parts(&after), floating_parts(&before), "{label}");
+        assert_eq!(carried(&after)[..10], carried(&before)[..10], "{label}: page objects and their tree entries");
+        no_floating_upload(upload);
+        tree_intact(full, upload);
+        // Only page 1's canvas cache is ever released; the floating picture's
+        // file keeps its exact metadata.
+        let expected: Vec<String> = if label == "first stroke" { vec![] } else { vec![cache.clone()] };
+        assert_eq!(released, &expected, "{label}");
+    }
+}
+
+#[test]
+fn floating_objects_that_cannot_be_carried_keep_the_pen_closed() {
+    let closed = "Bu notta serbest yerleşimli nesne var; kalem henüz desteklenmiyor.";
+    let note = with_floating("0");
+    let base = resource(&note);
+    let strokes = stroke_parts(&note);
+    let variants: Vec<(&str, Box<dyn Fn(&mut Element)>)> = vec![
+        ("page outside the note", Box::new(|r: &mut Element| r.find_mut("floatingObjectList").unwrap().children[0].set("pageIndex", "3"))),
+        ("no pageIndex", Box::new(|r: &mut Element| {
+            r.find_mut("floatingObjectList").unwrap().children[0].attrib.retain(|(k, _)| k != "pageIndex");
+        })),
+        ("nested object", Box::new(|r: &mut Element| {
+            r.find_mut("floatingObjectList").unwrap().children[0].children.push(Element::new("object", &[("type", "stroke")]));
+        })),
+        ("stale tree entry", Box::new(|r: &mut Element| {
+            r.find_mut("noteTree").unwrap().find_mut("floatingObjectList").unwrap().children[0].set("t", "1");
+        })),
+        ("unknown object type", Box::new(|r: &mut Element| r.find_mut("floatingObjectList").unwrap().children[0].set("type", "customObject"))),
+    ];
+    for (label, change) in variants {
+        let mut root = base.clone();
+        change(&mut root);
+        let doc = document(&xml::xml_bytes(&root), strokes.clone(), "synthetic-commit-6");
+        let p = areas::project_ink(&doc, false).unwrap();
+        assert!(!on(&caps(&p), "appendInk") && !on(&caps(&p), "firstStroke"), "{label}: {p:?}");
+        assert!(p.get("reason").and_then(Val::as_str).is_some_and(|r| r == closed || r.contains("nesne")), "{label}: {p:?}");
+        let snap = snapshot::from_dict(&doc).unwrap();
+        let source = first_stroke(&root);
+        assert!(prepare_append(&AppendSnapshot::from_doc(&snap), &source, NEW, &samples(&[(200.0, 300.0), (260.0, 330.0)]),
+                               1_800_000_000_000, AppendRecipe::V2, None).is_err(), "{label}");
+        let page3 = root.find("pageList").unwrap().children[2].get("id").unwrap().to_string();
+        let raw = samples(&[(150.0, 250.0), (700.0, 900.0)]);
+        assert!(rs_ops::ink_first_stroke::prepare_first_stroke(&deps(), &snap, Some(&page3), Some(&raw as &dyn std::any::Any),
+            Some(0xff000000u32 as i128), Some(4.0), Some(1_800_000_000_000), Some(Some(NEW))).is_err(), "{label}");
+    }
+}
+
+#[test]
+fn page_operations_keep_a_floating_picture_on_its_page() {
+    // The picture sits on page 3 (index 2): nothing at or before it may move.
+    let note = with_floating("2");
+    let root = resource(&note);
+    let snap = snapshot::from_dict(&note).unwrap();
+    let ids: Vec<String> = root.find("pageList").unwrap().children.iter().map(|p| p.get("id").unwrap().to_string()).collect();
+    let now = Some(1_800_000_000_000i128);
+    let delete = rs_ops::page_ops::prepare_delete_page(&deps(), &snap, vec![Some(ids[2].clone())], now);
+    assert!(delete.is_err_and(|e| e.msg.contains("serbest yerleşimli")), "before: the blank page 3 was deleted under the picture");
+    let order = vec![Some(ids[0].clone()), Some(ids[2].clone()), Some(ids[1].clone())];
+    assert!(rs_ops::page_ops::prepare_reorder_pages(&deps(), &snap, order, now).is_err());
+    let insert = rs_ops::page_ops::prepare_add_page(&deps(), &snap, Some(0), now, None, None, None, None);
+    assert!(insert.is_err(), "a page inserted before the picture's page");
+    let append = rs_ops::page_ops::prepare_add_page(&deps(), &snap, Some(2), now, None, None, None, None).unwrap();
+    assert_eq!(floating_parts(&xml::parse_bytes(&append.full_xml).unwrap()), floating_parts(&root));
+    let state = areas::page_ops_state(Some(&note)).unwrap();
+    assert_eq!(state.get("canReorder"), Some(&Val::Bool(false)), "{state:?}");
+}

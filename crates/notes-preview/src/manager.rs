@@ -560,11 +560,19 @@ impl Inner {
         // pure-ink pages without a saved canvas, and the local ink layer of PDF
         // pages whose native layer is not available.
         let pdf_without_layer = candidates.values().any(|c| matches!(c, Candidate::Pdf(p) if p.annotation_objects != 0));
+        // Page composites (pictures, shapes, blank sheets, approximated ink)
+        // are drawn in-process (resvg) and need neither the ink renderer nor
+        // its sandbox; without them (renderer not built, no bwrap/rsvg) only
+        // the renderer-only pages stay unavailable, as before.
         let mut over_pdf: Vec<InkPage> = Vec::new();
-        if (candidates.len() < inventory.page_count || pdf_without_layer) && self.ink.provider_available() {
+        let renderer = self.ink.provider_available();
+        if candidates.len() < inventory.page_count || pdf_without_layer {
             let attempt = (|| -> Result<(), Fail> {
                 let digest = snapshot.get("raw_sha256").and_then(Val::as_str).ok_or_else(|| Fail::key("'raw_sha256'"))?.to_string();
                 for rendered in self.ink_inventory(&snapshot, &digest)? {
+                    if !renderer && !rendered.composite {
+                        continue;
+                    }
                     let index = rendered.index;
                     if rendered.over_pdf {
                         over_pdf.push(rendered);

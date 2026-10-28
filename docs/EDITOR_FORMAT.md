@@ -173,8 +173,17 @@ clearing a title/body through an edit writes it back without `<text>`
 (new notes keep the research writer's `<text/>`). Page slices keep a cleared
 body's `<text>` (zero-length `sectionData`).
 
-Still read-only, with plain-language reasons: free-floating objects
-(`floatingObjectList` non-empty), voice/attachment/extra-bundle nodes,
+Since editor rules v3 (`editor-projection-v3`, 2026-10-28) free-floating
+objects (`floatingObjectList`, e.g. a picture inserted on a phone, placed on
+page `pageIndex`) are carried the same way when the shared rule
+(`rs_doc::objects::floating_inventory`: self-contained image/shape/line/text
+box, `pageIndex` inside the note, note-tree entries mirroring them) admits
+every one of them; the upload never contains the list. On the phone test note
+the body text still stays read-only: it anchors the picture with an
+`objectSpan` annotation the editor grammar does not know (fail-closed).
+
+Still read-only, with plain-language reasons: free-floating objects the rule
+does not admit, voice/attachment/extra-bundle nodes,
 objects outside the page list, page objects whose ids disagree with the note
 tree's layer inventory, unknown annotation grammar, locked/encrypted notes,
 and more than 32768 annotations per text object (was 4096; long device notes

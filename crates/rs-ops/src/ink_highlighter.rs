@@ -203,11 +203,10 @@ pub fn prepare_highlighter_stroke(
     if root.iter().any(|n| matches!(n.tag.as_str(), "strokeGroup" | "voiceDataList" | "attachedFileMap")) {
         return ink("grouped/media ink is unsupported");
     }
-    if let Some(f) = optional(&root, "floatingObjectList")? {
-        if !root.children[f].is_empty() {
-            return ink("floating objects are unsupported");
-        }
-    }
+    // Free-floating pictures/shapes/text boxes are carried through untouched
+    // (util::floating_objects); anything else in the list stays refused.
+    optional(&root, "floatingObjectList")?;
+    floating_objects(&root)?;
     let stroke_parts: Vec<&Part> = parsed.parts.iter().filter(|p| p.name.as_deref() == Some("strokeResource")).collect();
     if stroke_parts.len() >= MAX_READONLY_PARTS
         || parsed.parts.iter().any(|p| {

@@ -90,6 +90,44 @@ görülmedi**; kullanıcı turu `tools/live_ink_objects_probe.py`.
 - Projeksiyon tarifi `ink-projection-v7:carried-objects` (önbelleğe alınmış
   eski kapalı projeksiyonlar yeniden hesaplanır).
 - Hâlâ kapalı: kilitli/şifreli not, gruplanmış çizgi (`strokeGroup`), ses/ek
-  dosya, serbest yerleşimli nesneler (`floatingObjectList` dolu), döndürülmüş
+  dosya, taşınamayan serbest yerleşimli nesneler (aşağıya bakın), döndürülmüş
   sayfa, arka plan resmi/şablon URI'si, birden çok katmanda ilk çizgi, kilitli/
   gizli katman, iç içe veya önbelleğe bağlı nesneler.
+
+## Serbest yerleşimli nesneler (2026-10-28)
+
+Durum: kaynakta uygulandı, sentetik testler geçti
+(`crates/notes-host/tests/ink_objects.rs`, `floating` bölümü; yeni testler eski
+kodda kırmızıydı). Kullanıcının telefonda yaptığı test notunun **özel yerel
+kopyasında çevrimdışı** hazırlık da geçti (yalnız sonuç/sayı yazdırıldı).
+**Cloud'a yazılmadı, cihazda görülmedi**; kullanıcı turu
+`tools/live_ink_objects_probe.py` (LinuxInk-Probe-015).
+
+- Telefonda eklenen resim sayfa katmanına değil, notun `floatingObjectList`'ine
+  yazılır: `object type="image"` + `pageIndex`, `layoutType`,
+  `ownerPageWidth/Height`, `rect`, `connectionPointList`, `lineColorEffect`,
+  `lineStyleEffect`, `originalRect`, `path/segmentList`, `fillEffect
+  type="image"` (`stretchOffset`, `tilingOffset`, `ninePatchRect`). Not ağacında
+  `noteTree/floatingObjectList/object id t h`, içerik dosyası `refCount` 1.
+  Gövde metni resmi `objectSpan` (U+FFFC çevresinde, değer `<id>,…`) ile çapalar.
+- Kural tek yerde: `rs_doc::objects` (`passthrough_object`, `floating_object`,
+  `floating_inventory`); rs-ink `core::objects::tree_floating`, rs-ops
+  `util::floating_objects` ve metin editörü aynı kuralı kullanır. Kabul:
+  sayfa nesnesiyle aynı kendine yeterlilik kuralı (resim/şekil/çizgi/metin
+  kutusu, `hash == SHA256(id + modifiedTime)`, iç içe nesne yok, `fileId` yok,
+  resimde tek `fillEffect imageId`), ek olarak `pageIndex` notun bir sayfası ve
+  not ağacı girdileri sıra sıra aynı (`id`, `t`, `h`; yaprak). Başka her şey
+  (bilinmeyen tür, sayfa dışı/eksik `pageIndex`, eski ağaç girdisi, grup) notu
+  eskisi gibi kapalı tutar.
+- Yazıcılar (ekleme tarif 2/3, ilk çizgi, fosforlu, silgi, taşıma, şekil) listeyi,
+  ağaç girdisini ve resmin içerik dosyasını bayt bayt korur; liste yüklemeye
+  hiç girmez (zaten girmiyordu). Önbellek bırakma resmin dosyasını sayfa
+  resimleri gibi sayar (`refCount` = kullanım). Zaman damgası serbest nesnelerin
+  `modifiedTime`'ını da aşar. Tarif 1 eskisi gibi kapalı. Daha önce kabul edilen
+  her girdinin çıktısı aynı.
+- Sayfa işlemleri: serbest nesnenin sayfası ve öncesi değişemez (o sayfaya kadar
+  silme/sıralama, önüne sayfa ekleme reddedilir; sonuna ekleme serbest),
+  `canReorder` false. Bu yeni bir koruma: önceden sayfa işlemleri serbest
+  nesneyi başka sayfaya kaydırabiliyordu.
+- Compare koruması değişmedi: sunucu serbest nesneyi adlandırırsa yayın durur.
+- Projeksiyon tarifi `ink-projection-v8:floating-objects`.

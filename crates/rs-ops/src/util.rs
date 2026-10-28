@@ -239,7 +239,42 @@ pub fn passthrough_object(o: &Element) -> Option<Option<String>> {
     if o.tag != "object" {
         return None;
     }
-    _ink::core::objects::passthrough_object(&o.attrib, o.iter().skip(1).map(|n| (n.tag.as_str(), n.attrib.as_slice())))
+    _doc::objects::passthrough_object(&o.attrib, o.iter().skip(1).map(|n| (n.tag.as_str(), n.attrib.as_slice())))
+}
+
+/// The note's free-floating objects (`floatingObjectList` children, e.g. a
+/// picture inserted on a phone, placed on page `pageIndex`) when an ink edit
+/// may carry every one of them through byte-identically
+/// (`rs_doc::objects::floating_inventory`: self-contained image/shape/line/
+/// text box, a `pageIndex` inside the note, note-tree entries mirroring them).
+/// Empty when the list is absent or empty (not validated further then, as
+/// before floating objects were carried); `Err(Ink)` otherwise.
+pub fn floating_objects(root: &Element) -> crate::err::R<Vec<&Element>> {
+    let lists: Vec<&Element> = root.children.iter().filter(|c| c.tag == "floatingObjectList").collect();
+    if lists.iter().all(|l| l.children.is_empty()) {
+        return Ok(Vec::new());
+    }
+    let refuse = || crate::err::ink("floating objects are unsupported");
+    let trees: Vec<&Element> = root.children.iter().filter(|c| c.tag == "noteTree").collect();
+    let pages: Vec<&Element> = root.children.iter().filter(|c| c.tag == "pageList").collect();
+    if lists.len() != 1 || trees.len() != 1 || pages.len() != 1 {
+        return refuse();
+    }
+    let tree_lists: Vec<&Element> = trees[0].children.iter().filter(|c| c.tag == "floatingObjectList").collect();
+    if tree_lists.len() != 1 {
+        return refuse();
+    }
+    let ok = _doc::objects::floating_inventory(
+        lists[0].children.iter().map(|o| {
+            (o.tag.as_str(), o.attrib.as_slice(), o.iter().skip(1).map(|n| (n.tag.as_str(), n.attrib.as_slice())))
+        }),
+        tree_lists[0].children.iter().map(|e| (e.tag.as_str(), e.attrib.as_slice(), e.children.len())),
+        pages[0].children.len(),
+    );
+    match ok {
+        Some(_) => Ok(lists[0].children.iter().collect()),
+        None => refuse(),
+    }
 }
 
 /// Stroke objects of a page list, refusing anything that is neither a

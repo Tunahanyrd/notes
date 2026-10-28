@@ -365,9 +365,11 @@ fn run_store(fx: &Val, scratch: &Path, t: &mut Tally) {
                 p.set("pendingStrokes", Val::List(vec![]));
                 p.set("pendingErase", Val::List(vec![]));
                 // The frozen oracle predates `ink-projection-v7:carried-objects`
-                // (2026-10-28, pen on notes with pictures/shapes/text boxes),
-                // which changed only the recipe string for these synthetic notes.
-                assert_eq!(areas::PROJECTION_RECIPE, "ink-projection-v7:carried-objects");
+                // (2026-10-28, pen on notes with pictures/shapes/text boxes) and
+                // `ink-projection-v8:floating-objects` (2026-10-28, pen on notes
+                // with free-floating pictures), which changed only the recipe
+                // string for these synthetic notes.
+                assert_eq!(areas::PROJECTION_RECIPE, "ink-projection-v8:floating-objects");
                 p.set("recipe", Val::s("ink-projection-v6:highlighter"));
                 store.cache_ink(&ident, &row.k("revision"), &p)?;
                 Ok(p)

@@ -48,7 +48,7 @@ pub const MAX_PIXELS: i64 = 4 * 1024 * 1024;
 /// `previews.MAX_QUEUED`.
 pub const MAX_QUEUED: usize = 256;
 /// `previews.INK_INVENTORY_RECIPE`.
-pub const INK_INVENTORY_RECIPE: &str = "ink-inventory-v5:body-flow:calibrated-inkpen2:per-page:stylusless-inkpen2:page-composite";
+pub const INK_INVENTORY_RECIPE: &str = "ink-inventory-v5:body-flow:calibrated-inkpen2:per-page:stylusless-inkpen2:page-composite:floating-objects";
 /// `previews.BROKER_HOSTS`.
 pub const BROKER_HOSTS: &[&str] = &["ew1a-api.samsungcloud.com"];
 /// `previews.FILE_HOSTS`.

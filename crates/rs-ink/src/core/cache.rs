@@ -126,8 +126,12 @@ pub fn release_page_cache(t: &mut Tree, page: Option<NodeId>, tick: i128) -> R<V
     }
     // Images on page layers reference their content file by id (fill
     // `imageId`); such a file keeps its exact metadata, like a PDF.
+    // Free-floating pictures (`floatingObjectList`, placed on a page by
+    // `pageIndex`) reference their content file the same way.
     let mut image_refs: Vec<(String, i64)> = Vec::new();
-    for node in t.iter(pages) {
+    let floating: Vec<NodeId> = t.children(root).iter().copied().filter(|n| t.tag(*n) == "floatingObjectList")
+        .flat_map(|list| t.children(list).to_vec()).collect();
+    for node in t.iter(pages).into_iter().chain(floating) {
         if t.tag(node) != "object" || t.get(node, "type") == Some("stroke") {
             continue;
         }

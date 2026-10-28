@@ -314,6 +314,10 @@ fn a_page_the_renderer_refuses_is_served_as_a_stand_in_not_left_pending() {
     // not complete its body text: the page is drawn as a composite stand-in
     // (`.partial.png`) and returned, instead of re-queueing forever (before:
     // `request` stayed None until its deadline, the UI showed "açılamadı").
+    if !notes_preview::NativeInk::new(notes_preview::env::default_project_root(), None).provider_available() {
+        eprintln!("ink renderer not built; skipping render");
+        return;
+    }
     let (_, case) = cases().into_iter().find(|(n, _)| n == "rich_flow").unwrap();
     let dir = TempDir::new();
     let s = store(dir.path());

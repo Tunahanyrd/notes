@@ -20,6 +20,20 @@ pub const BLANK_PAGE_CHILDREN: [&str; 3] = ["layerList", "drawnRect", "canvasCac
 pub const MAX_PAGES: usize = 1000;
 const STRUCTURE: &str = "Belgenin sayfa yapısı güvenli düzenleme için uygun değil.";
 const GROUPED: [&str; 3] = ["strokeGroup", "voiceDataList", "attachedFileMap"];
+const FLOATING: &str = "Bu notta serbest yerleşimli nesne var; o nesnenin sayfası veya öncesi değiştirilemiyor.";
+
+/// The page positions free-floating objects are anchored to (their
+/// `pageIndex`; an unreadable one counts as page 0, the most restrictive).
+/// A page operation must keep every such page at its position (and every
+/// page before it), or the object would move to another page.
+fn floating_anchor(root: &Element) -> Option<usize> {
+    root.children
+        .iter()
+        .filter(|c| c.tag == "floatingObjectList")
+        .flat_map(|l| l.children.iter())
+        .map(|o| integer(o.get("pageIndex")).map_or(0, |i| i as usize))
+        .max()
+}
 
 pub struct PageOps {
     pub kind: &'static str,
@@ -351,6 +365,9 @@ pub fn prepare_add_page(
     let new_page = page.get("id").unwrap().to_string();
     let new_layer = page.find_path("layerList/layer").and_then(|x| x.get("id")).unwrap().to_string();
     let at = (after + 1) as usize;
+    if floating_anchor(&l.root).is_some_and(|anchor| anchor >= at) {
+        return pageops(FLOATING);
+    }
     l.root.children[l.pi].children.insert(at, page);
     let (ti, tpi) = (l.ti, one_po(&l.root.children[l.ti], "pageList")?);
     l.root.children[ti].children[tpi].children.insert(at, node);
@@ -402,6 +419,11 @@ pub fn prepare_delete_page(deps: &dyn Deps, snapshot: &dyn Any, targets: Vec<Opt
     if l.root.iter().any(|n| GROUPED.contains(&n.tag.as_str())) {
         return pageops("Gruplanmış veya ses içeren notlar desteklenmiyor.");
     }
+    if let Some(anchor) = floating_anchor(&l.root) {
+        if targets.iter().any(|t| find(&l, t).is_some_and(|i| i <= anchor)) {
+            return pageops(FLOATING);
+        }
+    }
     let last = last_page(&l.root.children[l.ai], l.pages());
     let mut released = Vec::new();
     for identity in &targets {
@@ -446,6 +468,9 @@ pub fn prepare_reorder_pages(deps: &dyn Deps, snapshot: &dyn Any, order: Vec<Opt
     }
     if order == current {
         return pageops("Sayfa sırası zaten bu.");
+    }
+    if floating_anchor(&l.root).is_some_and(|anchor| order[..=anchor.min(order.len() - 1)] != current[..=anchor.min(current.len() - 1)]) {
+        return pageops(FLOATING);
     }
     let last = last_page(&l.root.children[l.ai], l.pages());
     let tpi = one_po(&l.root.children[l.ti], "pageList")?;
@@ -500,6 +525,7 @@ pub fn page_ops_state(deps: &dyn Deps, snapshot: Option<&dyn Any>) -> R<OpsState
         Err(e) => return Err(e),
     };
     let media = l.root.iter().any(|n| GROUPED.contains(&n.tag.as_str()));
+    let anchor = floating_anchor(&l.root);
     let pages = l.pages();
     let pdf_note = pages.iter().any(|p| p.find("pdfDataList").is_some());
     let mut rows = Vec::new();
@@ -509,6 +535,8 @@ pub fn page_ops_state(deps: &dyn Deps, snapshot: Option<&dyn Any>) -> R<OpsState
         let layer_ok = layer_list.children.iter().all(|layer| layer.children.iter().all(|n| n.tag == "objectList"));
         let reason = if media {
             Some("Gruplanmış veya ses içeren notlarda sayfa silinemiyor.")
+        } else if anchor.is_some_and(|a| index <= a) {
+            Some(FLOATING)
         } else if page_has_media(page) {
             Some("PDF veya resim içeren sayfa henüz silinemiyor.")
         } else if !layer_ok || objects.iter().any(|o| o.get("type") != Some("stroke") || !o.is_empty()) {
@@ -536,7 +564,9 @@ pub fn page_ops_state(deps: &dyn Deps, snapshot: Option<&dyn Any>) -> R<OpsState
     Ok(OpsState {
         editable: true,
         reason: None,
-        can_reorder: pages.len() > 1,
+        // Reordering would have to keep every anchored page in place; the
+        // sorter offers whole reorders, so it is closed with floating objects.
+        can_reorder: pages.len() > 1 && anchor.is_none(),
         can_add: pages.len() < MAX_PAGES && l.root.children[l.ai].get_or("orientation", "0") == "0",
         pages: rows,
     })

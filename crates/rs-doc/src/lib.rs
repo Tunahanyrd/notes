@@ -19,6 +19,7 @@ pub mod mime;
 pub mod payload;
 pub mod writer;
 pub mod doc;
+pub mod objects;
 pub mod pyapi;
 
 pub mod document;

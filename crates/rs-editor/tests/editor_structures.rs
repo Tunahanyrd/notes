@@ -305,3 +305,69 @@ fn floating_object_list_mirrors_the_writer() {
     add_pen_page(&mut root);
     assert!(projection(&root, "Boş liste").text_edit);
 }
+
+/// A free-floating picture as a phone inserts it (structure of a Notes
+/// 4.4.45 test note, synthetic values): `pageIndex`, its fill naming a
+/// content file, the object hash `SHA256(id + modifiedTime)` and the note-tree
+/// entry `floatingObjectList/object id t h`.
+fn add_floating_picture(root: &mut Element, page_index: &str) {
+    const PICTURE: &str = "0e5d4a3c-4444-4c1e-9a55-0a4fbb2f7a10";
+    let time = "1700000000500";
+    let hash = rs_doc::util::hex(&rs_doc::util::sha256(format!("{PICTURE}{time}").as_bytes()));
+    let mut object = el("object", &[("type", "image"), ("id", PICTURE), ("modifiedTime", time), ("hash", &hash),
+        ("pageIndex", page_index), ("layoutType", "3"), ("ownerPageWidth", "1080"), ("ownerPageHeight", "1527")]);
+    object.children.push(el("rect", &[("l", "100.0"), ("t", "200.0"), ("r", "500.0"), ("b", "600.0")]));
+    object.children.push(el("originalRect", &[("l", "100.0"), ("t", "200.0"), ("r", "500.0"), ("b", "600.0")]));
+    let mut fill = el("fillEffect", &[("type", "image"), ("imageId", &"a".repeat(64)), ("imageType", "0")]);
+    fill.children.push(el("stretchOffset", &[("l", "0.0"), ("t", "0.0"), ("r", "0.0"), ("b", "0.0")]));
+    object.children.push(fill);
+    let mut list = Element::new("floatingObjectList");
+    list.children.push(object);
+    root.children.retain(|c| c.local() != "floatingobjectlist");
+    root.children.push(list);
+    let tree = child_mut(root, "notetree");
+    tree.children.retain(|c| c.local() != "floatingobjectlist");
+    let mut tree_list = Element::new("floatingObjectList");
+    tree_list.children.push(el("object", &[("id", PICTURE), ("t", time), ("h", &hash)]));
+    tree.children.push(tree_list);
+}
+
+#[test]
+fn a_free_floating_picture_rides_along_a_text_edit() {
+    // Before (editor-projection-v2): EDITOR_FLOATING for any non-empty list.
+    let mut root = plain("Resimli", "metin");
+    add_pen_page(&mut root);
+    add_floating_picture(&mut root, "0");
+    let p = projection(&root, "Resimli");
+    assert!(p.text_edit, "{:?}", p.reason);
+    let before = etree::xml_bytes(child(&root, "floatingobjectlist"));
+    let edited = model("metin ve ek", vec![], vec![]);
+    let out = edit::prepare_editor_edit(&snap(&root, "Resimli"), &Val::str("Resimli"), &edited, &now(&root), &backend()).unwrap();
+    let full = etree::parse(&out.full_xml).unwrap();
+    assert_eq!(etree::xml_bytes(child(&full, "floatingobjectlist")), before, "carried byte for byte");
+    let upload = etree::parse(&out.upload_xml).unwrap();
+    assert!(upload.children.iter().all(|c| c.local() != "floatingobjectlist"), "never uploaded");
+    assert_eq!(etree::xml_bytes(child(&upload, "notetree")), etree::xml_bytes(child(&full, "notetree")));
+}
+
+#[test]
+fn a_floating_list_that_cannot_be_carried_stays_read_only() {
+    // Anchored outside the note.
+    let mut root = plain("Kapalı", "metin");
+    add_pen_page(&mut root);
+    add_floating_picture(&mut root, "7");
+    assert_eq!(reason(&root).as_deref(), Some(rs_doc::doc::EDITOR_FLOATING));
+    // Tree entry out of date.
+    let mut root = plain("Kapalı", "metin");
+    add_pen_page(&mut root);
+    add_floating_picture(&mut root, "0");
+    let tree = child_mut(&mut root, "notetree");
+    child_mut(tree, "floatingobjectlist").children[0].set("t", "1");
+    assert_eq!(reason(&root).as_deref(), Some(rs_doc::doc::EDITOR_FLOATING));
+    // A group inside the picture.
+    let mut root = plain("Kapalı", "metin");
+    add_pen_page(&mut root);
+    add_floating_picture(&mut root, "0");
+    child_mut(&mut root, "floatingobjectlist").children[0].children.push(el("object", &[("type", "stroke")]));
+    assert_eq!(reason(&root).as_deref(), Some(rs_doc::doc::EDITOR_FLOATING));
+}

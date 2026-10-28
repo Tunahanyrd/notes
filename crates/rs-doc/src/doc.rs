@@ -120,10 +120,12 @@ pub fn plain_structure(resource: &Element, payload_limits: &Limits, max_text: us
 /// sends the note tree and the changed text objects only (the page list and
 /// content file list go out empty, exactly like a title edit), so every page
 /// object and binary part stays byte-for-byte on the server. A text object
-/// without a `<text>` child is a native empty text box. Still rejected:
-/// objects outside the page list, free-floating objects, voice recordings /
-/// attachments, and the inventory, identity and text-object checks of the
-/// plain gate.
+/// without a `<text>` child is a native empty text box. Free-floating objects
+/// that the shared rule admits (`objects::floating_inventory`) are carried the
+/// same way (the upload never contains `floatingObjectList`). Still rejected:
+/// other objects outside the page list, free-floating objects that cannot be
+/// carried, voice recordings / attachments, and the inventory, identity and
+/// text-object checks of the plain gate.
 pub fn editor_structure(resource: &Element, payload_limits: &Limits, max_text: usize) -> Result<PlainStructure> {
     structure(resource, payload_limits, max_text, true)
 }
@@ -151,6 +153,25 @@ fn subtree_set<'a>(roots: impl IntoIterator<Item = &'a Element>) -> std::collect
         }
     }
     out
+}
+
+/// Whether the note's free-floating objects can ride along a text edit
+/// unchanged (`objects::floating_inventory` over the resource and tree lists).
+fn floating_carried(resource: &Element, tree: &Element) -> bool {
+    let lists: Vec<&Element> = resource.children.iter().filter(|n| n.local() == "floatingobjectlist").collect();
+    let tree_lists: Vec<&Element> = tree.children.iter().filter(|n| n.local() == "floatingobjectlist").collect();
+    let pages: Vec<&Element> = resource.children.iter().filter(|n| n.local() == "pagelist").collect();
+    if lists.len() != 1 || tree_lists.len() != 1 || pages.len() != 1 || lists[0].children.is_empty() {
+        return false;
+    }
+    crate::objects::floating_inventory(
+        lists[0].children.iter().map(|o| {
+            (o.tag.as_str(), o.attrs.as_slice(), o.iter().skip(1).map(|n| (n.tag.as_str(), n.attrs.as_slice())))
+        }),
+        tree_lists[0].children.iter().map(|e| (e.tag.as_str(), e.attrs.as_slice(), e.children.len())),
+        pages[0].children.len(),
+    )
+    .is_some()
 }
 
 pub const EDITOR_FLOATING: &str = "Bu nottaki serbest yerleşimli nesneler yüzünden metin henüz güvenle düzenlenemiyor.";
@@ -217,10 +238,19 @@ fn structure(resource: &Element, payload_limits: &Limits, max_text: usize, edito
     // Page content is carried unchanged by an editor write: the page and
     // content-file lists (and their note-tree mirrors) and the attributes'
     // string table that page objects refer to (pen/brush names).
+    // Free-floating objects (a picture inserted on a phone) are carried the
+    // same way when the shared ink/editor rule admits every one of them
+    // (`objects::floating_inventory`): self-contained, anchored to a page,
+    // mirrored by the note tree. The upload never contains the list.
+    let floating_carried = editor && floating_carried(resource, tree);
     let page_content = if editor {
+        let carried = |n: &Element| {
+            let name = n.local();
+            matches!(name.as_str(), "pagelist" | "contentfilelist") || (floating_carried && name == "floatingobjectlist")
+        };
         let mut roots: Vec<&Element> = Vec::new();
-        roots.extend(resource.children.iter().filter(|n| matches!(n.local().as_str(), "pagelist" | "contentfilelist")));
-        roots.extend(tree.children.iter().filter(|n| matches!(n.local().as_str(), "pagelist" | "contentfilelist")));
+        roots.extend(resource.children.iter().filter(|n| carried(n)));
+        roots.extend(tree.children.iter().filter(|n| carried(n)));
         roots.extend(attrs.children.iter().filter(|n| n.local() == "stringidlist"));
         subtree_set(roots)
     } else {
@@ -230,7 +260,7 @@ fn structure(resource: &Element, payload_limits: &Limits, max_text: usize, edito
     if editor {
         for node in resource.iter() {
             let name = node.local();
-            if matches!(name.as_str(), "floatingobjectlist") && !node.children.is_empty() {
+            if matches!(name.as_str(), "floatingobjectlist") && !node.children.is_empty() && !in_pages(node) {
                 return Err(d(EDITOR_FLOATING));
             }
             if matches!(name.as_str(), "attachment" | "voice" | "extrabundle") {

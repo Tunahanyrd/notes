@@ -242,9 +242,19 @@ pub fn prepare_ink_document(
     if t.len(pages) > page_bound || all.iter().any(|n| forbidden.contains(&t.tag(*n))) {
         return ink("cached/grouped/media ink requires a separate invalidation contract");
     }
-    if (recipe_version == 1 && t.len(t.one(root, "contentFileList")?) > 0) || t.len(t.one(root, "floatingObjectList")?) > 0 {
+    if (recipe_version == 1 && t.len(t.one(root, "contentFileList")?) > 0)
+        || (recipe_version == 1 && t.len(t.one(root, "floatingObjectList")?) > 0)
+    {
         return ink("attachments and floating objects are unsupported");
     }
+    // Recipe 2+: free-floating pictures/shapes/text boxes are carried through
+    // byte-identically like page-layer objects (core::objects); anything
+    // else in the list keeps the note refused.
+    let floating = if t.len(t.one(root, "floatingObjectList")?) > 0 {
+        super::objects::tree_floating(&t, root).map_err(|_| InkErr::Ink("attachments and floating objects are unsupported".into()))?
+    } else {
+        Vec::new()
+    };
     let sections = ["noteTree", "contentFileList", "attributes", "pageList", "floatingObjectList", "bodyText"];
     if t.children(root).iter().any(|n| !sections.contains(&t.tag(*n))) {
         return ink("unknown resource section");
@@ -279,10 +289,14 @@ pub fn prepare_ink_document(
             }
         }
     }
+    for o in &floating {
+        passthrough_ticks.push(doc_integer(t.get(*o, "modifiedTime"))?);
+    }
+    let floating_count = floating.len();
     let wanted: HashSet<&str> = HashSet::from(["type", "id", "modifiedTime", "hash"]);
     let nested = t.iter(pages).into_iter().filter(|n| t.tag(*n) == "object").count();
     if objects.len() != stroke_count
-        || nested != objects.len() + passthrough_ticks.len()
+        || nested + floating_count != objects.len() + passthrough_ticks.len()
         || objects.iter().any(|o| {
             let keys: HashSet<&str> = t.nodes[*o].attrs.iter().map(|(k, _)| k.as_str()).collect();
             t.get(*o, "type") != Some("stroke") || t.len(*o) != 0 || keys != wanted

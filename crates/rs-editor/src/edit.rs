@@ -27,7 +27,9 @@ pub trait Backend {
 /// another recipe are recomputed (rs-store drops them on open).
 /// v2: text objects next to page objects (handwriting, images, shapes) and
 /// binary parts; native empty text boxes without `<text>`; 32768 annotations.
-pub const PROJECTION_RECIPE: &str = "editor-projection-v2";
+/// v3: also next to free-floating objects the shared rule carries
+/// (`rs_doc::objects::floating_inventory`, e.g. a picture inserted on a phone).
+pub const PROJECTION_RECIPE: &str = "editor-projection-v3";
 
 /// The `now_ms` argument after defaulting: an int, or a non-int object.
 pub enum Now { Int(PyInt), NotInt }

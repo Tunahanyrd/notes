@@ -16,7 +16,7 @@ use pyo3::types::{PyDict, PyList, PyTuple};
 use std::any::Any;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-pub const PROJECTION_RECIPE: &str = "ink-projection-v7:carried-objects";
+pub const PROJECTION_RECIPE: &str = "ink-projection-v8:floating-objects";
 pub const MAX_PROJECTION_PAGES: usize = 2048;
 pub const MAX_PROJECTION_STROKES: usize = 20_000;
 pub const MAX_PROJECTION_POINTS: usize = 5_000_000;
@@ -79,7 +79,7 @@ fn disabled(reason: &str) -> Projection {
 }
 
 /// ink_projection._note_ink_reason: whole-note refusals (media, groups,
-/// shapes/text boxes, floating objects stay fail-closed).
+/// objects that cannot be carried through byte-identically).
 pub fn note_ink_reason(root: &Element) -> Option<&'static str> {
     let tags: HashSet<&str> = root.iter().map(|n| n.tag.as_str()).collect();
     if tags.contains("voiceDataList") || tags.contains("attachedFileMap") {
@@ -106,7 +106,10 @@ pub fn note_ink_reason(root: &Element) -> Option<&'static str> {
     if !foreign.is_empty() || tags.contains("customObject") || tags.contains("shape") {
         return Some("Bu notta şekil veya metin kutusu gibi nesneler var; kalem henüz desteklenmiyor.");
     }
-    if root.children.iter().any(|n| n.tag == "floatingObjectList" && !n.is_empty()) {
+    // Free-floating objects (a picture inserted on a phone, placed on a page
+    // by `pageIndex`) are carried the same way when self-contained and
+    // mirrored by the note tree (util::floating_objects); others stay closed.
+    if floating_objects(root).is_err() {
         return Some("Bu notta serbest yerleşimli nesne var; kalem henüz desteklenmiyor.");
     }
     None

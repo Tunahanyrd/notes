@@ -1,74 +1,18 @@
-//! Non-stroke page objects the ink writers carry through untouched.
+//! Non-stroke objects the ink writers carry through untouched.
 //!
-//! Samsung stores images (`type="image"`), shapes (`shape`), lines (`line`)
-//! and text boxes (`textBox`) inline in a layer's `objectList`; none of them
-//! has a binary MIME part. An ink edit (append, first stroke, highlighter,
-//! erase, move) only appends/removes/rewrites *stroke* objects of one layer,
-//! recomputes that layer's and page's hashes from the children's stored
-//! hashes, and may release the target page's canvas cache. Every other object
-//! therefore stays byte-identical as long as it is self-contained: it must not
-//! nest further objects, must not reference a canvas cache (`fileId`), and an
-//! image must reference exactly one content file through its fill. This
-//! module is the single admission rule; rs-ink's append (over its `Tree`) and
-//! rs-ops' writers (over their `Element`) both adapt to it.
-//!
-//! Observed (structure only) in a private library copy: 45 page-layer images,
-//! each `fillEffect type="image" imageId=<content file id>`, the content file
-//! `refCount` equal to its image uses, object hash `SHA256(id + modifiedTime)`
-//! for every object type. Text boxes on page layers were not observed; the
-//! rule is the same and synthetic tests cover it.
-use super::{doc_integer, is_canonical_uuid, sha256_hex};
+//! The admission rule itself lives in `rs_doc::objects` (shared with rs-ops
+//! and the text editor gate): self-contained images, shapes, lines and text
+//! boxes on page layers, and the same object types in the note-level
+//! `floatingObjectList` (a picture inserted on a phone) when their
+//! `pageIndex` names a page and their note-tree entries mirror them. An ink
+//! edit (append, first stroke, highlighter, erase, move) only
+//! appends/removes/rewrites *stroke* objects of one layer, recomputes that
+//! layer's and page's hashes from the children's stored hashes and may
+//! release the target page's canvas cache, so every carried object stays
+//! byte-identical. This module adapts the rule to rs-ink's [`super::xml::Tree`].
+use super::{ink, R};
 
-/// Object types an ink edit may carry through unchanged.
-pub const PASSTHROUGH_TYPES: [&str; 4] = ["image", "shape", "line", "textBox"];
-
-fn attr<'a>(attrs: &'a [(String, String)], key: &str) -> Option<&'a str> {
-    attrs.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
-}
-
-fn is_sha256(v: &str) -> bool {
-    v.len() == 64 && v.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
-
-/// `Some(image_file)` when an object with these attributes and descendants
-/// (pre-order, the object itself excluded; `(tag, attributes)`) is a
-/// self-contained non-stroke object an ink edit may carry through. For an
-/// image `image_file` is the content-file id its fill references; `None`
-/// otherwise. `None` (outer) refuses the object.
-pub fn passthrough_object<'a>(
-    attrs: &[(String, String)],
-    descendants: impl IntoIterator<Item = (&'a str, &'a [(String, String)])>,
-) -> Option<Option<String>> {
-    let kind = attr(attrs, "type")?;
-    if !PASSTHROUGH_TYPES.contains(&kind) {
-        return None;
-    }
-    let id = attr(attrs, "id").filter(|i| is_canonical_uuid(i))?;
-    let modified = doc_integer(attr(attrs, "modifiedTime")).ok().filter(|m| *m >= 1)?;
-    if attr(attrs, "hash") != Some(sha256_hex(format!("{id}{modified}").as_bytes()).as_str()) {
-        return None;
-    }
-    if attrs.iter().any(|(k, _)| k == "fileId" || k == "imageId") {
-        return None;
-    }
-    let mut images: Vec<String> = Vec::new();
-    for (tag, a) in descendants {
-        if tag == "object" || a.iter().any(|(k, _)| k == "fileId") {
-            return None;
-        }
-        if let Some(image) = attr(a, "imageId") {
-            if tag != "fillEffect" || attr(a, "type") != Some("image") || !is_sha256(image) {
-                return None;
-            }
-            images.push(image.to_string());
-        }
-    }
-    match (kind, images.len()) {
-        ("image", 1) => Some(images.pop()),
-        (_, 0) if kind != "image" => Some(None),
-        _ => None,
-    }
-}
+pub use rs_doc::objects::{floating_object, passthrough_object, PASSTHROUGH_TYPES};
 
 /// [`passthrough_object`] over an rs-ink [`super::xml::Tree`] node.
 pub fn tree_passthrough(t: &super::xml::Tree, node: super::xml::NodeId) -> Option<Option<String>> {
@@ -79,9 +23,40 @@ pub fn tree_passthrough(t: &super::xml::Tree, node: super::xml::NodeId) -> Optio
     passthrough_object(&t.nodes[node].attrs, all[1..].iter().map(|n| (t.tag(*n), t.nodes[*n].attrs.as_slice())))
 }
 
+/// The note's free-floating objects (`floatingObjectList` children) when
+/// every one of them can be carried through: [`floating_object`] for each and
+/// the note-tree mirror (`noteTree/floatingObjectList`) entry for entry.
+/// Returns the objects (empty when the list is absent or empty).
+pub fn tree_floating(t: &super::xml::Tree, root: super::xml::NodeId) -> R<Vec<super::xml::NodeId>> {
+    let lists: Vec<_> = t.children(root).iter().copied().filter(|n| t.tag(*n) == "floatingObjectList").collect();
+    let tree = t.one(root, "noteTree")?;
+    let tree_lists: Vec<_> = t.children(tree).iter().copied().filter(|n| t.tag(*n) == "floatingObjectList").collect();
+    if lists.len() > 1 || tree_lists.len() > 1 {
+        return ink("duplicate floating object list");
+    }
+    let objects: Vec<_> = lists.first().map(|l| t.children(*l).to_vec()).unwrap_or_default();
+    let entries: Vec<_> = tree_lists.first().map(|l| t.children(*l).to_vec()).unwrap_or_default();
+    let page_count = t.len(t.one(root, "pageList")?);
+    let ok = rs_doc::objects::floating_inventory(
+        objects.iter().map(|o| {
+            let all = t.iter(*o);
+            let descendants: Vec<(&str, &[(String, String)])> =
+                all[1..].iter().map(|n| (t.tag(*n), t.nodes[*n].attrs.as_slice())).collect();
+            (t.tag(*o), t.nodes[*o].attrs.as_slice(), descendants)
+        }),
+        entries.iter().map(|e| (t.tag(*e), t.nodes[*e].attrs.as_slice(), t.len(*e))),
+        page_count,
+    );
+    match ok {
+        Some(_) => Ok(objects),
+        None => ink("floating objects cannot be carried"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::sha256_hex;
 
     fn a(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
         pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()

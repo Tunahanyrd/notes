@@ -163,9 +163,10 @@ pub(crate) fn load(
     if pages.len() > inkcore_pages() || root.iter().any(|n| matches!(n.tag.as_str(), "strokeGroup" | "voiceDataList" | "attachedFileMap")) {
         return ink("grouped/media ink is unsupported");
     }
-    if !root.children[sect(&root, "floatingObjectList")?].is_empty() {
-        return ink("floating objects are unsupported");
-    }
+    sect(&root, "floatingObjectList")?;
+    // Free-floating pictures/shapes/text boxes are carried through untouched.
+    let floating_ticks: Vec<i64> =
+        floating_objects(&root)?.iter().map(|o| integer(o.get("modifiedTime"))).collect::<R<_>>()?;
     if root.children.iter().any(|n| !SUPPORTED_SECTIONS.contains(&n.tag.as_str())) {
         return ink("unknown resource section");
     }
@@ -279,6 +280,7 @@ pub(crate) fn load(
         }
         ticks.extend([integer(attrs.get("modifiedTime"))?, page_time, layer_time]);
         ticks.extend(carried_ticks.iter().copied());
+        ticks.extend(floating_ticks.iter().copied());
         let revision = integer(attrs.get("fileRevision"))? as i128 + 1;
         let max = ticks.into_iter().chain(records.values().map(|(_, b)| b.modified_time)).max().unwrap();
         let tick = max as i128 + 1;
