@@ -696,6 +696,11 @@ impl Engine {
     }
 
     pub fn create_editor(&self, title: &Val, model: &Val) -> R<Val> {
+        // A new note has no object a text anchor (objectSpan) could name; the
+        // upload would be refused later, so refuse the model up front.
+        if areas::normalize_model(model)?.get("objects").is_some() {
+            return Err(Fail::store("anchored_object", "Metnine resim yerleşmiş bir not yeni not olarak oluşturulamaz.", 422));
+        }
         let result = self.store.create_editor(&self.host, title, model)?;
         self.request_sync();
         Ok(result)

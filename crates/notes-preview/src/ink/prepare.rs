@@ -796,6 +796,11 @@ fn text_object(obj: &Element, page_box: bool, lenient: bool) -> P<Option<Flow>> 
             }
         }
         let rich = rs_editor::edit::object_rich(&clean).map_err(editor_fail)?;
+        // An anchored object (`objectSpan`) is drawn from its own frame; the
+        // strict reading refuses it so the lenient one blanks its U+FFFC.
+        if !rich.objects.is_empty() {
+            return fail("Metne yerleşik nesne");
+        }
         Ok((rich.model, sections))
     })();
     let (model, sections) = parsed.map_err(|e| PrepErr(format!("Metin biçimi desteklenmiyor. ({})", e.0)))?;

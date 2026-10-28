@@ -110,6 +110,7 @@ kopyasında çevrimdışı** hazırlık da geçti (yalnız sonuç/sayı yazdır�
   type="image"` (`stretchOffset`, `tilingOffset`, `ninePatchRect`). Not ağacında
   `noteTree/floatingObjectList/object id t h`, içerik dosyası `refCount` 1.
   Gövde metni resmi `objectSpan` (U+FFFC çevresinde, değer `<id>,…`) ile çapalar.
+  Bu metin `editor-projection-v4` ile düzenlenebilir (çapa yerinde kalır, silinemez; ayrıntı docs/EDITOR_FORMAT.md).
 - Kural tek yerde: `rs_doc::objects` (`passthrough_object`, `floating_object`,
   `floating_inventory`); rs-ink `core::objects::tree_floating`, rs-ops
   `util::floating_objects` ve metin editörü aynı kuralı kullanır. Kabul:

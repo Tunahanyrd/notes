@@ -101,8 +101,8 @@ is unused natively); a start that is not a paragraph start is rejected. An
 identical duplicate for the same paragraph (seen: a zero-length copy of
 `parsingState`) is dropped; differing duplicates are rejected. Re-encoding
 writes canonical one-paragraph ranges. Styled leading/empty paragraphs,
-unknown paragraph properties, font-name spans, embedded object spans, and
-unknown annotation grammar currently reject editing.
+unknown paragraph properties, font-name spans and unknown annotation grammar
+currently reject editing. Object spans are described below.
 
 ### Links (`span/hyperText`, type 9)
 
@@ -117,6 +117,56 @@ or `<?`/`?>` is rejected. The UI shows the span as a link (non-inclusive
 mark, so typing after it does not extend it), the text stays editable and
 the stored value is carried unchanged. No link is created and none is
 opened from the editor.
+
+### Text-anchored objects (`objectSpan/objectSpan`, `s1.a`) — editor-projection-v4
+
+A picture inserted into the text on a phone lives in the note-level
+`floatingObjectList` (see docs/INK_APPLICATION.md, "Serbest yerleşimli
+nesneler"); the body text marks its place with one U+FFFC wrapped in an
+object span:
+
+    <?a 'objectSpan/objectSpan'='<object id>,0,0'?>[U+FFFC]<?a 'objectSpan/objectSpan'?>
+
+Static evidence (Notes 4.4.45.37 APK, jadx of `classes7.dex`, not committed):
+`db.n.t` maps the group `objectSpan` to annotation type 4 and accepts only the
+kind `objectSpan`; `s1.a.c` parses the value as `id,int,int` (or a lone id,
+anything else fails); `s1.a.e` always writes `'objectSpan/objectSpan'='id,e,f'`;
+the binary form (`q1.n`/`r1.r`, format ≥ 2035) stores start, end = start + 1
+and the two ints, so an anchor covers exactly one unit; `n1.h.f` resolves every
+anchor id against the note's body objects and throws
+`setBodyObjectToObjectSpan - Fail to find object` when one is missing. The
+meaning of the two ints is **not** known; they are carried, never interpreted.
+Observed (private library copy, counts only): one note, one anchor, value
+`id,0,0`, length 1, on U+FFFC, id present in `floatingObjectList`; no U+FFFC
+without an anchor.
+
+Model: an optional `objects` list, omitted when empty (so models and
+fingerprints of other notes are unchanged):
+
+```json
+"objects": [{"start": 5, "objectId": "<uuid>", "type": "image"}]
+```
+
+`start` is the UTF-16 offset of its U+FFFC, ascending, one anchor per object.
+`type` (`image`/`shape`/`line`/`textBox`) is display information the
+projection takes from the floating object; the stream does not hold it, and
+the model fingerprint ignores it. The raw value stays out of the model (like
+page slices) and is carried byte for byte from the baseline.
+
+Rules (inferred, fail-closed): the body is editable only when every anchor's
+id names exactly one object in the note's `floatingObjectList` that the shared
+carry rule admits; an anchor in the title keeps title and body read-only.
+An edit must keep the same anchors in the same order — none added, removed,
+swapped or retyped. Deleting an anchor would also mean removing the floating
+object, its note-tree entry and the content file's `refCount`, which is not
+established, so the editor keeps anchors (the UI shows an undeletable inline
+chip; pasted text never creates U+FFFC). Only the anchor's position follows the
+text. The encoder writes the anchor at its new U+FFFC with the stored value
+and proves by re-reading that the stream yields exactly those anchors. A new
+note (or duplicate) cannot contain anchors. The floating list itself is
+never uploaded; a no-edit save writes nothing (an unchanged body is never
+re-encoded). Native re-layout of the picture after text moves it was **not**
+verified on a device.
 
 ### Page slices (`sectionData/sectionData`, `s1.c`)
 
@@ -178,9 +228,9 @@ objects (`floatingObjectList`, e.g. a picture inserted on a phone, placed on
 page `pageIndex`) are carried the same way when the shared rule
 (`rs_doc::objects::floating_inventory`: self-contained image/shape/line/text
 box, `pageIndex` inside the note, note-tree entries mirroring them) admits
-every one of them; the upload never contains the list. On the phone test note
-the body text still stays read-only: it anchors the picture with an
-`objectSpan` annotation the editor grammar does not know (fail-closed).
+every one of them; the upload never contains the list. Since v4 the body text
+that anchors such a picture with `objectSpan` is editable too (section
+"Text-anchored objects" above).
 
 Still read-only, with plain-language reasons: free-floating objects the rule
 does not admit, voice/attachment/extra-bundle nodes,

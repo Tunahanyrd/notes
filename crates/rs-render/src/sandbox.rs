@@ -558,12 +558,13 @@ mod mode_tests {
         let dir = std::env::temp_dir().join(format!("notes-env-prefix-{}", std::process::id()));
         let sub = dir.join("a=b");
         std::fs::create_dir_all(&sub).unwrap();
-        let program = sub.join("show");
-        std::fs::write(&program, "#!/bin/sh\nprintf '%s|%s' \"$PATH\" \"$HOME\"\n").unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        // A symlink to /bin/sh, not a freshly written script: exec of a file
+        // just written races with fork in parallel tests (ETXTBSY).
+        let program = sub.join("sh");
+        std::os::unix::fs::symlink("/bin/sh", &program).unwrap();
         let mut args = direct_prefix();
         args.push(program.to_string_lossy().into_owned());
+        args.extend(["-c".to_string(), "printf '%s|%s' \"$PATH\" \"$HOME\"".to_string()]);
         let out = run(&args, None, PDF_LIMITS, true, Duration::from_secs(10)).ok().expect("spawn");
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(out.code, Some(0));

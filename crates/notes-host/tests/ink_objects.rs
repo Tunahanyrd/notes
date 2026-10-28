@@ -773,3 +773,54 @@ fn page_operations_keep_a_floating_picture_on_its_page() {
     let state = areas::page_ops_state(Some(&note)).unwrap();
     assert_eq!(state.get("canReorder"), Some(&Val::Bool(false)), "{state:?}");
 }
+
+#[test]
+fn the_editor_opens_the_body_that_anchors_the_floating_picture() {
+    // The preview fixture (structure of the phone test note): the body text
+    // anchors the floating picture with `objectSpan` around U+FFFC.
+    // Before (editor-projection-v3): "Bilinmeyen biçimlendirme sözdizimi."
+    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../notes-preview/tests/fixtures/floating_note.json")).unwrap();
+    let fixture = rs_store::val::loads(&text).unwrap();
+    let p = areas::editor_projection_val(fixture.get("snapshot").unwrap()).unwrap();
+    assert!(on(&caps(&p), "textEdit") && on(&caps(&p), "richStyle"), "{p:?}");
+    let model = p.get("model").unwrap();
+    assert_eq!(model.get("text").and_then(Val::as_str), Some("\n\u{fffc}\n"));
+    let Some(Val::List(objects)) = model.get("objects") else { panic!("{model:?}") };
+    assert_eq!(objects.len(), 1);
+    assert_eq!(objects[0].get("start"), Some(&Val::Int(1)));
+    assert_eq!(objects[0].get("objectId").and_then(Val::as_str), Some(FLOATING));
+    assert_eq!(objects[0].get("type").and_then(Val::as_str), Some("image"));
+    // The probe's edit (tools/live_editor_anchor_probe.py): text before and
+    // after the picture, the first word bold; the anchor moves with the text.
+    use rs_editor::pyval::{PyInt, Val as E};
+    let snap = snapshot::from_dict(fixture.get("snapshot").unwrap()).unwrap();
+    let before = "Linux önce ";
+    let d = before.encode_utf16().count() as i128;
+    let wanted = E::Dict(vec![
+        (E::str("schemaVersion"), E::int(1)),
+        (E::str("text"), E::Str(format!("{before}\n\u{fffc}\n Linux sonra"))),
+        (E::str("spans"), E::List(vec![E::Dict(vec![(E::str("start"), E::int(0)), (E::str("end"), E::int(5)),
+            (E::str("kind"), E::str("bold")), (E::str("value"), E::Bool(true)), (E::str("interval"), E::int(3))])])),
+        (E::str("paragraphs"), E::List(vec![])),
+        (E::str("objects"), E::List(vec![E::Dict(vec![(E::str("start"), E::int(1 + d)), (E::str("objectId"), E::str(FLOATING)),
+            (E::str("type"), E::str("image"))])])),
+    ]);
+    let resolved = rs_editor::edit::Snapshot { title: Some(snap.title.clone()), resource_xml: snap.resource_xml.clone() };
+    let be = rs_editor::edit::DocBackend { limits: rs_doc::doc::DocLimits::default(), raw_body: snap.raw_body.clone(), content_type: snap.content_type.clone() };
+    let now = rs_editor::edit::Now::Int(PyInt::from_i128(1_900_000_000_000));
+    let out = rs_editor::edit::prepare_editor_edit(&resolved, &E::Str(snap.title.clone()), &wanted, &now, &be).unwrap();
+    let draft = rs_editor::edit::Snapshot { title: Some(snap.title.clone()), resource_xml: out.full_xml.clone() };
+    let p = rs_editor::edit::editor_projection(Ok(&draft), &be).unwrap();
+    assert!(p.text_edit, "{:?}", p.reason);
+    assert!(rs_editor::pyval::py_eq(p.model.as_ref().unwrap(), &rs_editor::rich::normalize_model(&wanted).unwrap()));
+    let before_root = xml::parse_bytes(&snap.resource_xml).unwrap();
+    assert_eq!(floating_parts_of(&xml::parse_bytes(&out.full_xml).unwrap()), floating_parts_of(&before_root));
+    no_floating_upload(&out.upload_xml);
+}
+
+/// The floating list and its tree mirror (any picture file).
+fn floating_parts_of(root: &Element) -> Vec<Vec<u8>> {
+    let tree = root.find("noteTree").unwrap();
+    vec![xml::xml_bytes(root.find("floatingObjectList").unwrap()), xml::xml_bytes(tree.find("floatingObjectList").unwrap()),
+        xml::xml_bytes(root.find("contentFileList").unwrap())]
+}

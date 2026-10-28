@@ -390,6 +390,31 @@ test('real rich editor selection, formatting, lists, history and revisioned API 
   await page.waitForResponse(response=>response.url().endsWith('/api/notes/one/editor')&&response.status()===503);await expect(editor).toHaveAttribute('contenteditable','true');await expect(editor).toContainText('Yeni satır taslak');
   unavailable=false;await page.keyboard.press('ControlOrMeta+s');await expect(page.getByText('Kaydedilmedi',{exact:true})).toHaveCount(0);expect(model.text).toContain('Yeni satır taslak');expect(writes).toHaveLength(3);
 });
+test('a picture anchored in the text (objectSpan) stays in place while text around it is typed and formatted',async({page})=>{
+  const {notes}=await setup(page);const note=notes.find(n=>n.id==='one');note.body='Önce\n\uFFFC\nSonra';
+  const picture='0e5d4a3c-4444-4c1e-9a55-0a4fbb2f7a10';
+  let model:any={schemaVersion:1,text:note.body,spans:[],paragraphs:[],objects:[{start:5,objectId:picture,type:'image'}]};const writes:any[]=[];
+  await page.route('**/api/notes/one/editor',async route=>{
+    if(route.request().method()==='GET')return route.fulfill({json:{schemaVersion:1,capabilities:{titleEdit:true,textEdit:true,richStyle:true,inkEdit:false},model,reason:null,revision:note.revision}});
+    const data=route.request().postDataJSON();writes.push(data);model=data.model;note.body=model.text;note.revision++;note.syncState='pending';return route.fulfill({json:{note}});
+  });
+  await openNote(page,/Aklımda kalanlar/);const editor=page.getByRole('textbox',{name:'Not içeriği'});await expect(editor).toHaveAttribute('contenteditable','true');
+  const chip=editor.locator('.native-object-anchor');await expect(chip).toHaveCount(1);await expect(chip).toHaveText('Resim');await expect(chip).toHaveAttribute('contenteditable','false');await expect(chip).toHaveCSS('animation-name','none');
+  // Select everything and delete / overtype: the anchor cannot go, so nothing changes.
+  await editor.click();await page.keyboard.press('ControlOrMeta+a');await page.keyboard.press('Delete');await page.keyboard.press('ControlOrMeta+a');await page.keyboard.type('x');
+  await expect(chip).toHaveCount(1);await expect(editor).toContainText('Önce');await expect(editor).toContainText('Sonra');
+  // Type before and after the picture, then bold the first word.
+  await page.keyboard.press('ControlOrMeta+Home');await page.keyboard.press('End');await page.keyboard.type(' yeni');
+  await page.keyboard.press('ControlOrMeta+End');await page.keyboard.type(' son');
+  await editor.locator('p').first().evaluate(element=>{const node=element.firstChild!;const range=document.createRange();range.setStart(node,0);range.setEnd(node,4);const selection=window.getSelection()!;selection.removeAllRanges();selection.addRange(range);});
+  await page.getByRole('button',{name:'Kalın',exact:true}).click();
+  await page.keyboard.press('ControlOrMeta+s');await expect(page.getByText('Kaydedilmedi',{exact:true})).toHaveCount(0);expect(writes).toHaveLength(1);
+  expect(model.text).toBe('Önce yeni\n\uFFFC\nSonra son');expect(model.objects).toEqual([{start:10,objectId:picture,type:'image'}]);expect(model.spans).toContainEqual({start:0,end:4,kind:'bold',value:true,interval:3});
+  // Pasted text never creates an anchor.
+  await editor.click();await page.keyboard.press('ControlOrMeta+End');
+  await editor.evaluate(element=>{const data=new DataTransfer();data.setData('text/plain','a\uFFFCb');element.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));});
+  await expect(chip).toHaveCount(1);await expect(editor).toContainText('Sonra sonab');
+});
 test('unsupported native typing anchors keep original rich content read-only instead of flattening it',async({page})=>{
   const {notes,requests}=await setup(page);const note=notes.find(n=>n.id==='rich');note.titleEditable=true;
   await page.route('**/api/notes/rich/editor',route=>route.fulfill({json:{schemaVersion:1,capabilities:{titleEdit:true,textEdit:true,richStyle:true,inkEdit:false},model:{schemaVersion:1,text:note.body,spans:[{start:0,end:0,kind:'bold',value:false,interval:3}],paragraphs:[]},reason:null,revision:note.revision}}));

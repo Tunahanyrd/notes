@@ -18,6 +18,10 @@ pub const ALIGNMENTS: &[(&str, i64)] = &[("left", 0), ("right", 1), ("center", 2
 pub const BULLETS: &[(&str, i64)] = &[("none", 0), ("check", 2), ("number", 4), ("alphabet", 6), ("roman", 7),
     ("disc", 8), ("whiteCircle", 9), ("upperAlphabet", 10), ("blackSquare", 11), ("whiteSquare", 12)];
 const DIRECTIONS: &[(&str, i64)] = &[("none", 0), ("ltr", 1), ("rtl", 2)];
+/// U+FFFC OBJECT REPLACEMENT CHARACTER: the one text unit an `objectSpan`
+/// anchor covers.
+pub const OBJECT_CHAR: char = '\u{fffc}';
+const BAD_ANCHOR: &str = "Metne yerleşik nesnenin konumu güvenle okunamıyor.";
 
 /// Error classes raised by the editor port (mapped to Python exceptions).
 #[derive(Debug)]
@@ -432,11 +436,52 @@ pub fn model_spans(model: &Val) -> &[Val] {
 pub fn model_paragraphs(model: &Val) -> &[Val] {
     dget(model.dict().unwrap(), "paragraphs").and_then(Val::list).map(|v| v.as_slice()).unwrap_or(&[])
 }
+/// Text-anchored objects (`{"start", "objectId"[, "type"]}`, ascending).
+pub fn model_objects(model: &Val) -> &[Val] {
+    dget(model.dict().unwrap(), "objects").and_then(Val::list).map(|v| v.as_slice()).unwrap_or(&[])
+}
+
+/// `(start, objectId)` of every text-anchored object of a normalized model.
+pub fn object_anchors(model: &Val) -> Vec<(i64, String)> {
+    model_objects(model).iter().map(|o| {
+        let o = o.dict().unwrap();
+        (dget(o, "start").unwrap().exact_i64().unwrap(), dget(o, "objectId").unwrap().as_str().unwrap().to_string())
+    }).collect()
+}
+
+/// The model without the informational object `type` (the stream itself does
+/// not name it; the projection adds it from the note's object list).
+pub fn without_object_types(model: &Val) -> Val {
+    let mut model = model.clone();
+    if let Val::Dict(fields) = &mut model {
+        if let Some(Val::List(objects)) = dget_mut(fields, "objects") {
+            for object in objects.iter_mut() {
+                if let Val::Dict(o) = object { o.retain(|(k, _)| k.as_str() != Some("type")); }
+            }
+        }
+    }
+    model
+}
+
+/// `objectSpan` value (`s1.a.c`): `<object id>,<int>,<int>` (what the native
+/// writer `s1.a.e` emits) or a lone id. The two integers are carried
+/// unchanged, never interpreted. Anything else is refused.
+pub fn object_span_id(value: &str) -> Option<&str> {
+    let int_ok = |s: &str| {
+        let digits = s.strip_prefix('-').unwrap_or(s);
+        ascii_digits(digits, 1, 10) && s.parse::<i64>().is_ok_and(|v| i32::try_from(v).is_ok())
+    };
+    let parts: Vec<&str> = value.split(',').collect();
+    match parts.as_slice() {
+        [id] | [id, _, _] if rs_doc::util::is_canonical_uuid(id) && parts[1..].iter().all(|p| int_ok(p)) => Some(id),
+        _ => None,
+    }
+}
 
 pub fn normalize_model(model: &Val) -> Result<Val> {
     let bad_version = || Error::Document("Editör belgesi sürümü geçersiz.".into());
     let d = model.dict().ok_or_else(bad_version)?;
-    if extra_keys(d, &["schemaVersion", "text", "spans", "paragraphs"])
+    if extra_keys(d, &["schemaVersion", "text", "spans", "paragraphs", "objects"])
         || !py_eq(dget(d, "schemaVersion").unwrap_or(&Val::None), &Val::int(1)) {
         return Err(bad_version());
     }
@@ -445,10 +490,11 @@ pub fn normalize_model(model: &Val) -> Result<Val> {
     let empty = Val::List(vec![]);
     let spans = dget(d, "spans").unwrap_or(&empty);
     let paragraphs = dget(d, "paragraphs").unwrap_or(&empty);
-    let (Some(spans), Some(paragraphs)) = (spans.list(), paragraphs.list()) else {
+    let objects = dget(d, "objects").unwrap_or(&empty);
+    let (Some(spans), Some(paragraphs), Some(objects)) = (spans.list(), paragraphs.list(), objects.list()) else {
         return doc("Biçimlendirme sınırı aşıldı.");
     };
-    if spans.len() + paragraphs.len() > MAX_ANNOTATIONS { return doc("Biçimlendirme sınırı aşıldı."); }
+    if spans.len() + paragraphs.len() + objects.len() > MAX_ANNOTATIONS { return doc("Biçimlendirme sınırı aşıldı."); }
     let mut out_spans = Vec::new();
     let mut by_kind: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
     for span in spans {
@@ -506,8 +552,38 @@ pub fn normalize_model(model: &Val) -> Result<Val> {
         }
         out_paragraphs.push(Val::Dict(item));
     }
-    let output = Val::Dict(vec![(Val::str("schemaVersion"), Val::int(1)), (Val::str("text"), Val::Str(text)),
-        (Val::str("spans"), Val::List(out_spans)), (Val::str("paragraphs"), Val::List(out_paragraphs))]);
+    // Text-anchored objects: each covers exactly the U+FFFC at `start`, in
+    // ascending order, one anchor per object. Omitted from the output when
+    // empty, so models of notes without anchors are unchanged.
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let mut out_objects = Vec::new();
+    let mut previous = -1i64;
+    let mut ids = HashSet::new();
+    for object in objects {
+        let bad = || Error::Document(BAD_ANCHOR.into());
+        let o = match object.dict() {
+            Some(o) if !extra_keys(o, &["start", "objectId", "type"]) => o,
+            _ => return Err(bad()),
+        };
+        let start = dget(o, "start").and_then(|v| contains_val(&boundaries, v))
+            .filter(|s| *s > previous && units.get(*s as usize) == Some(&(OBJECT_CHAR as u16))).ok_or_else(bad)?;
+        let id = match dget(o, "objectId") {
+            Some(Val::Str(id)) if rs_doc::util::is_canonical_uuid(id) && ids.insert(id.clone()) => id.clone(),
+            _ => return Err(bad()),
+        };
+        let mut item = vec![(Val::str("start"), Val::int(start as i128)), (Val::str("objectId"), Val::Str(id))];
+        match dget(o, "type") {
+            None => {}
+            Some(Val::Str(t)) if rs_doc::objects::PASSTHROUGH_TYPES.contains(&t.as_str()) => item.push((Val::str("type"), Val::Str(t.clone()))),
+            Some(_) => return Err(bad()),
+        }
+        previous = start;
+        out_objects.push(Val::Dict(item));
+    }
+    let mut fields = vec![(Val::str("schemaVersion"), Val::int(1)), (Val::str("text"), Val::Str(text)),
+        (Val::str("spans"), Val::List(out_spans)), (Val::str("paragraphs"), Val::List(out_paragraphs))];
+    if !out_objects.is_empty() { fields.push((Val::str("objects"), Val::List(out_objects))); }
+    let output = Val::Dict(fields);
     if json_dumps(&output, Some(2), false).len() > 1024 * 1024 {
         return doc("Editör belgesi kayıt sınırını aşıyor.");
     }
@@ -515,7 +591,9 @@ pub fn normalize_model(model: &Val) -> Result<Val> {
 }
 
 pub fn editor_model_fingerprint(model: &Val) -> Result<String> {
-    let normalized = normalize_model(model)?;
+    // The object `type` is display information derived from the note, not
+    // stream content: a readback compares anchors by position and id.
+    let normalized = without_object_types(&normalize_model(model)?);
     Ok(hex(&Sha256::digest(json_dumps(&normalized, None, true).as_bytes())))
 }
 
@@ -535,6 +613,10 @@ pub struct Rich {
     pub span_order: Vec<String>,
     pub zero_length: Vec<String>,
     pub sections: Vec<SectionT>,
+    /// `objectSpan` anchors: (start, raw value), ascending. Like the page
+    /// slices the raw value stays out of the model; the model names the
+    /// object id at each U+FFFC.
+    pub objects: Vec<(i64, String)>,
 }
 
 /// A side-car record: Ok(str) or Err(type name of a non-str object).
@@ -570,12 +652,12 @@ fn span_record(span: &[(Val, Val)]) -> Result<String> {
 struct Open { group: &'static str, kind: String, value: Val, raw: String, interval: Option<PyInt>, start: i64, seq: usize }
 
 fn token_at(s: &str, pos: usize) -> Option<(usize, &'static str, String, Option<String>)> {
-    // \s+'(span|paragraph|sectionData)/([A-Za-z]+)'(?:='([^']*)')?
+    // \s+'(span|paragraph|sectionData|objectSpan)/([A-Za-z]+)'(?:='([^']*)')?
     let rest = &s[pos..];
     let ws: usize = rest.chars().take_while(|c| py_isspace(*c)).map(char::len_utf8).sum();
     if ws == 0 { return None; }
     let mut r = rest[ws..].strip_prefix('\'')?;
-    let group = ["span", "paragraph", "sectionData"].into_iter().find(|g| r.starts_with(&format!("{g}/")))?;
+    let group = ["span", "paragraph", "sectionData", "objectSpan"].into_iter().find(|g| r.starts_with(&format!("{g}/")))?;
     r = &r[group.len() + 1..];
     let n = r.bytes().take_while(|b| b.is_ascii_alphabetic()).count();
     if n == 0 { return None; }
@@ -619,12 +701,15 @@ pub fn read_rich_text(encoded: &str, span_order: &[Record], zero_length: &[Recor
                 return doc("Bilinmeyen biçimlendirme sözdizimi.");
             };
             offset = next;
-            if group == "sectionData" && kind != "sectionData" { return doc("Bilinmeyen biçimlendirme sözdizimi."); }
+            if (group == "sectionData" || group == "objectSpan") && kind != group { return doc("Bilinmeyen biçimlendirme sözdizimi."); }
             if let Some(value) = value {
                 let mut interval = None;
                 let parsed = if group == "sectionData" {
                     if !section_raw_ok(&value) { return doc("Sayfa bölümü verisi desteklenmiyor."); }
                     Val::Str(value.clone())
+                } else if group == "objectSpan" {
+                    let id = object_span_id(&value).ok_or_else(|| Error::Document(BAD_ANCHOR.into()))?;
+                    Val::str(id)
                 } else if group == "span" {
                     let bad = || Error::Document("Metin biçimi değeri geçersiz.".into());
                     let (i, raw) = value.split_once(',').ok_or_else(bad)?;
@@ -658,8 +743,10 @@ pub fn read_rich_text(encoded: &str, span_order: &[Record], zero_length: &[Recor
     let mut spans: Vec<Vec<(Val, Val)>> = Vec::new();
     let mut paragraph_map: Vec<(usize, Vec<(Val, Val)>)> = Vec::new();
     let mut sections: Vec<(usize, i64, i64, String)> = Vec::new();
+    let mut objects: Vec<(i64, i64, Val, String)> = Vec::new();
     for (item, end) in completed {
         match item.group {
+            "objectSpan" => objects.push((item.start, end, item.value, item.raw)),
             "span" => spans.push(vec![(Val::str("start"), Val::int(item.start as i128)), (Val::str("end"), Val::int(end as i128)),
                 (Val::str("kind"), Val::Str(item.kind)), (Val::str("value"), item.value),
                 (Val::str("interval"), Val::Int(item.interval.unwrap(), true))]),
@@ -706,11 +793,21 @@ pub fn read_rich_text(encoded: &str, span_order: &[Record], zero_length: &[Recor
     sections.sort_by_key(|s| s.0);
     let sections: Vec<SectionT> = sections.into_iter().map(|(_, a, b, r)| (a, b, r)).collect();
     check_sections_typed(&text, &sections)?;
-    let model = normalize_model(&Val::Dict(vec![(Val::str("schemaVersion"), Val::int(1)), (Val::str("text"), Val::Str(text)),
+    // An anchor covers exactly one unit (the native binary form stores
+    // start and start+1); normalize_model checks it is U+FFFC.
+    objects.sort_by_key(|o| o.0);
+    if objects.iter().any(|(start, end, _, _)| end - start != 1) { return doc(BAD_ANCHOR); }
+    let anchors: Vec<Val> = objects.iter().map(|(start, _, id, _)| {
+        Val::Dict(vec![(Val::str("start"), Val::int(*start as i128)), (Val::str("objectId"), id.clone())])
+    }).collect();
+    let mut fields = vec![(Val::str("schemaVersion"), Val::int(1)), (Val::str("text"), Val::Str(text)),
         (Val::str("spans"), Val::List(spans.into_iter().map(Val::Dict).collect())),
-        (Val::str("paragraphs"), Val::List(paragraph_map.into_iter().map(|(_, p)| Val::Dict(p)).collect()))]))?;
+        (Val::str("paragraphs"), Val::List(paragraph_map.into_iter().map(|(_, p)| Val::Dict(p)).collect()))];
+    if !anchors.is_empty() { fields.push((Val::str("objects"), Val::List(anchors))); }
+    let model = normalize_model(&Val::Dict(fields))?;
     Ok(Rich { encoded: encoded.to_string(), model, span_order: span_order.iter().map(|r| r.clone().unwrap_or_default()).collect(),
-        zero_length: zero_length.iter().map(|r| r.clone().unwrap_or_default()).collect(), sections })
+        zero_length: zero_length.iter().map(|r| r.clone().unwrap_or_default()).collect(), sections,
+        objects: objects.into_iter().map(|(start, _, _, raw)| (start, raw)).collect() })
 }
 
 /// One item of a sections argument: a (start, end, raw) triple, or an item
@@ -794,6 +891,20 @@ pub fn remap_offsets(old_text: &str, new_text: &str, positions: &[(i64, i64)]) -
 
 /// encode_rich_text for an already normalized model and checked slices.
 pub fn encode_normalized(model: Val, sections: Vec<SectionT>) -> Result<Rich> {
+    encode_with_objects(model, sections, &[])
+}
+
+/// [`encode_normalized`] for a model with text-anchored objects: `values[i]`
+/// is the stored raw `objectSpan` value of the model's i-th anchor (carried
+/// from the baseline; its id must be that anchor's `objectId`). A model with
+/// anchors and no values (a new note, a title) is refused: an anchor cannot
+/// be created.
+pub fn encode_with_objects(model: Val, sections: Vec<SectionT>, values: &[String]) -> Result<Rich> {
+    let anchors = object_anchors(&model);
+    if anchors.len() != values.len()
+        || anchors.iter().zip(values).any(|((_, id), raw)| object_span_id(raw) != Some(id.as_str())) {
+        return doc("Metne yerleşik nesneler güvenle yazılamıyor.");
+    }
     let text = model_text(&model).to_string();
     let boundaries = Boundaries::new(&text);
     #[derive(Default)]
@@ -828,6 +939,9 @@ pub fn encode_normalized(model: Val, sections: Vec<SectionT>) -> Result<Rich> {
             }
         }
     }
+    for ((start, _), raw) in anchors.iter().zip(values) {
+        add(&mut events, *start, start + 1, "objectSpan/objectSpan", raw);
+    }
     for (start, end, raw) in &sections {
         if start == end {
             events.entry(*start).or_default().zero.push(format!(" 'sectionData/sectionData'='{raw}' 'sectionData/sectionData'"));
@@ -849,12 +963,16 @@ pub fn encode_normalized(model: Val, sections: Vec<SectionT>) -> Result<Rich> {
     if previous < utf16_length(&text) as i64 {
         stream.push_str(&b64(&text[boundaries.byte(previous).unwrap()..]));
     }
-    let rich = Rich { encoded: b64(&stream), model, span_order: order, zero_length: zeros, sections };
-    if !rich.sections.is_empty() {
+    let objects = anchors.iter().map(|(start, _)| *start).zip(values.iter().cloned()).collect();
+    let rich = Rich { encoded: b64(&stream), model, span_order: order, zero_length: zeros, sections, objects };
+    if !rich.sections.is_empty() || !rich.objects.is_empty() {
+        // Prove by re-reading that the stream yields exactly these slices and
+        // anchors (fail closed otherwise).
         let records = |v: &[String]| -> Vec<Record> { v.iter().cloned().map(Ok).collect() };
         let again = read_rich_text(&rich.encoded, &records(&rich.span_order), &records(&rich.zero_length))?;
-        if again.sections != rich.sections || !py_eq(&again.model, &rich.model) {
-            return doc("Sayfa bölümleri güvenle yeniden yazılamıyor.");
+        if again.sections != rich.sections || again.objects != rich.objects
+            || !py_eq(&again.model, &without_object_types(&rich.model)) {
+            return doc(if rich.objects.is_empty() { "Sayfa bölümleri güvenle yeniden yazılamıyor." } else { "Metne yerleşik nesneler güvenle yazılamıyor." });
         }
     }
     Ok(rich)

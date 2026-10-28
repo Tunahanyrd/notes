@@ -1,8 +1,9 @@
 import {Extension,Mark,Node,type JSONContent} from '@tiptap/core';
 import {Plugin} from '@tiptap/pm/state';
+import type {Node as PMNode} from '@tiptap/pm/model';
 import {Decoration,DecorationSet} from '@tiptap/pm/view';
 import StarterKit from '@tiptap/starter-kit';
-import {argbToCss,spanKinds,markName,bulletMarker,numberedBullets,type SpanKind,type SpanValue,type HyperTextValue} from './editorModel';
+import {argbToCss,spanKinds,markName,bulletMarker,numberedBullets,OBJECT_CHAR,type SpanKind,type SpanValue,type HyperTextValue,type ObjectType} from './editorModel';
 // style.css draws disc/number/check with ::before; other preserved native
 // list kinds get an inline, non-editable marker widget below.
 const cssBullets=['none','disc','number','check'];
@@ -70,5 +71,35 @@ const Checklist=Extension.create({
     });return DecorationSet.create(state.doc,decorations);
   }},view(view){return {update(){view.dom.querySelectorAll<HTMLButtonElement>('.native-check-control').forEach(button=>{button.disabled=!view.editable;});}};}})];},
 });
-export const editorExtensions=[StarterKit.configure({paragraph:false,bold:false,italic:false,underline:false,strike:false,blockquote:false,bulletList:false,orderedList:false,listItem:false,listKeymap:false,heading:false,code:false,codeBlock:false,hardBreak:false,horizontalRule:false,link:false,trailingNode:false}),Paragraph,Checklist,...spanKinds.map(nativeMark)];
-export function plainPasteContent(text:string):JSONContent[]{return text.split(/\r\n|\r|\n/).map(line=>({type:'paragraph',content:line?[{type:'text',text:line}]:[]}));}
+// An object the text anchors (objectSpan, U+FFFC): a picture inserted on a
+// phone and kept in the note's floating object list. Shown as a small inline
+// chip; it is not editable, not draggable and cannot be deleted here (the
+// object, its note-tree entry and content file would have to go with it).
+const objectLabels:Record<ObjectType,string>={image:'Resim',shape:'Şekil',line:'Çizgi',textBox:'Metin kutusu'};
+const SamsungObject=Node.create({
+  name:'samsungObject',group:'inline',inline:true,atom:true,selectable:false,draggable:false,
+  addAttributes(){return {objectId:{default:null},objectType:{default:null}};},
+  // Never created from pasted or dropped HTML: only the stored model has them.
+  parseHTML(){return [];},
+  renderHTML({node}){const type=node.attrs.objectType as ObjectType|null,label=(type&&objectLabels[type])||'Nesne';return ['span',{class:'native-object-anchor','data-object-type':type??'',contenteditable:'false',role:'img','aria-label':label,title:`${label}: telefonda eklendi; metindeki yeri korunur, buradan silinemez.`},label];},
+  renderText(){return '';},
+});
+export const replaceDocumentMeta='samsungReplaceDocument';
+const anchorKeys=new WeakMap<PMNode,string>();
+function anchorKey(doc:PMNode){
+  let key=anchorKeys.get(doc);if(key!==undefined)return key;
+  const ids:string[]=[];doc.descendants(node=>{if(node.type.name==='samsungObject')ids.push(String(node.attrs.objectId));return node.isBlock;});
+  key=ids.join('\n');anchorKeys.set(doc,key);return key;
+}
+// Edits keep every anchor, in order: a change that would delete, duplicate or
+// reorder one is not applied (loading another model is marked explicitly).
+const ObjectAnchors=Extension.create({
+  name:'nativeObjectAnchors',
+  addProseMirrorPlugins(){return [new Plugin({filterTransaction(tr,state){
+    if(!tr.docChanged||tr.getMeta(replaceDocumentMeta))return true;
+    const before=anchorKey(state.doc);return before===anchorKey(tr.doc);
+  }})];},
+});
+export const editorExtensions=[StarterKit.configure({paragraph:false,bold:false,italic:false,underline:false,strike:false,blockquote:false,bulletList:false,orderedList:false,listItem:false,listKeymap:false,heading:false,code:false,codeBlock:false,hardBreak:false,horizontalRule:false,link:false,trailingNode:false}),Paragraph,Checklist,SamsungObject,ObjectAnchors,...spanKinds.map(nativeMark)];
+// U+FFFC belongs to anchored objects only; pasted text never creates one.
+export function plainPasteContent(text:string):JSONContent[]{return text.split(OBJECT_CHAR).join('').split(/\r\n|\r|\n/).map(line=>({type:'paragraph',content:line?[{type:'text',text:line}]:[]}));}

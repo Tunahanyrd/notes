@@ -14,7 +14,15 @@ export const bulletTypes={none:0,check:2,number:4,alphabet:6,roman:7,disc:8,whit
 export type BulletKind=keyof typeof bulletTypes;
 export const numberedBullets:readonly BulletKind[]=['number','alphabet','roman','upperAlphabet'];
 export interface EditorParagraph {index:number;alignment?:'left'|'right'|'center'|'justify';parsingState?:boolean;bullet?:{kind:BulletKind;number?:number;checked?:boolean;typeList?:number[]};indentLevel?:{level:number;direction:'none'|'ltr'|'rtl'}}
-export interface EditorModel {schemaVersion:1;text:string;spans:EditorSpan[];paragraphs:EditorParagraph[]}
+// An object the body text anchors with Samsung's objectSpan: the picture (or
+// shape/line/text box) lives in the note's floatingObjectList, the text holds
+// one U+FFFC at `start`. The editor shows it as an atom it cannot delete;
+// only its position follows the text. `type` comes from the note itself.
+export const objectTypes=['image','shape','line','textBox'] as const;
+export type ObjectType=typeof objectTypes[number];
+export const OBJECT_CHAR='\uFFFC';
+export interface EditorObject {start:number;objectId:string;type?:ObjectType}
+export interface EditorModel {schemaVersion:1;text:string;spans:EditorSpan[];paragraphs:EditorParagraph[];objects?:EditorObject[]}
 const invalid=()=>new Error('Bu notun biçimlendirmesi güvenle düzenlenemiyor. Özgün içerik korunuyor.');
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
 const boundary=(text:string,at:number)=>Number.isInteger(at)&&at>=0&&at<=text.length&&!(at>0&&at<text.length&&/[\uD800-\uDBFF]/.test(text[at-1])&&/[\uDC00-\uDFFF]/.test(text[at]));
@@ -35,19 +43,32 @@ export function assertEditorModel(model:EditorModel){
   const seen=new Set<number>(),count=model.text.split(/[\r\n]/).length;
   if(model.paragraphs.some(p=>p.index===0)&&(!model.text.length||/^[\r\n]/.test(model.text)))throw invalid();
   for(const paragraph of model.paragraphs){if(!Number.isInteger(paragraph.index)||paragraph.index<0||paragraph.index>=count||seen.has(paragraph.index)||Object.keys(paragraph).some(k=>!['index','alignment','parsingState','bullet','indentLevel'].includes(k))||(paragraph.alignment!==undefined&&!['left','right','center','justify'].includes(paragraph.alignment))||(paragraph.parsingState!==undefined&&typeof paragraph.parsingState!=='boolean'))throw invalid();if(paragraph.indentLevel&&(!Number.isInteger(paragraph.indentLevel.level)||paragraph.indentLevel.level<0||paragraph.indentLevel.level>32||!['none','ltr','rtl'].includes(paragraph.indentLevel.direction)))throw invalid();if(paragraph.bullet&&(!Object.hasOwn(bulletTypes,paragraph.bullet.kind)||(paragraph.bullet.kind==='check'?typeof paragraph.bullet.checked!=='boolean'||paragraph.bullet.number!==undefined:paragraph.bullet.checked!==undefined||!Number.isInteger(paragraph.bullet.number??0)||(paragraph.bullet.number??0)<0||(paragraph.bullet.number??0)>2147483647)||(paragraph.bullet.typeList&&(!Array.isArray(paragraph.bullet.typeList)||paragraph.bullet.typeList.length>32||paragraph.bullet.typeList.some(v=>!(Object.values(bulletTypes) as number[]).includes(v))))))throw invalid();seen.add(paragraph.index);}
+  if(model.objects!==undefined){
+    if(!Array.isArray(model.objects)||model.spans.length+model.paragraphs.length+model.objects.length>32768)throw invalid();
+    let previous=-1;const ids=new Set<string>();
+    for(const object of model.objects){
+      if(!object||typeof object!=='object'||Object.keys(object).some(k=>!['start','objectId','type'].includes(k))||!Number.isInteger(object.start)||object.start<=previous||model.text[object.start]!==OBJECT_CHAR||typeof object.objectId!=='string'||!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/.test(object.objectId)||ids.has(object.objectId)||(object.type!==undefined&&!objectTypes.includes(object.type)))throw invalid();
+      previous=object.start;ids.add(object.objectId);
+    }
+  }
   for(let i=0;i<model.spans.length;i++)for(let j=i+1;j<model.spans.length;j++){const a=model.spans[i],b=model.spans[j];if(a.kind===b.kind&&Math.max(a.start,b.start)<Math.min(a.end,b.end))throw invalid();}
 }
 export const markName=(kind:SpanKind)=>`samsung_${kind}`;
 export function modelToContent(model:EditorModel):JSONContent{
   assertEditorModel(model);
   const marksAt=(start:number,end:number)=>model.spans.flatMap((span,index)=>span.start<=start&&span.end>=end?[{type:markName(span.kind),attrs:{value:span.value,interval:span.interval,sourceId:`source-${index}`,sourceOrder:index}}]:[]);
-  const pieces=model.text.split(/([\r\n])/);let offset=0;
+  const pieces=model.text.split(/([\r\n])/),objects=model.objects??[];let offset=0;
   const content:JSONContent[]=[];
   for(let i=0;i<pieces.length;i+=2){
     const text=pieces[i],start=offset,end=start+text.length,separator=pieces[i+1]||'';
-    const boundaries=[...new Set([start,end,...model.spans.flatMap(s=>[s.start,s.end]).filter(p=>p>start&&p<end)])].sort((a,b)=>a-b);
+    const anchors=objects.filter(o=>o.start>=start&&o.start<end);
+    const boundaries=[...new Set([start,end,...model.spans.flatMap(s=>[s.start,s.end]).filter(p=>p>start&&p<end),...anchors.flatMap(o=>[o.start,o.start+1])])].sort((a,b)=>a-b);
     const children:JSONContent[]=[];
-    for(let j=0;j<boundaries.length-1;j++){const a=boundaries[j],b=boundaries[j+1];if(a<b)children.push({type:'text',text:model.text.slice(a,b),marks:marksAt(a,b)});}
+    for(let j=0;j<boundaries.length-1;j++){
+      const a=boundaries[j],b=boundaries[j+1],anchor=anchors.find(o=>o.start===a);
+      if(anchor)children.push({type:'samsungObject',attrs:{objectId:anchor.objectId,objectType:anchor.type??null},marks:marksAt(a,b)});
+      else if(a<b)children.push({type:'text',text:model.text.slice(a,b),marks:marksAt(a,b)});
+    }
     const paragraph=model.paragraphs.find(p=>p.index===content.length);
     content.push({type:'paragraph',attrs:{nativeAlignment:paragraph?.alignment??null,nativeParsingState:paragraph?.parsingState??null,nativeBullet:paragraph?.bullet??null,nativeIndent:paragraph?.indentLevel??null,separatorAfter:separator,separatorMarks:separator?marksAt(end,end+1):[]},content:children});
     offset=end+separator.length;
@@ -56,7 +77,7 @@ export function modelToContent(model:EditorModel):JSONContent{
 }
 export function contentToModel(doc:JSONContent):EditorModel{
   if(doc.type!=='doc'||!doc.content?.length)throw invalid();
-  let text='';const paragraphs:EditorParagraph[]=[],segments:{span:EditorSpan;id:string;order:number}[]=[];
+  let text='';const paragraphs:EditorParagraph[]=[],segments:{span:EditorSpan;id:string;order:number}[]=[],objects:EditorObject[]=[];
   const append=(value:string,marks:JSONContent['marks'])=>{
     const start=text.length;text+=value;
     for(const mark of marks||[]){
@@ -68,7 +89,13 @@ export function contentToModel(doc:JSONContent):EditorModel{
   doc.content.forEach((paragraph,index)=>{
     if(paragraph.type!=='paragraph')throw invalid();
     const attrs=paragraph.attrs||{},start=text.length;
-    for(const child of paragraph.content||[]){if(child.type!=='text'||typeof child.text!=='string')throw invalid();append(child.text,child.marks);}
+    for(const child of paragraph.content||[]){
+      if(child.type==='samsungObject'){
+        const objectId=child.attrs?.objectId,type=child.attrs?.objectType;if(typeof objectId!=='string')throw invalid();
+        objects.push({start:text.length,objectId,...(type!=null?{type}:{})});append(OBJECT_CHAR,child.marks);continue;
+      }
+      if(child.type!=='text'||typeof child.text!=='string')throw invalid();append(child.text,child.marks);
+    }
     if((attrs.nativeAlignment!==null&&attrs.nativeAlignment!==undefined)||(attrs.nativeParsingState!==null&&attrs.nativeParsingState!==undefined)||attrs.nativeBullet!=null||attrs.nativeIndent!=null){
       // Native paragraphs after the first include the preceding newline. An empty
       // first paragraph has no serializable range; retain its transient typing
@@ -84,7 +111,7 @@ export function contentToModel(doc:JSONContent):EditorModel{
     else joined.push({...segment,span:{...segment.span}});
   }
   joined.sort((a,b)=>a.order-b.order||a.span.start-b.span.start);
-  const model:EditorModel={schemaVersion:1,text,spans:joined.map(s=>s.span),paragraphs};assertEditorModel(model);return model;
+  const model:EditorModel={schemaVersion:1,text,spans:joined.map(s=>s.span),paragraphs,...(objects.length?{objects}:{})};assertEditorModel(model);return model;
 }
 const roman=(n:number)=>{let out='';for(const [v,r] of [[1000,'m'],[900,'cm'],[500,'d'],[400,'cd'],[100,'c'],[90,'xc'],[50,'l'],[40,'xl'],[10,'x'],[9,'ix'],[5,'v'],[4,'iv'],[1,'i']] as const)while(n>=v){out+=r;n-=v;}return out;};
 const letters=(n:number)=>{let out='';while(n>0){n--;out=String.fromCharCode(97+n%26)+out;n=Math.floor(n/26);}return out;};

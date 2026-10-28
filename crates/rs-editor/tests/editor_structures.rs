@@ -310,8 +310,9 @@ fn floating_object_list_mirrors_the_writer() {
 /// 4.4.45 test note, synthetic values): `pageIndex`, its fill naming a
 /// content file, the object hash `SHA256(id + modifiedTime)` and the note-tree
 /// entry `floatingObjectList/object id t h`.
+const PICTURE: &str = "0e5d4a3c-4444-4c1e-9a55-0a4fbb2f7a10";
+
 fn add_floating_picture(root: &mut Element, page_index: &str) {
-    const PICTURE: &str = "0e5d4a3c-4444-4c1e-9a55-0a4fbb2f7a10";
     let time = "1700000000500";
     let hash = rs_doc::util::hex(&rs_doc::util::sha256(format!("{PICTURE}{time}").as_bytes()));
     let mut object = el("object", &[("type", "image"), ("id", PICTURE), ("modifiedTime", time), ("hash", &hash),
@@ -370,4 +371,165 @@ fn a_floating_list_that_cannot_be_carried_stays_read_only() {
     add_floating_picture(&mut root, "0");
     child_mut(&mut root, "floatingobjectlist").children[0].children.push(el("object", &[("type", "stroke")]));
     assert_eq!(reason(&root).as_deref(), Some(rs_doc::doc::EDITOR_FLOATING));
+}
+
+// ---- text-anchored objects (`objectSpan`) ------------------------------------
+
+/// Body stream as the phone writes it around an inserted picture: the
+/// picture's U+FFFC wrapped in `objectSpan` (`<id>,0,0`), one
+/// `parsingState` per paragraph (synthetic text).
+fn anchored_stream(before: &str, after: &str, value: &str) -> String {
+    format!("<?a 'paragraph/parsingState'='false'?>{}<?a 'paragraph/parsingState'?>{}<?a 'objectSpan/objectSpan'='{value}'?>{}<?a 'objectSpan/objectSpan'?>{}",
+        rich::b64(before), rich::b64("\n"), rich::b64("\u{fffc}"), rich::b64(&format!("\n{after}")))
+}
+
+fn set_body_stream(root: &mut Element, stream: &str) {
+    let body = body_obj(root);
+    body.children.retain(|c| c.local() != "text");
+    let mut text = Element::new("text");
+    text.text = Some(rich::b64(stream));
+    body.children.push(text);
+}
+
+fn anchored_note(value: &str) -> Element {
+    let mut root = plain("Resimli", "x");
+    add_pen_page(&mut root);
+    add_floating_picture(&mut root, "0");
+    set_body_stream(&mut root, &anchored_stream("Önce", "Sonra", value));
+    root
+}
+
+fn anchor(start: i128, kind: Option<&str>) -> Val {
+    let mut o = vec![(Val::str("start"), Val::int(start)), (Val::str("objectId"), Val::str(PICTURE))];
+    if let Some(k) = kind { o.push((Val::str("type"), Val::str(k))); }
+    Val::Dict(o)
+}
+
+fn with_objects(mut m: Val, objects: Vec<Val>) -> Val {
+    if let Val::Dict(fields) = &mut m { fields.push((Val::str("objects"), Val::List(objects))); }
+    m
+}
+
+#[test]
+fn a_body_anchoring_a_floating_picture_is_editable() {
+    // Before (editor-projection-v3): "Bilinmeyen biçimlendirme sözdizimi."
+    let root = anchored_note(&format!("{PICTURE},0,0"));
+    let p = projection(&root, "Resimli");
+    assert!(p.text_edit && p.title_edit, "{:?}", p.reason);
+    let m = p.model.unwrap();
+    assert_eq!(rich::model_text(&m), "Önce\n\u{fffc}\nSonra");
+    let objects = rich::model_objects(&m);
+    assert_eq!(objects.len(), 1);
+    assert!(rs_editor::pyval::py_eq(&objects[0], &anchor(5, Some("image"))), "{:?}", objects[0]);
+    assert_eq!(edit::PROJECTION_RECIPE, "editor-projection-v4");
+}
+
+#[test]
+fn typing_around_the_anchor_moves_it_and_carries_the_picture() {
+    let root = anchored_note(&format!("{PICTURE},0,0"));
+    let floating = etree::xml_bytes(child(&root, "floatingobjectlist"));
+    // Text before and after the picture, bold on the new words, and a
+    // bold span across the anchor itself.
+    let text = "Yeni Önce\n\u{fffc}\nSonra ek";
+    let edited = with_objects(model(text, vec![span(0, 4, "bold", Val::Bool(true)), span(10, 12, "italic", Val::Bool(true))],
+        vec![]), vec![anchor(10, Some("image"))]);
+    let out = edit::prepare_editor_edit(&snap(&root, "Resimli"), &Val::str("Resimli"), &edited, &now(&root), &backend()).unwrap();
+    let full = etree::parse(&out.full_xml).unwrap();
+    assert_eq!(etree::xml_bytes(child(&full, "floatingobjectlist")), floating, "carried byte for byte");
+    assert_eq!(carried(&root), carried(&full), "pages, tree, content files untouched");
+    let upload = etree::parse(&out.upload_xml).unwrap();
+    assert!(upload.children.iter().all(|c| c.local() != "floatingobjectlist"), "never uploaded");
+    let back = reread_body(&out.full_xml);
+    assert_eq!(back.objects, vec![(10, format!("{PICTURE},0,0"))], "anchor follows its U+FFFC, raw value carried");
+    assert!(rs_editor::pyval::py_eq(&rich::without_object_types(&rich::normalize_model(&edited).unwrap()), &back.model));
+    assert_eq!(rich::model_text(&back.model).encode_utf16().nth(10), Some(0xfffc));
+    // The saved draft projects the same model (readback precondition).
+    let p = projection(&full, "Resimli");
+    assert!(p.text_edit, "{:?}", p.reason);
+    assert_eq!(rich::editor_model_fingerprint(p.model.as_ref().unwrap()).unwrap(), rich::editor_model_fingerprint(&edited).unwrap());
+    // The fingerprint ignores the display-only type.
+    let untyped = with_objects(model(text, vec![span(0, 4, "bold", Val::Bool(true)), span(10, 12, "italic", Val::Bool(true))], vec![]),
+        vec![anchor(10, None)]);
+    assert_eq!(rich::editor_model_fingerprint(&untyped).unwrap(), rich::editor_model_fingerprint(&edited).unwrap());
+}
+
+#[test]
+fn an_unedited_anchored_body_round_trips_byte_identically() {
+    for value in [format!("{PICTURE},0,0"), format!("{PICTURE},-1,7"), PICTURE.to_string()] {
+        let root = anchored_note(&value);
+        let original = body_obj(&mut root.clone()).children.iter().find(|c| c.local() == "text").unwrap().text.clone().unwrap();
+        let back = reread_body(&etree::xml_bytes(&root));
+        assert_eq!(back.objects, vec![(5, value.clone())]);
+        let values: Vec<String> = back.objects.iter().map(|(_, r)| r.clone()).collect();
+        let again = rich::encode_with_objects(back.model.clone(), back.sections.clone(), &values).unwrap();
+        assert_eq!(again.encoded, original, "{value}");
+        // Saving the projected model unchanged writes nothing.
+        let p = projection(&root, "Resimli");
+        let err = edit::prepare_editor_edit(&snap(&root, "Resimli"), &Val::str("Resimli"), p.model.as_ref().unwrap(), &now(&root), &backend());
+        assert!(matches!(err, Err(rich::Error::Document(m)) if m == "Kaydedilecek bir değişiklik yok."));
+    }
+}
+
+#[test]
+fn anchors_cannot_be_deleted_added_or_swapped() {
+    let root = anchored_note(&format!("{PICTURE},0,0"));
+    let kept = |m: Val| {
+        let r = edit::prepare_editor_edit(&snap(&root, "Resimli"), &Val::str("Resimli"), &m, &now(&root), &backend());
+        assert!(matches!(&r, Err(rich::Error::Document(msg)) if msg == edit::ANCHOR_KEPT), "{:?}", r.err());
+    };
+    // The picture's character deleted (and the anchor with it).
+    kept(model("Önce\n\nSonra", vec![], vec![]));
+    // U+FFFC still in the text but the anchor dropped from the model.
+    kept(model("Önce\n\u{fffc}\nSonra", vec![], vec![]));
+    // Another object id.
+    kept(with_objects(model("Önce\n\u{fffc}\nSonra", vec![], vec![]), vec![Val::Dict(vec![
+        (Val::str("start"), Val::int(5)), (Val::str("objectId"), Val::str(STROKE))])]));
+    // A wrong type for the same object.
+    kept(with_objects(model("Önce\n\u{fffc}\nSonra", vec![], vec![]), vec![anchor(5, Some("shape"))]));
+    // An anchor not on U+FFFC is malformed.
+    assert!(rich::normalize_model(&with_objects(model("Önce\nx\nSonra", vec![], vec![]), vec![anchor(5, None)])).is_err());
+    // A new note or a title cannot create one.
+    assert!(rich::encode_rich_text(&with_objects(model("\u{fffc}", vec![], vec![]), vec![anchor(0, None)]), &[]).is_err());
+}
+
+#[test]
+fn malformed_or_unknown_anchors_keep_the_body_read_only() {
+    // Not in the floating list.
+    let mut root = anchored_note(&format!("{PICTURE},0,0"));
+    child_mut(&mut root, "floatingobjectlist").children[0].set("id", STROKE);
+    let tree = child_mut(&mut root, "notetree");
+    child_mut(tree, "floatingobjectlist").children[0].set("id", STROKE);
+    assert!(reason(&root).is_some());
+    // No floating list at all.
+    let mut root = plain("Kapalı", "x");
+    add_pen_page(&mut root);
+    set_body_stream(&mut root, &anchored_stream("a", "b", &format!("{PICTURE},0,0")));
+    assert_eq!(reason(&root).as_deref(), Some(edit::ANCHOR_MISSING));
+    // Malformed values and ranges.
+    for value in [format!("{PICTURE},0"), format!("{PICTURE},a,0"), "not-a-uuid,0,0".into(), format!("{PICTURE},0,0,0")] {
+        let root = anchored_note(&value);
+        assert!(reason(&root).is_some(), "{value}");
+    }
+    let mut root = anchored_note(&format!("{PICTURE},0,0"));
+    let wide = format!("{}<?a 'objectSpan/objectSpan'='{PICTURE},0,0'?>{}<?a 'objectSpan/objectSpan'?>", rich::b64("a"), rich::b64("\u{fffc}b"));
+    set_body_stream(&mut root, &wide);
+    assert!(reason(&root).is_some(), "two units");
+    let mut root = anchored_note(&format!("{PICTURE},0,0"));
+    let plain_char = format!("{}<?a 'objectSpan/objectSpan'='{PICTURE},0,0'?>{}<?a 'objectSpan/objectSpan'?>", rich::b64("a"), rich::b64("b"));
+    set_body_stream(&mut root, &plain_char);
+    assert!(reason(&root).is_some(), "not U+FFFC");
+    let mut root = anchored_note(&format!("{PICTURE},0,0"));
+    let other_kind = format!("{}<?a 'objectSpan/other'='{PICTURE},0,0'?>{}<?a 'objectSpan/other'?>", rich::b64("a"), rich::b64("\u{fffc}"));
+    set_body_stream(&mut root, &other_kind);
+    assert!(reason(&root).is_some(), "unknown objectSpan kind");
+    // An anchor in the title closes the editor (and the title).
+    let mut root = anchored_note(&format!("{PICTURE},0,0"));
+    let title = title_obj(&mut root);
+    title.children.retain(|c| c.local() != "text");
+    let mut t = Element::new("text");
+    t.text = Some(rich::b64(&format!("<?a 'objectSpan/objectSpan'='{PICTURE},0,0'?>{}<?a 'objectSpan/objectSpan'?>", rich::b64("\u{fffc}"))));
+    title.children.push(t);
+    let p = projection(&root, "Kapalı");
+    assert!(!p.text_edit && !p.title_edit);
+    assert_eq!(p.reason.as_deref(), Some(edit::ANCHOR_IN_TITLE));
 }

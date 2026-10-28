@@ -56,21 +56,37 @@ tools/build_ink_wasm.sh
 [ -d desktop/node_modules ] || npm --prefix desktop ci --no-audit --no-fund
 
 configs=(--config ../packaging/linux/tauri.release.conf.json)
+rpm_configs=("${configs[@]}")
+prerelease=0
 if [ -n "$VERSION" ]; then
     case "$VERSION" in *[!0-9A-Za-z.+-]*) echo "bad VERSION: $VERSION" >&2; exit 2;; esac
-    overlay="$(mktemp)"
-    trap 'rm -f "$overlay"' EXIT INT TERM
+    overlay="$(mktemp)"; rpm_overlay="$(mktemp)"
+    trap 'rm -f "$overlay" "$rpm_overlay"' EXIT INT TERM
     printf '{"version": "%s"}\n' "$VERSION" > "$overlay"
     configs+=(--config "$overlay")
+    rpm_configs+=(--config "$overlay")
+    # rpm forbids '-' in Version: a pre-release (0.0.1-alpha) is built as
+    # Version 0.0.1, Release 0.alpha (Fedora convention; sorts before 0.0.1-1).
+    case "$VERSION" in *-*)
+        prerelease=1
+        pre="${VERSION#*-}"
+        printf '{"version": "%s", "bundle": {"linux": {"rpm": {"release": "0.%s"}}}}\n' \
+            "${VERSION%%-*}" "${pre//[!0-9A-Za-z.+]/.}" > "$rpm_overlay"
+        rpm_configs=(--config ../packaging/linux/tauri.release.conf.json --config "$rpm_overlay")
+    esac
 fi
 
 # linuxdeploy's bundled strip cannot read .relr.dyn sections; the release
 # profile strips our own binary already.
 export NO_STRIP=true APPIMAGE_EXTRACT_AND_RUN=1
-(
-    cd desktop
-    npx tauri build --bundles "$bundles" "${configs[@]}" -- --locked
-)
+rest="$(printf ',%s,' "$bundles" | sed 's/,rpm,/,/g; s/^,*//; s/,*$//')"
+if [ "$prerelease" = 1 ] && [ "$rest" != "$bundles" ]; then
+    # The rpm needs its own version overlay, so it is a separate build.
+    [ -z "$rest" ] || (cd desktop && npx tauri build --bundles "$rest" "${configs[@]}" -- --locked)
+    (cd desktop && npx tauri build --bundles rpm "${rpm_configs[@]}" -- --locked)
+else
+    (cd desktop && npx tauri build --bundles "$bundles" "${configs[@]}" -- --locked)
+fi
 
 mkdir -p "$dist"
 out="desktop/src-tauri/target/release/bundle"

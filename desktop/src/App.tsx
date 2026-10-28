@@ -526,6 +526,8 @@ export default function App() {
     const model=projection?.schemaVersion===1&&projection.revision===full.revision&&projection.capabilities.textEdit&&projection.capabilities.richStyle?projection.model:null;
     if(!model&&!full.editable)throw new Error('Bu not henüz çoğaltılamıyor.');
     if(model)assertEditorModel(model);
+    // A text-anchored picture cannot be created in a new note (its object and file stay with the original).
+    if(model?.objects?.length)throw new Error('Metnine resim yerleşmiş notlar henüz çoğaltılamıyor.');
     const {note:copy}=model?await api<{note:Note}>('/api/notes/editor','POST',{title,model}):await api<{note:Note}>('/api/notes','POST',{title,body:full.body??''});
     setNotes(previous=>[copy,...previous]);await refreshList();setNotice('Notun kopyası oluşturuldu.');
   });

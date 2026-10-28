@@ -29,7 +29,13 @@ pub trait Backend {
 /// binary parts; native empty text boxes without `<text>`; 32768 annotations.
 /// v3: also next to free-floating objects the shared rule carries
 /// (`rs_doc::objects::floating_inventory`, e.g. a picture inserted on a phone).
-pub const PROJECTION_RECIPE: &str = "editor-projection-v3";
+/// v4: body text that anchors such an object with `objectSpan` (U+FFFC);
+/// the model names each anchor (`objects`), the anchors stay in place.
+pub const PROJECTION_RECIPE: &str = "editor-projection-v4";
+
+pub const ANCHOR_MISSING: &str = "Metne yerleşik bir nesne notta bulunamadı; metin güvenle düzenlenemiyor.";
+pub const ANCHOR_IN_TITLE: &str = "Başlığa yerleşik nesne içeren notlar henüz düzenlenemiyor.";
+pub const ANCHOR_KEPT: &str = "Metne yerleşik resim veya nesneler bu sürümde silinemez ya da yer değiştiremez.";
 
 /// The `now_ms` argument after defaulting: an int, or a non-int object.
 pub enum Now { Int(PyInt), NotInt }
@@ -128,7 +134,7 @@ pub fn object_rich(obj: &Element) -> Result<Rich> {
 /// True when a rich value has no text, formatting or page slices at all.
 pub fn rich_is_empty(rich: &Rich) -> bool {
     model_text(&rich.model).is_empty() && model_spans(&rich.model).is_empty()
-        && model_paragraphs(&rich.model).is_empty() && rich.sections.is_empty()
+        && model_paragraphs(&rich.model).is_empty() && rich.sections.is_empty() && rich.objects.is_empty()
 }
 
 /// editor_document._put_rich. A missing `<text>` (native empty text box) is
@@ -248,6 +254,7 @@ pub fn prepare_title_edit(snap: &Snapshot, title: &Val, now: &Now, be: &dyn Back
     let new_length = utf16_length(&title) as i128;
     if old_text.contains('\n') || old_text.contains('\r') { return doc("Çok satırlı biçimlendirilmiş başlık desteklenmiyor."); }
     if !old.sections.is_empty() { return doc("Sayfa bölümü içeren başlık desteklenmiyor."); }
+    if !old.objects.is_empty() { return doc(ANCHOR_IN_TITLE); }
     let mut model = old.model.clone();
     let Val::Dict(fields) = &mut model else { unreachable!() };
     *dget_mut(fields, "text").unwrap() = Val::Str(title.clone());
@@ -304,6 +311,32 @@ pub fn prepare_title_edit(snap: &Snapshot, title: &Val, now: &Now, be: &dyn Back
         upload_xml: etree::xml_bytes(&upload), requested_ids: vec![], title, body: None })
 }
 
+/// The model with each text anchor's object `type`, looked up in the note's
+/// `floatingObjectList` (the only objects the editor carries for an anchor;
+/// the native writer refuses an anchor whose object it cannot find,
+/// `n1.h.f` "setBodyObjectToObjectSpan"). Err: an anchor names no such object.
+fn typed_anchors(model: &Val, root: &Element) -> Result<Val> {
+    if model_objects(model).is_empty() { return Ok(model.clone()); }
+    let floating: Vec<&Element> = root.children.iter().filter(|n| n.local() == "floatingobjectlist")
+        .flat_map(|list| list.children.iter()).collect();
+    let mut model = model.clone();
+    let Val::Dict(fields) = &mut model else { unreachable!() };
+    let Some(Val::List(objects)) = dget_mut(fields, "objects") else { unreachable!() };
+    for object in objects.iter_mut() {
+        let Val::Dict(o) = object else { unreachable!() };
+        let id = dget(o, "objectId").and_then(Val::as_str).unwrap_or("").to_string();
+        let found: Vec<&&Element> = floating.iter().filter(|n| n.local() == "object" && n.get("id") == Some(id.as_str())).collect();
+        let kind = match found.as_slice() {
+            [one] => one.get("type").filter(|t| rs_doc::objects::PASSTHROUGH_TYPES.contains(t)),
+            _ => None,
+        };
+        let Some(kind) = kind else { return doc(ANCHOR_MISSING) };
+        o.retain(|(k, _)| k.as_str() != Some("type"));
+        o.push((Val::str("type"), Val::str(kind)));
+    }
+    Ok(model)
+}
+
 fn projection_inner(snap: Result<&Snapshot>, be: &dyn Backend, p: &mut Projection) -> Result<()> {
     let snap = snap?;
     let root = resource(snap)?;
@@ -321,6 +354,7 @@ fn projection_inner(snap: Result<&Snapshot>, be: &dyn Backend, p: &mut Projectio
     let boi = one(&root.children[bi], "object")?;
     let rich = object_rich(&root.children[bi].children[boi])?;
     p.model = Some(rich.model.clone());
+    p.model = Some(typed_anchors(&rich.model, &root)?);
     let mut temporary = root.clone();
     {
         let body = &mut temporary.children[bi].children[boi];
@@ -336,6 +370,7 @@ fn projection_inner(snap: Result<&Snapshot>, be: &dyn Backend, p: &mut Projectio
         let temp_title = &mut temporary.children[ai].children[tti].children[oi];
         if !temp_title.children.iter().any(|n| n.local() == "text") { temp_title.children.push(Element::new("text")); }
         let title_rich = object_rich(temp_title)?;
+        if !title_rich.objects.is_empty() { return doc(ANCHOR_IN_TITLE); }
         temp_title.children.retain(|n| !sidecar(n));
         let t = one(temp_title, "text")?;
         temp_title.children[t].text = Some(encode_text(model_text(&title_rich.model))?);
@@ -364,6 +399,34 @@ pub fn new_editor_document<T>(model: &Val, make: impl FnOnce(&str) -> Result<(T,
     Ok((identity, etree::xml_bytes(&root)))
 }
 
+/// The edited model's text anchors against the projected ones: the same
+/// objects in the same order (none added, removed or swapped — deleting an
+/// anchor would also need the floating object, its note-tree entry and its
+/// content file's `refCount` to change, which is not established). Each keeps
+/// its projected `type`; only its position follows the text.
+fn carry_anchors(normalized: Val, projected: Option<&Val>, baseline: &Rich) -> Result<Val> {
+    let expected = projected.map(model_objects).unwrap_or(&[]);
+    let edited = model_objects(&normalized);
+    let field = |o: &Val, key: &str| dget(o.dict().unwrap(), key).and_then(Val::as_str).map(str::to_string);
+    if expected.len() != edited.len() || expected.len() != baseline.objects.len()
+        || expected.iter().zip(edited).any(|(a, b)| {
+            field(a, "objectId") != field(b, "objectId")
+                || field(b, "type").is_some_and(|t| Some(t) != field(a, "type"))
+        }) {
+        return doc(ANCHOR_KEPT);
+    }
+    if edited.is_empty() { return Ok(normalized); }
+    let mut model = normalized;
+    let Val::Dict(fields) = &mut model else { unreachable!() };
+    let Some(Val::List(objects)) = dget_mut(fields, "objects") else { unreachable!() };
+    for (object, projected) in objects.iter_mut().zip(expected) {
+        let Val::Dict(o) = object else { unreachable!() };
+        o.retain(|(k, _)| k.as_str() != Some("type"));
+        if let Some(t) = dget(projected.dict().unwrap(), "type") { o.push((Val::str("type"), t.clone())); }
+    }
+    Ok(model)
+}
+
 pub fn prepare_editor_edit(snap: &Snapshot, title: &Val, model: &Val, now: &Now, be: &dyn Backend) -> Result<EditOut> {
     let root = resource(snap)?;
     let title = text_value(title)?;
@@ -375,9 +438,11 @@ pub fn prepare_editor_edit(snap: &Snapshot, title: &Val, model: &Val, now: &Now,
     let bi = one(&root, "bodytext")?;
     let boi = one(&root.children[bi], "object")?;
     let baseline = object_rich(&root.children[bi].children[boi])?;
-    let normalized = normalize_model(model)?;
+    let normalized = carry_anchors(normalize_model(model)?, capability.model.as_ref(), &baseline)?;
     let sections = remap_sections(model_text(&baseline.model), model_text(&normalized), &baseline.sections)?;
-    let rich = encode_rich_text(&normalized, &sections)?;
+    let sections = check_sections(model_text(&normalized), &sections_to_vals(&sections))?;
+    let values: Vec<String> = baseline.objects.iter().map(|(_, raw)| raw.clone()).collect();
+    let rich = encode_with_objects(normalized, sections, &values)?;
     let body_changed = !py_eq(&rich.model, capability.model.as_ref().unwrap_or(&Val::None));
     let title_changed = snap.title.as_deref() != Some(title.as_str());
     if !body_changed && !title_changed { return doc("Kaydedilecek bir değişiklik yok."); }

@@ -311,14 +311,26 @@ fn carried(root: &EtEl, body_too: bool) -> Vec<String> {
     out
 }
 
+/// The edited model; text-anchored objects follow their U+FFFC (the k-th
+/// U+FFFC of the new text gets the k-th anchor) and are dropped when the
+/// count no longer matches (the edit then must be refused).
 fn with_text(model: &E, text: String, spans: Vec<E>, paragraphs: Vec<E>) -> E {
-    let _ = model;
-    E::Dict(vec![
+    let anchors = rich::model_objects(model);
+    let at: Vec<i128> = text.encode_utf16().enumerate().filter(|(_, u)| *u == 0xfffc).map(|(i, _)| i as i128).collect();
+    let mut fields = vec![
         (E::str("schemaVersion"), E::int(1)),
         (E::str("text"), E::Str(text)),
         (E::str("spans"), E::List(spans)),
         (E::str("paragraphs"), E::List(paragraphs)),
-    ])
+    ];
+    if !anchors.is_empty() && at.len() == anchors.len() {
+        let moved = anchors.iter().zip(at).map(|(o, start)| {
+            let E::Dict(d) = o else { unreachable!() };
+            E::Dict(d.iter().map(|(k, v)| if k.as_str() == Some("start") { (k.clone(), E::int(start)) } else { (k.clone(), v.clone()) }).collect())
+        });
+        fields.push((E::str("objects"), E::List(moved.collect())));
+    }
+    E::Dict(fields)
 }
 
 fn shifted(items: &[E], key_pairs: &[(&str, i128)]) -> Vec<E> {
@@ -354,8 +366,13 @@ fn check_edit(t: &mut Tally, label: &str, snap: &rs_doc::doc::DocumentSnapshot, 
     let be = backend(snap);
     let s = snap_of(&snap.resource_xml, Some(&snap.title));
     let now = rs_editor::rich::integer(root.get("syncModifiedTime")).unwrap() + 1000;
+    let anchored = !rich::model_objects(&ed::editor_projection(Ok(&s), &be).unwrap().model.unwrap()).is_empty();
     let out = match ed::prepare_editor_edit(&s, &E::Str(snap.title.clone()), edited, &Now::Int(PyInt::from_i128(now)), &be) {
         Ok(o) => o,
+        Err(e) if anchored && rich::model_objects(edited).is_empty() => {
+            t.add(&format!("{label} refused: the edit drops a text-anchored object"), e.message() == ed::ANCHOR_KEPT);
+            return;
+        }
         Err(e) => {
             t.add(&format!("{label} prepare ({})", e.message()), false);
             return;
@@ -366,7 +383,7 @@ fn check_edit(t: &mut Tally, label: &str, snap: &rs_doc::doc::DocumentSnapshot, 
     t.add(&format!("{label} title object unchanged"), etree::canonicalize(title_object(root)) == etree::canonicalize(title_object(&new_root)));
     let reread = ed::object_rich(body_object(&new_root));
     let expected = rich::normalize_model(edited).unwrap();
-    t.add(&format!("{label} body re-read equals edit"), reread.as_ref().map(|r| rs_editor::pyval::py_eq(&r.model, &expected)).unwrap_or(false));
+    t.add(&format!("{label} body re-read equals edit"), reread.as_ref().map(|r| rs_editor::pyval::py_eq(&r.model, &rich::without_object_types(&expected))).unwrap_or(false));
     // The draft must itself be editable again (same gate as a Cloud readback).
     let p = ed::editor_projection(Ok(&snap_of(&out.full_xml, Some(&snap.title))), &be).unwrap();
     t.add(&format!("{label} draft projection textEdit+model"), p.text_edit && p.model.as_ref().map(|m| rs_editor::pyval::py_eq(m, &expected)).unwrap_or(false));
@@ -476,7 +493,8 @@ fn roundtrip(t: &mut Tally, document: &Val) {
     let model = p.model.clone().unwrap();
     let body = ed::object_rich(body_object(&root)).unwrap();
     // 1. codec: parse -> serialize with no edit.
-    match rich::encode_rich_text(&body.model, &body.sections) {
+    let values: Vec<String> = body.objects.iter().map(|(_, raw)| raw.clone()).collect();
+    match rich::encode_with_objects(body.model.clone(), body.sections.clone(), &values) {
         Ok(again) => {
             let byte = again.encoded == body.encoded && again.span_order == body.span_order && again.zero_length == body.zero_length;
             t.add("no-edit re-encode byte-identical", byte);
@@ -487,7 +505,8 @@ fn roundtrip(t: &mut Tally, document: &Val) {
             }
             let records = |v: &[String]| -> Vec<rich::Record> { v.iter().cloned().map(Ok).collect() };
             let back = rich::read_rich_text(&again.encoded, &records(&again.span_order), &records(&again.zero_length)).unwrap();
-            t.add("no-edit re-encode document-equivalent (model+slices)", rs_editor::pyval::py_eq(&back.model, &body.model) && back.sections == body.sections);
+            t.add("no-edit re-encode document-equivalent (model+slices+anchors)",
+                rs_editor::pyval::py_eq(&back.model, &body.model) && back.sections == body.sections && back.objects == body.objects);
         }
         Err(e) => t.add(&format!("no-edit re-encode ({})", e.message()), false),
     }
