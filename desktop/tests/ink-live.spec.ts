@@ -72,7 +72,8 @@ test('pen-up keeps exactly the pixels drawn live (no jump), for the draft and th
   // The pen rests before lifting, so no predicted tip (never stored) is on screen.
   const points=[...moving,...Array.from({length:4},()=>({...moving[moving.length-1]}))];
   const release=await penStroke(page,points,{release:false});
-  await expect.poll(()=>exactFrames(page,points.length),{timeout:10000}).toBeGreaterThan(0);await page.waitForTimeout(100);
+  // Each test is a fresh page, so its first stroke compiles the renderer module again (slow on CI macOS runners).
+  await expect.poll(()=>exactFrames(page,points.length),{timeout:30000}).toBeGreaterThan(0);await page.waitForTimeout(100);
   // Snapshot of the live layer right before the pen leaves the screen.
   await page.evaluate(()=>{const canvas=document.querySelector<HTMLCanvasElement>('.ink-live')!;(window as any).__before=canvas.getContext('2d')!.getImageData(0,0,canvas.width,canvas.height);});
   await release();

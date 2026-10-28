@@ -664,10 +664,12 @@ test('short click opens, right click menus, Escape and invalid folders cancel a 
   // Right click still opens the context menu and never starts a drag.
   await card.click({button:'right'});await expect(page.getByRole('menu',{name:'Not menüsü'})).toBeVisible();await expect(page.getByTestId('note-drag-ghost')).toHaveCount(0);
   await page.keyboard.press('Escape');await expect(page.getByRole('menu',{name:'Not menüsü'})).toHaveCount(0);
-  // Moving before the hold time is an ordinary press, not a drag: released on the card it is a click.
-  let p=await center(card);await page.mouse.move(p.x,p.y);await page.mouse.down();await page.mouse.move(p.x+20,p.y+30,{steps:3});await page.waitForTimeout(500);
-  await expect(page.getByTestId('note-drag-ghost')).toHaveCount(0);await page.mouse.up();
-  await page.getByRole('button',{name:'Not listesine dön'}).click();await expect(card).toBeVisible();
+  // With a mouse, pressing and moving starts the drag at once (no need to hold still);
+  // released away from any folder it writes nothing and does not open the note.
+  let p=await center(card);await page.mouse.move(p.x,p.y);await page.mouse.down();await page.mouse.move(p.x+20,p.y+30,{steps:3});
+  await expect(page.getByTestId('note-drag-ghost')).toBeVisible();await page.mouse.up();
+  await expect(page.getByTestId('note-drag-ghost')).toHaveCount(0);await page.waitForTimeout(150);
+  await expect(page.getByRole('button',{name:'Not listesine dön'})).toBeHidden();
   // Escape cancels: no write and the release does not open the note.
   await holdOn(page,card);await moveOver(page,sidebarFolder(page,'Çalışma'));await expect(sidebarFolder(page,'Çalışma')).toHaveClass(/drop-target/);
   await page.keyboard.press('Escape');await expect(page.getByTestId('note-drag-ghost')).toHaveCount(0);await expect(sidebarFolder(page,'Çalışma')).not.toHaveClass(/drop-target/);

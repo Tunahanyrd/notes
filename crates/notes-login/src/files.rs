@@ -10,11 +10,27 @@ use std::path::Path;
 
 /// `os.open(path, O_CREAT|O_EXCL|O_WRONLY, 0o600)`, write, flush, fsync.
 /// Never overwrites and never follows an existing symlink.
+///
+/// The file appears complete or not at all: the data goes to a private
+/// temporary file in the same directory, which is then hard-linked to `path`
+/// (fails with `AlreadyExists` like `O_EXCL`). Writing `path` directly let a
+/// poller see it between create and write and read it empty: the sign-in
+/// waits for `callback.json` with `exists()` and then parses it.
 pub fn private_write(path: &Path, data: &[u8]) -> io::Result<()> {
-    let mut f = OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)?;
-    f.write_all(data)?;
-    f.flush()?;
-    f.sync_all()
+    let name = path.file_name().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
+    let mut suffix = [0u8; 8];
+    getrandom::fill(&mut suffix).map_err(|e| io::Error::other(e.to_string()))?;
+    let suffix: String = suffix.iter().map(|b| format!("{:02x}", b)).collect();
+    let temp = path.with_file_name(format!(".{}.{}.tmp", name.to_string_lossy(), suffix));
+    let result = (|| {
+        let mut f = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temp)?;
+        f.write_all(data)?;
+        f.flush()?;
+        f.sync_all()?;
+        fs::hard_link(&temp, path)
+    })();
+    let _ = fs::remove_file(&temp);
+    result
 }
 
 /// `path.open('rb').read(limit + 1)`
@@ -111,4 +127,45 @@ pub fn private_directory(path: &Path) -> Result<()> {
 /// Python `str(path)` for a path that must be valid UTF-8 (JSON receipts).
 pub fn path_text(path: &Path) -> Result<String> {
     path.to_str().map(str::to_string).ok_or_else(|| Error::value("non-UTF-8 private path is not supported"))
+}
+
+#[cfg(test)]
+mod atomic_write_tests {
+    use super::private_write;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn private_write_is_exclusive_private_and_leaves_no_temporary() {
+        let dir = std::env::temp_dir().join(format!("notes-login-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("callback.json");
+        let _ = std::fs::remove_file(&path);
+        private_write(&path, b"{\"ok\": true}").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"{\"ok\": true}");
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(private_write(&path, b"x").unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("callback.json")]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_poller_never_sees_the_file_before_its_content() {
+        let dir = std::env::temp_dir().join(format!("notes-login-poll-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let data = vec![b'7'; 1 << 20];
+        for round in 0..20 {
+            let path = dir.join(format!("callback-{round}.json"));
+            let (reader_path, expected) = (path.clone(), data.len());
+            let reader = std::thread::spawn(move || loop {
+                if reader_path.exists() {
+                    return std::fs::read(&reader_path).unwrap().len() == expected;
+                }
+                std::hint::spin_loop();
+            });
+            private_write(&path, &data).unwrap();
+            assert!(reader.join().unwrap(), "round {round}: read a partial file");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

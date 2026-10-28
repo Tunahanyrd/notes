@@ -4,9 +4,10 @@ import {FileText} from 'lucide-react';
 // Press-and-hold drag of note cards onto sidebar drop targets
 // (elements carrying data-drop-target: a folder id, or '' for the root).
 // A short click still opens the note and a right click still opens the
-// context menu: the drag starts only after HOLD_MS with the pointer
-// (mouse, pen or touch) barely moving. The drop calls the caller's move
-// action; this hook never writes anything itself.
+// context menu: with a mouse or pen the drag starts once the pointer moves
+// past SLOP while pressed (or after HOLD_MS held still); with touch only the
+// hold starts it, since moving a finger scrolls. The drop calls the caller's
+// move action; this hook never writes anything itself.
 const HOLD_MS=380,SLOP=8,EXPAND_MS=650;
 type Target=string|null;
 export interface NoteDragOptions {
@@ -20,7 +21,7 @@ export interface NoteDragOptions {
   onExpand?:(folderId:string)=>void;
 }
 interface DragState {ids:string[];title:string;thumb:string|null;hover:Target|undefined;valid:boolean;baseReason:string}
-interface Press {pointerId:number;x:number;y:number;noteId:string;element:HTMLElement;timer:number;dragging:boolean}
+interface Press {pointerId:number;pointerType:string;x:number;y:number;noteId:string;element:HTMLElement;timer:number;dragging:boolean}
 
 export function useNoteDrag(options:NoteDragOptions) {
   const optionsRef=useRef(options);optionsRef.current=options;
@@ -80,11 +81,15 @@ export function useNoteDrag(options:NoteDragOptions) {
     const element=event.currentTarget;
     suppressUntil.current=0;suppressNote.current=null;// a new press is a new click intent
     position.current={x:event.clientX,y:event.clientY};
-    press.current={pointerId:event.pointerId,x:event.clientX,y:event.clientY,noteId,element,timer:window.setTimeout(start,HOLD_MS),dragging:false};
+    press.current={pointerId:event.pointerId,pointerType:event.pointerType,x:event.clientX,y:event.clientY,noteId,element,timer:window.setTimeout(start,HOLD_MS),dragging:false};
     const move=(e:PointerEvent)=>{
       const current=press.current;if(!current||e.pointerId!==current.pointerId)return;
       position.current={x:e.clientX,y:e.clientY};
-      if(!current.dragging){if(Math.hypot(e.clientX-current.x,e.clientY-current.y)>SLOP)finish();return;}
+      if(!current.dragging){
+        if(Math.hypot(e.clientX-current.x,e.clientY-current.y)<=SLOP)return;
+        if(current.pointerType==='touch'){finish();return;}
+        window.clearTimeout(current.timer);start();if(!press.current?.dragging)return;
+      }
       e.preventDefault();place();hitTest(e.clientX,e.clientY);
     };
     const up=(e:PointerEvent)=>{
