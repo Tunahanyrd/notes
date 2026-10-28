@@ -310,9 +310,18 @@ jobs:
         with:
           path: references/upstream/sdocx
           key: sdocx-${{ env.SDOCX_COMMIT }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ink-live
+          workspaces: crates/notes-ink-live -> target
       - name: Fetch sdocx and build ink-live.wasm
         working-directory: .
         run: tools/fetch_sdocx.sh && tools/build_ink_wasm.sh
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('desktop/package-lock.json') }}
       - run: npm ci
       - name: Type check
         run: npx tsc --noEmit

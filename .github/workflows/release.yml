@@ -152,6 +152,14 @@ jobs:
       - name: Packaging script present
         run: |
           test -x packaging/build-flatpak.sh || { echo "::error::packaging/build-flatpak.sh is missing (provided by the packaging owner)"; exit 1; }
+      # flatpak-builder's state dir keeps downloads and finished modules
+      # (Poppler, ImageMagick, cargo/npm sources) between releases.
+      - name: Cache flatpak-builder state
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .flatpak-builder/state
+          key: flatpak-gnome${{ needs.prepare.outputs.gnome }}-${{ hashFiles('packaging/flatpak/**') }}
+          restore-keys: flatpak-gnome${{ needs.prepare.outputs.gnome }}-
       # The manifest builds offline from generated cargo/npm source lists;
       # sdocx is a git source pinned to SDOCX_COMMIT inside the manifest.
       - name: Build Flatpak bundle
