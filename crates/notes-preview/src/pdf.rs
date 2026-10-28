@@ -28,6 +28,9 @@ pub struct PdfBackground {
     pub download_url: Option<String>,
     /// The native canvas layer composited over the PDF page, when available.
     pub overlay: Option<CanvasPreviewCandidate>,
+    /// Without a native layer: the page's own objects drawn locally over the
+    /// PDF page (`overPdf` composite of the note snapshot `sha256`).
+    pub local_ink: Option<crate::manager::InkGeometryPreview>,
 }
 
 impl PdfBackground {
@@ -37,7 +40,7 @@ impl PdfBackground {
 
     /// PDF background only; native canvas objects are separate render layers.
     pub fn complete(&self) -> bool {
-        self.annotation_objects == 0 || self.overlay.is_some()
+        self.annotation_objects == 0 || self.overlay.is_some() || self.local_ink.as_ref().is_some_and(|l| l.notice.is_none())
     }
 }
 
@@ -62,7 +65,7 @@ pub fn inspect_pdf_backgrounds(parsed: &Parsed) -> Result<Vec<PdfBackground>, Fa
         .map_err(|e| e.map(pdf).unwrap_or_else(|| pdf(PDF_DEFAULT)))?;
     Ok(placements.into_iter().map(|p| PdfBackground {
         page_index: p.page_index, pdf_page_index: p.pdf_page_index, width: p.width, height: p.height, rect: p.rect,
-        annotation_objects: p.annotation_objects, sha256: p.sha256, download_url: p.download_url, overlay: None,
+        annotation_objects: p.annotation_objects, sha256: p.sha256, download_url: p.download_url, overlay: None, local_ink: None,
     }).collect())
 }
 

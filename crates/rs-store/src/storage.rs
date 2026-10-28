@@ -267,6 +267,7 @@ impl StoreCore {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&store.path, std::fs::Permissions::from_mode(0o600))?;
         }
+        store.refresh_editor_capabilities()?;
         if !store.meta("favorite_snapshot_imported")?.map(|v| v.truthy()).unwrap_or(false) {
             let rows = store.with_db(|db| {
                 db.query(
@@ -285,6 +286,29 @@ impl StoreCore {
 
     pub fn with_db<T>(&self, f: impl FnOnce(&DbHandle) -> Result<T>) -> Result<T> {
         with_db(&self.path, f)
+    }
+
+    /// Editor capabilities are cached per note revision. When the capability
+    /// rules change (`rs_editor::edit::PROJECTION_RECIPE`), drop the cached
+    /// projections (and refused title flags) of synced Cloud notes so they are
+    /// derived again from the stored Cloud document. Local/pending models and
+    /// granted title flags are kept.
+    fn refresh_editor_capabilities(&self) -> Result<()> {
+        const KEY: &str = "editor_projection_recipe";
+        let recipe = _editor::edit::PROJECTION_RECIPE;
+        if self.meta(KEY)?.as_ref().and_then(Val::as_str) == Some(recipe) {
+            return Ok(());
+        }
+        let encoded = dumps_ascii(&Val::s(recipe))?;
+        self.with_db(|db| {
+            db.exec("BEGIN IMMEDIATE", &[])?;
+            let synced = "SELECT id FROM notes WHERE sync_state='synced' AND base_document IS NOT NULL";
+            db.exec(&format!("DELETE FROM editor_documents WHERE note_id IN ({synced})"), &[])?;
+            // The rules only ever widen title editing: re-derive the refused ones.
+            db.exec(&format!("UPDATE notes SET title_editable=NULL WHERE title_editable=0 AND id IN ({synced})"), &[])?;
+            db.exec("INSERT INTO metadata VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", &p![KEY, encoded])?;
+            Ok(())
+        })
     }
 
     pub fn meta(&self, key: &str) -> Result<Option<Val>> {

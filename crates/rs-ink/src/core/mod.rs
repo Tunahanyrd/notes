@@ -5,6 +5,7 @@ pub mod cache;
 pub mod capture;
 pub mod coords;
 pub mod num;
+pub mod objects;
 pub mod payload;
 pub mod prepare;
 pub mod xml;

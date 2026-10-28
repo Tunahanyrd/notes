@@ -67,6 +67,8 @@ struct Tally {
     ok_match: usize,
     err_match: usize,
     flags_only: usize,
+    /// Counted in `ok_match`: documented intended divergences (editor rules v2).
+    intended: usize,
     mismatches: Vec<String>,
 }
 
@@ -181,8 +183,39 @@ fn run_funcs(fx: &Val, t: &mut Tally) {
             }
             other => panic!("unknown fn {other}"),
         };
-        t.check(&label, case.k("result"), ok_val(r));
+        let got = ok_val(r);
+        if fname.starts_with("editor_projection") {
+            if let (Some(want), Ok(Some(rust))) = (case.k("result").get("ok").and_then(Val::as_str), &got) {
+                if editor_v2_intended(want, rust) {
+                    t.total += 1;
+                    t.ok_match += 1;
+                    t.intended += 1;
+                    continue;
+                }
+            }
+        }
+        t.check(&label, case.k("result"), got);
     }
+}
+
+/// Intended divergence from the frozen Python oracle (editor capability
+/// rules v2, `rs_editor::edit::PROJECTION_RECIPE`): text objects next to page
+/// objects/content files are editable. The oracle blocked them at its
+/// object/resource gate; Rust either enables them (same model and title flag)
+/// or, for a page/tree inventory mismatch, keeps them blocked with that reason.
+fn editor_v2_intended(want: &str, got: &str) -> bool {
+    const OLD: [&str; 2] = ["Çizim veya ek nesne içeren notlar salt okunur.", "Ek kaynak içeren notlar salt okunur."];
+    let (Ok(w), Ok(g)) = (loads(want), loads(got)) else { return false };
+    let caps = |v: &Val, k: &str| v.get("capabilities").and_then(|c| c.get(k)).map(Val::truthy).unwrap_or(false);
+    if caps(&w, "textEdit") || !w.get("reason").and_then(Val::as_str).is_some_and(|r| OLD.contains(&r)) {
+        return false;
+    }
+    if caps(&w, "titleEdit") != caps(&g, "titleEdit") || js(&w.get_or_null("model")) != js(&g.get_or_null("model")) {
+        return false;
+    }
+    let enabled = caps(&g, "textEdit") && caps(&g, "richStyle") && g.get_or_null("reason").is_null();
+    let inconsistent = !caps(&g, "textEdit") && g.get("reason").and_then(Val::as_str) == Some(rs_doc::doc::EDITOR_INCONSISTENT);
+    enabled || inconsistent
 }
 
 fn unit(r: rs_store::host::FaultResult<()>) -> Result<Option<String>, Fail> {
@@ -331,7 +364,11 @@ fn run_store(fx: &Val, scratch: &Path, t: &mut Tally) {
                 let mut p = areas::project_ink(&base, false).map_err(rs_store::db::Error::from)?;
                 p.set("pendingStrokes", Val::List(vec![]));
                 p.set("pendingErase", Val::List(vec![]));
-                p.set("recipe", Val::s(areas::PROJECTION_RECIPE));
+                // The frozen oracle predates `ink-projection-v7:carried-objects`
+                // (2026-10-28, pen on notes with pictures/shapes/text boxes),
+                // which changed only the recipe string for these synthetic notes.
+                assert_eq!(areas::PROJECTION_RECIPE, "ink-projection-v7:carried-objects");
+                p.set("recipe", Val::s("ink-projection-v6:highlighter"));
                 store.cache_ink(&ident, &row.k("revision"), &p)?;
                 Ok(p)
             })(),
@@ -365,7 +402,9 @@ fn run_store(fx: &Val, scratch: &Path, t: &mut Tally) {
         let order = if table == "metadata" { "1" } else { "rowid" };
         let rows = store
             .with_db(|db| {
-                let cur = rs_store::db::Sql::query(db, &format!("SELECT * FROM \"{table}\" ORDER BY {order}"), &[])?;
+                // `editor_projection_recipe` (editor rules v2) is newer than the oracle.
+                let filter = if table == "metadata" { " WHERE key<>'editor_projection_recipe'" } else { "" };
+                let cur = rs_store::db::Sql::query(db, &format!("SELECT * FROM \"{table}\"{filter} ORDER BY {order}"), &[])?;
                 Ok(cur
                     .iter()
                     .map(|row| match row.to_dict() {
@@ -431,11 +470,12 @@ fn python_differential() {
         let impl_name = fx.get_or_null("impl");
         for (name, t) in &sections {
             eprintln!(
-                "[{} impl={}] {name}: {} cases, {} values equal, {} errors equal (class+message), {} errors class-only, {} mismatches",
+                "[{} impl={}] {name}: {} cases, {} values equal ({} intended v2 editor divergences), {} errors equal (class+message), {} errors class-only, {} mismatches",
                 path.display(),
                 impl_name.as_str().unwrap_or("?"),
                 t.total,
                 t.ok_match,
+                t.intended,
                 t.err_match,
                 t.flags_only,
                 t.mismatches.len() - t.flags_only

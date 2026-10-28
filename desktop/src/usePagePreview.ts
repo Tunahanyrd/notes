@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react';
 import {api, notePath, request} from './api';
-export type PreviewPage={index:number;width:number|null;height:number|null;available:boolean;darkMode?:boolean;previewKind?:'pdf-background'|'ink-reconstructed';complete?:boolean;previewNotice?:string|null};
+export type PreviewPage={index:number;width:number|null;height:number|null;available:boolean;darkMode?:boolean;previewKind?:'pdf-background'|'pdf-with-notes'|'ink-reconstructed'|'page-reconstructed'|'blank'|string;complete?:boolean;previewNotice?:string|null};
 type PreviewState={noteId:string;pages:PreviewPage[];phase:'loading'|'ready'|'unavailable';url:string|null;activeIndex:number};
 const empty:PreviewState={noteId:'',pages:[],phase:'unavailable',url:null,activeIndex:0};
 export function usePagePreview(noteId:string|null,revision:number|undefined,enabled:boolean) {

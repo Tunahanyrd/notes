@@ -13,7 +13,7 @@
 .settings-option>div:first-child,.settings-option>span:first-child{min-width:0}
 .settings-option-title{display:block;font-size:15px;font-weight:500;line-height:22px;color:#222}
 .settings-option-description{display:block;font-size:12px;line-height:19px;color:#77777d;margin-top:4px}
-.settings-option select{flex-shrink:0;background:#fff;border:1px solid #d2d2d5;border-radius:6px;font-size:13px;min-height:34px;padding:5px 30px 5px 10px;max-width:45%;cursor:pointer}
+.settings-option select{flex-shrink:0;background:#fff;border:1px solid #d2d2d5;border-radius:6px;font-size:13px;min-height:34px;padding:5px 30px 5px 10px;max-width:45%;cursor:default}
 .settings-option select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .settings-sync-button{display:flex;align-items:center;justify-content:center;gap:8px;flex-shrink:0;min-height:34px;border:1px solid #d4d4d7;border-radius:6px;padding:6px 13px;background:white;font-size:12px}
 .settings-sync-details{margin:0 22px 16px;padding-top:12px;border-top:1px solid #ededee;display:flex;gap:30px;flex-wrap:wrap}
@@ -28,7 +28,7 @@
 .settings-view-choices button{position:relative;display:flex;flex-direction:column;gap:6px;align-items:center;justify-content:center;width:76px;min-height:72px;border:1px solid #dddde0;border-radius:9px;color:#777;font-size:12px}
 .settings-view-choices button[aria-pressed=true]{background:#fff3ee;border-color:#ed917c;color:#a2442e}
 .settings-choice-check{position:absolute;right:5px;top:5px}
-.settings-toggle{appearance:none;-webkit-appearance:none;position:relative;flex-shrink:0;width:38px;height:22px;border:1px solid #a9a9af;border-radius:20px;background:#dddde1;margin:0;cursor:pointer;transition:background 120ms}
+.settings-toggle{appearance:none;-webkit-appearance:none;position:relative;flex-shrink:0;width:38px;height:22px;border:1px solid #a9a9af;border-radius:20px;background:#dddde1;margin:0;cursor:default;transition:background 120ms}
 .settings-toggle:before{content:'';position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:white;box-shadow:0 1px 2px #0003;transition:transform 120ms}
 .settings-toggle:checked{background:var(--accent);border-color:var(--accent)}
 .settings-toggle:checked:before{transform:translateX(16px)}

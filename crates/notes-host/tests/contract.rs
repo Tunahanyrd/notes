@@ -91,5 +91,5 @@ fn null_snapshot_states() {
     assert_eq!(rs_store::val::dumps(&bg, false, false).unwrap(), r#"{"backgroundArgb": null, "editable": false, "reason": "Notun sayfa bilgisi henüz hazır değil."}"#);
     let ops = areas::page_ops_state(Some(&Val::Null)).unwrap();
     assert_eq!(rs_store::val::dumps(&ops, false, false).unwrap(), r#"{"editable": false, "reason": "Notun sayfa bilgisi henüz hazır değil.", "pages": []}"#);
-    assert_eq!(areas::PROJECTION_RECIPE, "ink-projection-v6:highlighter");
+    assert_eq!(areas::PROJECTION_RECIPE, "ink-projection-v7:carried-objects");
 }

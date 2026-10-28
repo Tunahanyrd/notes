@@ -91,7 +91,10 @@ function ShapeSvg({shape,className}:{shape:Omit<ShapeItem,'id'>;className?:strin
 
 // Drawn over a page sheet. Captures pointer input only while the tool is on
 // and this page accepts shapes; otherwise the pen/eraser layer underneath works.
-export function ShapeLayer({controller,pageIndex,current}:{controller:ShapeController;pageIndex:number;current:boolean}){
+// Saved shapes are part of the page image (Samsung's canvas cache or our
+// local page renderer), so they are drawn here only when the page has no
+// image; the shape being synced is always drawn until the new image arrives.
+export function ShapeLayer({controller,pageIndex,current,hasImage=false}:{controller:ShapeController;pageIndex:number;current:boolean;hasImage?:boolean}){
   const page=controller.page(pageIndex);const svg=useRef<SVGSVGElement>(null);
   const [drag,setDrag]=useState<{pointer:number;start:[number,number];end:[number,number]}|null>(null);
   if(!page||!page.width||!page.height)return null;
@@ -99,7 +102,8 @@ export function ShapeLayer({controller,pageIndex,current}:{controller:ShapeContr
   const reason=controller.active?controller.reasonFor(pageIndex):'';
   const drawing=controller.active&&!reason;
   const pending=controller.pending&&controller.pending.pageId===page.id?[controller.pending.shape]:[];
-  if(!page.shapes.length&&!pending.length&&!controller.active)return null;
+  const saved=hasImage?[]:page.shapes;
+  if(!saved.length&&!pending.length&&!controller.active)return null;
   const point=(event:React.PointerEvent):[number,number]=>{const box=svg.current!.getBoundingClientRect();
     return [Math.min(width,Math.max(0,(event.clientX-box.left)/box.width*width)),Math.min(height,Math.max(0,(event.clientY-box.top)/box.height*height))];};
   const finish=(event:React.PointerEvent)=>{
@@ -119,7 +123,7 @@ export function ShapeLayer({controller,pageIndex,current}:{controller:ShapeContr
         svg.current?.setPointerCapture(event.pointerId);const start=point(event);setDrag({pointer:event.pointerId,start,end:start});}}
       onPointerMove={event=>{if(drag&&drag.pointer===event.pointerId)setDrag({...drag,end:point(event)});}}
       onPointerUp={finish} onPointerCancel={()=>setDrag(null)}>
-      {page.shapes.map(shape=><ShapeSvg key={shape.id} shape={shape}/>)}
+      {saved.map(shape=><ShapeSvg key={shape.id} shape={shape}/>)}
       {pending.map(shape=><ShapeSvg key="pending" shape={shape} className="shape-pending"/>)}
       {drag&&<ShapeSvg className="shape-preview" shape={{kind:controller.kind,geometry:[...drag.start,...drag.end],colorARGB:controller.style.colorARGB,width:controller.style.width,
         fillARGB:controller.style.fill&&!LINE_KINDS.includes(controller.kind)?controller.style.fillARGB:null}}/>}
@@ -136,10 +140,10 @@ export function ShapePanel({controller}:{controller:ShapeController}){
   return <div className="pen-panel shape-panel"><h2>Şekil</h2>
     <div className="shape-kinds" role="radiogroup" aria-label="Şekil türü">{SHAPE_KINDS.map(item=><button key={item.kind} role="radio" aria-checked={kind===item.kind} className={kind===item.kind?'selected':''} title={item.label} aria-label={item.label} onClick={()=>controller.setKind(item.kind)}>{KIND_ICONS[item.kind]}</button>)}</div>
     <div className="palette-heading pen-heading"><Palette size={16}/><span>Çizgi rengi</span></div>
-    <div className="color-palette pen-colors" role="group" aria-label="Şekil çizgi rengi">{shapeColors.map(value=>{const argb=argbOf(value);const selected=argb===style.colorARGB>>>0;return <button key={value} aria-label={`Çizgi rengi ${value.toUpperCase()}`} aria-pressed={selected} className={selected?'selected':''} style={{backgroundColor:value}} onClick={()=>setStyle({...style,colorARGB:argb})}/>;})}</div>
+    <div className="color-palette pen-colors" role="group" aria-label="Şekil çizgi rengi">{shapeColors.map((value,i)=>{const argb=argbOf(value);const selected=argb===style.colorARGB>>>0;return <button key={value} aria-label={`Çizgi rengi ${i+1}`} aria-pressed={selected} className={selected?'selected':''} style={{backgroundColor:value}} onClick={()=>setStyle({...style,colorARGB:argb})}/>;})}</div>
     <label className="pen-size"><span>Kalınlık <output>{Math.round(style.width*10)/10}</output></span><input type="range" aria-label="Şekil çizgi kalınlığı" min={MIN_SHAPE_WIDTH} max={MAX_SHAPE_WIDTH} step={0.5} value={style.width} onChange={event=>setStyle({...style,width:Number(event.target.value)})}/></label>
     <label className="shape-fill"><input type="checkbox" disabled={line} checked={style.fill&&!line} onChange={event=>setStyle({...style,fill:event.target.checked})}/><span>Dolgu</span></label>
-    {style.fill&&!line&&<div className="color-palette pen-colors" role="group" aria-label="Şekil dolgu rengi">{shapeColors.map(value=>{const argb=argbOf(value,0x40);const selected=argb===style.fillARGB>>>0;return <button key={value} aria-label={`Dolgu rengi ${value.toUpperCase()}`} aria-pressed={selected} className={selected?'selected':''} style={{backgroundColor:value,opacity:.5}} onClick={()=>setStyle({...style,fillARGB:argb})}/>;})}</div>}
-    <p className="pen-hint">Sayfada sürükleyerek çizin; her şekil ayrı kaydedilip Samsung Cloud'a gönderilir. Önizleme yaklaşık geometridir, Samsung çizicisiyle birebir değildir. Şekil eklenen notta kalem şimdilik kapanır.</p>
+    {style.fill&&!line&&<div className="color-palette pen-colors" role="group" aria-label="Şekil dolgu rengi">{shapeColors.map((value,i)=>{const argb=argbOf(value,0x40);const selected=argb===style.fillARGB>>>0;return <button key={value} aria-label={`Dolgu rengi ${i+1}`} aria-pressed={selected} className={selected?'selected':''} style={{backgroundColor:value,opacity:.5}} onClick={()=>setStyle({...style,fillARGB:argb})}/>;})}</div>}
+    <p className="pen-hint">Şekli sayfada sürükleyerek çizin. Ekrandaki görünüm cihazdakinden biraz farklı olabilir.</p>
   </div>;
 }

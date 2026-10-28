@@ -51,7 +51,7 @@ u32le  N                      data block length (= rest of the file)
 Page caches use flags `0xe0` (A, B, C set; D clear). The image is divided
 into 16×16 blocks: `C = ceil(W/16)` columns, `R = ceil(H/16)` rows, and
 `ceil(R/G)` row groups. Sizes are limited to 32768 per side; our decoder also
-caps images at 4 Mi pixels.
+caps images at 4 Mi pixels and inputs at 32 MiB (8 MiB before 2026-10-28).
 
 ### Data packet
 

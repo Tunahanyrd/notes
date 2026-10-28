@@ -18,6 +18,7 @@
 //! bwrap-sandboxed, rlimited process; the SVG is rasterized in-process with
 //! resvg (`SAMSUNG_NOTES_INK_RASTER=rsvg` selects the sandboxed rsvg-convert),
 //! exactly as rs-render does.
+pub mod objects;
 pub mod prepare;
 
 use crate::util::{ink_render, sha256};
@@ -43,12 +44,19 @@ const UNSAFE: &str = "Bu çizginin görünümü güvenle oluşturulamadı.";
 
 /// One admitted page of `inspect_render_pages` (`darkMode` may be absent in
 /// pages a custom backend returns; the manager reads `.get('darkMode', False)`).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct InkPage {
     pub index: i64,
     pub width: i64,
     pub height: i64,
     pub dark_mode: Option<bool>,
+    /// A `page-reconstructed` composite page (inventory `"kind": "page"`).
+    pub composite: bool,
+    /// Calm reason the composite is approximate (None: complete).
+    pub notice: Option<String>,
+    /// A PDF page's own objects, drawn over its PDF page image
+    /// (inventory `"kind": "pdf-ink"`).
+    pub over_pdf: bool,
 }
 
 /// The `ink_render` functions the manager calls (tests substitute it the way
@@ -60,6 +68,15 @@ pub trait InkBackend: Send + Sync {
     fn inspect_render_pages(&self, snapshot: &Val) -> Vec<InkPage>;
     /// `ink_render.render_ink_page(snapshot, page_index)`: contract RGBA PNG.
     fn render_ink_page(&self, snapshot: &Val, page_index: i64) -> Result<Vec<u8>, Fail>;
+    /// Content-file SHA256s (images) the page composite draws.
+    fn page_media(&self, _snapshot: &Val, _page_index: i64) -> Vec<String> {
+        Vec::new()
+    }
+    /// The page PNG with images from `media` (SHA256 -> verified bytes) and
+    /// whether every image could be drawn (false: placeholders were used).
+    fn render_page(&self, snapshot: &Val, page_index: i64, _media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<(Vec<u8>, bool), Fail> {
+        self.render_ink_page(snapshot, page_index).map(|png| (png, true))
+    }
 }
 
 /// The real renderer pipeline.
@@ -95,7 +112,40 @@ impl InkBackend for NativeInk {
     }
 
     fn render_ink_page(&self, snapshot: &Val, page_index: i64) -> Result<Vec<u8>, Fail> {
+        self.render_page(snapshot, page_index, &|_| None).map(|(png, _)| png)
+    }
+
+    fn page_media(&self, snapshot: &Val, page_index: i64) -> Vec<String> {
+        match page_body(snapshot, page_index, self.child.as_deref()) {
+            Ok((_, body)) if is_composite(&body) => composite_media(&body),
+            _ => Vec::new(),
+        }
+    }
+
+    fn render_page(&self, snapshot: &Val, page_index: i64, media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<(Vec<u8>, bool), Fail> {
         let (page, body) = page_body(snapshot, page_index, self.child.as_deref())?;
+        if is_composite(&body) {
+            return render_composite(&self.renderer(), &body, (page.width, page.height), media);
+        }
+        let size = (page.width, page.height);
+        match self.render_strokes(page, body) {
+            Ok(png) => Ok((png, true)),
+            Err(e) => {
+                // The renderer refused a renderer-only page: draw it as a
+                // composite stand-in (approximated ink), marked incomplete.
+                let forced = single_body(snapshot, page_index, "forced", self.child.as_deref());
+                if !is_composite(&forced) {
+                    return Err(e);
+                }
+                render_composite(&self.renderer(), &forced, size, media).map(|(png, _)| (png, false))
+            }
+        }
+    }
+}
+
+impl NativeInk {
+    /// A renderer-only ink page (unchanged `ink-reconstructed` path).
+    fn render_strokes(&self, page: InkPage, body: Vec<u8>) -> Result<Vec<u8>, Fail> {
         // Shape-only page (shapes come from the UI overlay): plain background.
         if let Some((width, height, argb)) = rs_render::ink_render::background_only(&body) {
             if (width, height) != (page.width, page.height) {
@@ -124,6 +174,120 @@ impl InkBackend for NativeInk {
     }
 }
 
+/// Whether a prepared page body is a page composite (see `prepare::composite_page`).
+pub fn is_composite(body: &[u8]) -> bool {
+    body.starts_with(b"{\"composite\":1,")
+}
+
+fn composite_value(body: &[u8]) -> Option<Val> {
+    rs_store::val::loads(std::str::from_utf8(body).ok()?).ok()
+}
+
+/// The image SHA256s a composite body draws (deduplicated, in order).
+pub fn composite_media(body: &[u8]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    if let Some(Val::List(items)) = composite_value(body).and_then(|v| v.get("items").cloned()) {
+        for item in items {
+            if let Some(sha) = item.get("image").and_then(|i| i.get("sha256")).and_then(Val::as_str) {
+                if !out.iter().any(|s| s == sha) {
+                    out.push(sha.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+fn floats(v: Option<&Val>, n: usize) -> Option<Vec<f64>> {
+    let Some(Val::List(items)) = v else { return None };
+    let out: Vec<f64> = items.iter().filter_map(|x| match x {
+        Val::Int(i) => Some(*i as f64),
+        Val::Float(f) => Some(*f),
+        _ => None,
+    }).collect();
+    (out.len() == n && items.len() == n).then_some(out)
+}
+
+fn float_of(v: Option<&Val>, default: f64) -> f64 {
+    match v {
+        Some(Val::Int(i)) => *i as f64,
+        Some(Val::Float(f)) => *f,
+        _ => default,
+    }
+}
+
+/// Paint a composite body: page colour, its items in order (images resolved
+/// through `media`), then the renderer's ink/text layer. A renderer failure
+/// falls back to the text-box-free input, then to approximated polylines.
+pub fn render_composite(renderer: &Path, body: &[u8], size: (i64, i64), media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<(Vec<u8>, bool), Fail> {
+    use rs_render::compose::{self, ImagePlacement, Item};
+    let fail = || ink_render(UNSAFE);
+    let value = composite_value(body).ok_or_else(fail)?;
+    let width = value.get("width").and_then(Val::as_i64).ok_or_else(fail)?;
+    let height = value.get("height").and_then(Val::as_i64).ok_or_else(fail)?;
+    let color = value.get("backgroundArgb").and_then(Val::as_i64).filter(|c| (0..=u32::MAX as i64).contains(c)).ok_or_else(fail)? as u32;
+    if (width, height) != size {
+        return Err(fail());
+    }
+    let mut complete = true;
+    // Renderer layer (strokes, body flow, text boxes).
+    let mut layer: Option<(String, String)> = None;
+    let attempts = ["renderer", "rendererPlain"];
+    let wanted = value.get("renderer").and_then(Val::as_str).is_some();
+    if wanted {
+        let available = rs_render::ink_render::renderer_available(renderer);
+        for key in attempts {
+            let Some(input) = value.get(key).and_then(Val::as_str) else { continue };
+            if !available {
+                break;
+            }
+            let Ok(svg) = rs_render::ink_render::run_renderer(renderer, false, input.as_bytes().to_vec(), MAX_SVG) else { continue };
+            let Ok(text) = String::from_utf8(svg) else { continue };
+            if let Ok(found) = compose::renderer_layer(&text, width, height) {
+                if key != "renderer" {
+                    complete = false;
+                }
+                layer = Some(found);
+                break;
+            }
+        }
+    }
+    let images: Vec<(usize, Option<Vec<u8>>)> = match value.get("items") {
+        Some(Val::List(items)) => items.iter().enumerate().filter_map(|(i, item)| {
+            let sha = item.get("image")?.get("sha256")?.as_str()?;
+            Some((i, media(sha)))
+        }).collect(),
+        _ => Vec::new(),
+    };
+    let mut items: Vec<Item> = Vec::new();
+    if let Some(Val::List(list)) = value.get("items") {
+        for (i, item) in list.iter().enumerate() {
+            if let Some(svg) = item.get("svg").and_then(Val::as_str) {
+                items.push(Item::Svg(svg));
+            } else if let Some(image) = item.get("image") {
+                let rect = floats(image.get("rect"), 4).ok_or_else(fail)?;
+                let crop = floats(image.get("crop"), 4).map(|c| [c[0], c[1], c[2], c[3]]);
+                let place = ImagePlacement {
+                    rect: [rect[0], rect[1], rect[2], rect[3]], crop,
+                    flip_h: image.get("flipH").is_some_and(Val::truthy), flip_v: image.get("flipV").is_some_and(Val::truthy),
+                    degrees: float_of(image.get("degrees"), 0.0), opacity: float_of(image.get("opacity"), 1.0),
+                };
+                let bytes = images.iter().find(|(at, _)| *at == i).and_then(|(_, b)| b.as_deref());
+                items.push(Item::Image(bytes, place));
+            }
+        }
+    }
+    let fallback = value.get("fallback").and_then(Val::as_str).unwrap_or("");
+    if wanted && layer.is_none() {
+        complete = false;
+        items.push(Item::Svg(fallback));
+    }
+    let inner = layer.as_ref().map(|(a, b)| (a.as_str(), b.as_str()));
+    let (pixels, drawn) = compose::compose(width, height, color, &items, inner).map_err(|_| fail())?;
+    let png = px::rgba_png(width, height, &pixels).map_err(|_| ink_render(px::FilteredError::Format.message()))?;
+    Ok((png, complete && drawn))
+}
+
 /// `_snapshot_bytes(snapshot)` for a snapshot dict (compact JSON).
 fn snapshot_bytes(snapshot: &Val) -> Option<Vec<u8>> {
     rs_store::val::dumps(snapshot, true, true).ok().map(String::into_bytes)
@@ -138,6 +302,9 @@ fn parse_inventory(raw: &[u8]) -> Option<Vec<InkPage>> {
             width: p.get("width")?.as_i64()?,
             height: p.get("height")?.as_i64()?,
             dark_mode: p.get("darkMode").map(Val::truthy),
+            composite: matches!(p.get("kind").and_then(Val::as_str), Some("page") | Some("pdf-ink")),
+            over_pdf: p.get("kind").and_then(Val::as_str) == Some("pdf-ink"),
+            notice: p.get("notice").and_then(Val::as_str).map(str::to_string),
         })
     }).collect()
 }
@@ -180,6 +347,23 @@ fn inventory_job(exe: &Path, data: Vec<u8>) -> Result<Vec<u8>, Fail> {
         Err(sandbox::RunError::Spawn) => Err(Fail::os("ink preparation could not start")),
         Ok(o) if o.code != Some(0) || o.stdout.is_empty() => Err(ink_render(NOT_PREPARED)),
         Ok(o) => Ok(o.stdout),
+    }
+}
+
+/// One page's body prepared alone (`page`) or its forced composite (`forced`):
+/// in the isolated child when self-exec is configured, else in-process.
+fn single_body(snapshot: &Val, index: i64, mode: &str, child: Option<&Path>) -> Vec<u8> {
+    match child {
+        None if mode == "page" => prepare::page_body(snapshot, index),
+        None => prepare::forced_composite(snapshot, index),
+        Some(exe) => {
+            let Some(data) = snapshot_bytes(snapshot) else { return Vec::new() };
+            let args = child_args(exe, mode, Some(index));
+            match sandbox::run_with_cwd(&args, Some(data), JOB_LIMITS, true, Duration::from_secs(180), None, false) {
+                Ok(o) if o.code == Some(0) && o.stdout.len() <= prepare::MAX_INPUT => o.stdout,
+                _ => Vec::new(),
+            }
+        }
     }
 }
 
@@ -357,6 +541,12 @@ fn start_note_child(exe: &Path, data: Vec<u8>, wanted: i64, slot: Slot, key: [u8
                 break;
             }
         }
+        // Stop a child we no longer read from (body budget reached, bad
+        // frame): it would otherwise block on its full pipe until the 180 s
+        // watchdog, holding every waiter of this note. The child is not reaped
+        // yet, so its process group id cannot have been reused.
+        // SAFETY: kill() takes plain integers; see the watchdog above.
+        unsafe { libc::kill(-killer_pid, libc::SIGKILL) };
         let _ = child.wait();
         let _ = stop_tx.send(());
         let _ = watchdog.join();
@@ -409,7 +599,21 @@ fn wait_for(slot: &Slot, page: Option<i64>, timeout: Duration) -> Option<Lookup>
 }
 
 /// Inventory page + renderer body for `index`, sharing one producer per note.
+/// A page the shared producer left out (its 96 MiB body budget ran out on a
+/// note with many heavy pages) is prepared on its own.
 fn page_body(snapshot: &Val, index: i64, child: Option<&Path>) -> Result<(InkPage, Vec<u8>), Fail> {
+    match shared_page_body(snapshot, index, child) {
+        Err(e) if e.message == NOT_PREPARED => {
+            let Some(data) = snapshot_bytes(snapshot) else { return Err(e) };
+            let Some(page) = inventory_get(&sha256(&data)).and_then(|p| p.iter().find(|p| p.index == index).cloned()) else { return Err(e) };
+            let body = single_body(snapshot, index, "page", child);
+            if body.is_empty() { Err(e) } else { Ok((page, body)) }
+        }
+        other => other,
+    }
+}
+
+fn shared_page_body(snapshot: &Val, index: i64, child: Option<&Path>) -> Result<(InkPage, Vec<u8>), Fail> {
     let Some(data) = snapshot_bytes(snapshot) else { return Err(ink_render(NOT_FOUND)) };
     let key = sha256(&data);
     let (slot, fresh) = note_slot(key);
@@ -459,10 +663,7 @@ fn finish_page(key: [u8; 32], slot: Slot, index: i64) -> Result<(InkPage, Vec<u8
             forget_note(key);
             Err(ink_render(TIMED_OUT))
         }
-        _ => {
-            forget_note(key);
-            Err(ink_render(NOT_PREPARED))
-        }
+        _ => Err(ink_render(NOT_PREPARED)),
     }
 }
 
@@ -503,7 +704,8 @@ fn child_main(args: &[String]) -> i32 {
         return 71;
     }
     let mode = args[0].as_str();
-    if (mode != "inventory" && mode != "render") || (mode == "render") != (args.len() == 3) {
+    let paged = matches!(mode, "render" | "page" | "forced");
+    if !(mode == "inventory" || paged) || paged != (args.len() == 3) {
         return 65;
     }
     if sandbox::apply_limits(&JOB_LIMITS, true).is_err() {
@@ -515,8 +717,15 @@ fn child_main(args: &[String]) -> i32 {
     }
     let Ok(text) = String::from_utf8(raw) else { return 70 };
     let Ok(snapshot) = rs_store::val::loads(&text) else { return 70 };
-    let inventory = prepare::inventory_json(&snapshot);
     let mut out = std::io::stdout().lock();
+    if mode == "page" || mode == "forced" {
+        // One page body only (the streaming producer ran out of budget, or the
+        // renderer refused the page and the composite stand-in is wanted).
+        let Ok(index) = args[2].parse::<i64>() else { return 65 };
+        let body = if mode == "page" { prepare::page_body(&snapshot, index) } else { prepare::forced_composite(&snapshot, index) };
+        return if out.write_all(&body).and_then(|_| out.flush()).is_ok() { 0 } else { 70 };
+    }
+    let inventory = prepare::inventory_json(&snapshot);
     if mode == "inventory" {
         return if out.write_all(inventory.as_bytes()).and_then(|_| out.flush()).is_ok() { 0 } else { 70 };
     }

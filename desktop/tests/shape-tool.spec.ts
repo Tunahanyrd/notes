@@ -41,11 +41,11 @@ const rail=(page:Page)=>page.locator('.tool-rail');
 test('dragging with the ellipse queues one page-ops shape job and shows it while it syncs',async({page})=>{
   const {requests}=await fixture(page);
   const button=rail(page).getByRole('button',{name:'Şekil',exact:true});
-  await expect(button).toBeEnabled();await expect(button).toHaveAttribute('title',/^Şekil: sayfada sürükleyerek/);
+  await expect(button).toBeEnabled();await expect(button).toHaveAttribute('title','Şekil');
   await button.click();
   const panel=page.getByRole('complementary',{name:'Şekil araçları'});await expect(panel).toBeVisible();
   await panel.getByRole('radio',{name:'Elips'}).click();
-  await panel.getByRole('button',{name:'Çizgi rengi #229BFF'}).click();
+  await panel.getByRole('button',{name:'Çizgi rengi 5',exact:true}).click();
   const area=page.getByLabel('1. sayfa şekil alanı');await expect(area).toHaveClass(/drawing/);
   const box=(await area.boundingBox())!;const at=(x:number,y:number)=>[box.x+x*box.width/1000,box.y+y*box.height/1000] as const;
   await page.mouse.move(...at(200,200));await page.mouse.down();await page.mouse.move(...at(500,400),{steps:6});
@@ -63,9 +63,12 @@ test('dragging with the ellipse queues one page-ops shape job and shows it while
   await expect(page.locator('.shape-notice')).toContainText('eşitleniyor');
   await expect(page.getByLabel('1. sayfa şekil alanı')).toHaveCount(0);
 });
-test('saved shapes are drawn and a page that cannot take shapes explains why',async({page})=>{
+// Saved shapes are part of the page image (canvas cache or local renderer):
+// over an image only the shape still being synced is drawn.
+test('saved shapes come from the page image and a page that cannot take shapes explains why',async({page})=>{
   const {requests}=await fixture(page,{saved:true,shapeReason:'Sayfa katmanı kilitli veya gizli; şekil eklenemiyor.'});
-  await expect(page.locator('.shape-overlay rect')).toHaveCount(1);
+  await expect(page.locator('.page-sheet[data-page-index="0"] img.page-image')).toBeVisible();
+  await expect(page.locator('.shape-overlay rect')).toHaveCount(0);
   const button=rail(page).getByRole('button',{name:'Şekil',exact:true});
   await expect(button).toBeDisabled();
   await expect(button).toHaveAttribute('title','Şekil: Sayfa katmanı kilitli veya gizli; şekil eklenemiyor.');
@@ -89,8 +92,9 @@ test('a line ignores the fill option and a tiny drag sends nothing',async({page}
 });
 test('a page without a preview image still shows its shapes and takes new ones',async({page})=>{
   const {requests}=await fixture(page,{saved:true,twoPages:true});
-  await expect(page.locator('.shape-placeholder')).toContainText('yalnız şekiller');
-  await expect(page.locator('.shape-overlay rect')).toHaveCount(1);
+  await expect(page.locator('.page-sheet[data-page-index="1"] .page-placeholder')).toHaveText('Bu sayfanın görüntüsü bu cihazda oluşturulamıyor.');
+  await expect(page.getByText(/görüntüsü yok|yaklaşık geometri/)).toHaveCount(0);
+  await expect(page.locator('.page-sheet[data-page-index="1"] .shape-overlay rect')).toHaveCount(1);
   await rail(page).getByRole('button',{name:'Şekil',exact:true}).click();
   const area=page.getByLabel('2. sayfa şekil alanı');await area.scrollIntoViewIfNeeded();const box=(await area.boundingBox())!;
   await page.mouse.move(box.x+50,box.y+50);await page.mouse.down();await page.mouse.move(box.x+250,box.y+200,{steps:4});await page.mouse.up();

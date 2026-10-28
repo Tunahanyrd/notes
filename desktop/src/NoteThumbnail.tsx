@@ -10,7 +10,7 @@ export function NoteThumbnail({note,text,dirty,enabled,refresh,selectionMode,sel
   const image=thumbnail.phase==='ready'&&thumbnail.url&&!broken;
   return <div className="note-thumbnail" ref={thumbnail.element}>
     {image?<img className="thumbnail-image" src={thumbnail.url!} alt="" draggable={false} decoding="async" onError={()=>setBroken(true)}/>:text?<div className="thumbnail-text">{text}</div>:<div className="thumbnail-empty"><FileText size={24}/><span>{thumbnail.phase==='pending'?'Önizleme hazırlanıyor':'Önizleme yok'}</span></div>}
-    {dirty?<span className="thumbnail-text-only">Kaydedilmemiş değişiklik</span>:image?!thumbnail.complete&&<span className="thumbnail-text-only">Kısmi önizleme</span>:text&&<span className="thumbnail-text-only">Metin önizlemesi</span>}
+    {dirty?<span className="thumbnail-text-only">Kaydedilmedi</span>:image?!thumbnail.complete&&<span className="thumbnail-text-only">Kısmi önizleme</span>:text&&!note.editable&&<span className="thumbnail-text-only">Yalnızca metin</span>}
     {selectionMode&&<span className="selection-check">{selected?<CircleCheck size={21}/>:<Circle size={21}/>}</span>}
     {band&&<span className="thumbnail-band">{band}</span>}
     {note.favorite&&<WinIcon name="ac_ic_favorite_on" size={15}/>}

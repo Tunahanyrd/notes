@@ -15,15 +15,38 @@ fn cases() -> Vec<(String, Val)> {
     items
 }
 
+/// Oracle cases whose pages the renderer refused (whole note or page) and
+/// that are now drawn by the local page composite (intended, 2026-10-28):
+/// an unadmitted pen is approximated, unsupported body formatting is dropped.
+const COMPOSITE_NOW: [&str; 3] = ["unsupported_pen", "hyper_text", "plain_append"];
+
 #[test]
 fn prepare_pages_matches_python_oracle_byte_for_byte() {
     for (name, case) in cases() {
         let snapshot = case.get("snapshot").unwrap();
         let meta = prepare::prepare_pages(snapshot, None, false);
+        if COMPOSITE_NOW.contains(&name.as_str()) {
+            // Formerly refused: every page is now a composite with a notice.
+            let pages = meta.unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            assert!(!pages.is_empty() && pages.iter().all(|p| p.composite && p.notice.is_some()), "{name}");
+            if let Val::List(old) = case.get("inventory").unwrap() {
+                assert!(old.is_empty(), "{name}: no page was admitted before");
+            }
+            continue;
+        }
+        if name == "pdf_list" {
+            // A PDF page keeps its Poppler background; its own strokes are now
+            // also prepared as a local layer over it (2026-10-28).
+            let pages = meta.unwrap();
+            assert!(!pages.is_empty() && pages.iter().all(|p| p.over_pdf && p.composite), "{name}");
+            assert_eq!(case.get("inventory").unwrap(), &Val::List(vec![]), "{name}");
+            continue;
+        }
         match case.get("inventory").unwrap() {
             Val::Null => assert!(meta.is_err(), "{name}: expected failure"),
             Val::List(expected) => {
                 let pages = meta.unwrap_or_else(|e| panic!("{name}: {e:?}"));
+                assert!(pages.iter().all(|p| !p.composite), "{name}");
                 assert_eq!(pages.len(), expected.len(), "{name}");
                 for (p, e) in pages.iter().zip(expected) {
                     assert_eq!(p.index, e.get("index").unwrap().as_i64().unwrap(), "{name}");
@@ -91,7 +114,7 @@ impl InkBackend for FakeInk {
         true
     }
     fn inspect_render_pages(&self, _snapshot: &Val) -> Vec<InkPage> {
-        vec![InkPage { index: 0, width: 8, height: 8, dark_mode: None }]
+        vec![InkPage { index: 0, width: 8, height: 8, dark_mode: None, ..Default::default() }]
     }
     fn render_ink_page(&self, snapshot: &Val, index: i64) -> Result<Vec<u8>, Fail> {
         self.rendered.lock().unwrap().push((snapshot.get("raw_sha256").unwrap().as_str().unwrap().to_string(), index));
@@ -175,49 +198,78 @@ fn prefetch_warms_first_pages_of_loaded_notes_at_background_priority() {
 
 /// Synthetic notes with shape/line objects (generator frozen at
 /// reference/python/generators/notes-preview/gen_ink_shape_cases.py).
-/// Recognised shapes are left out of the renderer input (the UI overlay draws
-/// them); a page that keeps no stroke becomes a plain background; any shape
-/// outside the exact writer profile keeps the page refused. Intended
-/// divergence from the Python renderer, which refuses every shape page.
+/// Since 2026-10-28 every shape page is a page composite: shapes and lines
+/// (recognised or foreign) are drawn from their saved geometry under the
+/// renderer's ink layer, whose input stays byte-identical to the former
+/// shape-skipping body. Foreign/odd objects are drawn approximately with a
+/// notice instead of refusing the page.
 fn shape_cases() -> Vec<(String, Val)> {
     let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/ink_shape_cases.json")).unwrap();
     let Val::Dict(items) = rs_store::val::loads(&text).unwrap() else { panic!() };
     items
 }
 
+fn composite(body: &[u8]) -> Val {
+    assert!(notes_preview::ink::is_composite(body));
+    rs_store::val::loads(std::str::from_utf8(body).unwrap()).unwrap()
+}
+
 #[test]
-fn recognised_shapes_are_skipped_and_foreign_objects_still_refuse_the_page() {
+fn shape_pages_are_composites_keeping_the_former_ink_input() {
     let cases = shape_cases();
     assert_eq!(cases.len(), 11);
     for (name, case) in cases {
         let snapshot = case.get("snapshot").unwrap();
-        let Val::List(expected) = case.get("inventory").unwrap() else { panic!() };
-        let pages = prepare::prepare_pages(snapshot, None, false).unwrap_or_else(|e| panic!("{name}: {e:?}"));
-        assert_eq!(pages.len(), expected.len(), "{name}");
+        let built = prepare::prepare_pages(snapshot, None, true).unwrap_or_else(|e| panic!("{name}: {e:?}"));
         let Val::Dict(bodies) = case.get("bodies").unwrap() else { panic!() };
-        let built = prepare::prepare_pages(snapshot, None, true).unwrap();
-        assert_eq!(built.len(), bodies.len(), "{name}");
-        for (index, body) in bodies {
-            let page = built.iter().find(|p| p.index.to_string() == *index).unwrap();
-            assert_eq!(String::from_utf8(page.body.clone()).unwrap(), body.as_str().unwrap(), "{name} page {index}");
+        if name == "empty_page" {
+            // No object anywhere: a text note, not a page note.
+            assert!(built.is_empty(), "{name}");
+            continue;
+        }
+        assert_eq!(built.len(), 1, "{name}");
+        let page = &built[0];
+        assert!(page.composite, "{name}");
+        let body = composite(&page.body);
+        let svg: Vec<&str> = match body.get("items").unwrap() {
+            Val::List(items) => items.iter().filter_map(|i| i.get("svg").and_then(Val::as_str)).collect(),
+            _ => panic!(),
+        };
+        match bodies.iter().find(|(i, _)| i == "0") {
+            // Formerly admitted with shapes skipped: same renderer input.
+            Some((_, old)) => {
+                let old = old.as_str().unwrap();
+                if old.contains("\"strokes\":[]") {
+                    assert_eq!(body.get("renderer"), Some(&Val::Null), "{name}");
+                } else {
+                    assert_eq!(body.get("renderer").and_then(Val::as_str), Some(old), "{name}");
+                }
+                assert!(page.notice.is_none(), "{name}: recognised shapes are exact");
+            }
+            None => assert!(page.notice.is_some(), "{name}: foreign/odd objects are approximate"),
+        }
+        if name != "textbox_object" {
+            assert!(!svg.is_empty() && svg.iter().all(|s| s.contains("<path")), "{name}");
         }
     }
 }
 
 #[test]
-fn shape_only_page_renders_a_plain_background_without_the_renderer() {
+fn shape_only_page_draws_its_shapes_on_the_page_colour() {
     let (_, case) = shape_cases().into_iter().find(|(n, _)| n == "shapes_only").unwrap();
     let snapshot = case.get("snapshot").unwrap();
     let native = notes_preview::NativeInk::new(notes_preview::env::default_project_root(), None);
     let pages = native.inspect_render_pages(snapshot);
     assert_eq!(pages.len(), 1);
+    assert!(pages[0].composite && pages[0].notice.is_none());
     let png = native.render_ink_page(snapshot, 0).unwrap();
     let (w, h) = (pages[0].width, pages[0].height);
     assert!(notes_preview::png_valid(&png, w, h));
-    let expected = rs_render::pixels::rgba_png(w, h, &rs_render::ink_render::background_pixels(w, h, 0xfffcfcfc)).unwrap();
-    assert_eq!(png, expected);
-    assert_eq!(rs_render::ink_render::background_only(&prepare::page_body(snapshot, 0)), Some((w, h, 0xfffcfcfc)));
-    // Only the exact plain-background input qualifies.
+    let background = rs_render::pixels::rgba_png(w, h, &rs_render::ink_render::background_pixels(w, h, 0xfffcfcfc)).unwrap();
+    assert_ne!(png, background, "the shapes are drawn into the page image");
+    let Ok(pixels) = rs_render::pixels::unfilter_png(&png, w, h, 64 << 20) else { panic!("png") };
+    assert_eq!(&pixels[..4], [0xfc, 0xfc, 0xfc, 255], "page colour outside the shapes");
+    // Only the exact plain-background input qualifies for the old fast path.
     assert_eq!(rs_render::ink_render::background_only(b"{\"schemaVersion\":1,\"width\":8,\"height\":8,\"backgroundArgb\":4294769916,\"strokes\":[],\"flow\":{}}"), None);
     assert_eq!(rs_render::ink_render::background_only(b"{\"schemaVersion\":1,\"width\":8,\"height\":8,\"backgroundArgb\":16579836,\"strokes\":[]}"), None);
 }
@@ -254,4 +306,25 @@ fn pen_templates_carry_the_renderer_pen_of_each_admitted_stroke() {
         }
     }
     assert!(seen >= 2, "fixtures must exercise at least two pens, saw {seen}");
+}
+
+#[test]
+fn a_page_the_renderer_refuses_is_served_as_a_stand_in_not_left_pending() {
+    // The synthetic rich flow page is admitted, but the pinned renderer does
+    // not complete its body text: the page is drawn as a composite stand-in
+    // (`.partial.png`) and returned, instead of re-queueing forever (before:
+    // `request` stayed None until its deadline, the UI showed "açılamadı").
+    let (_, case) = cases().into_iter().find(|(n, _)| n == "rich_flow").unwrap();
+    let dir = TempDir::new();
+    let s = store(dir.path());
+    let id = note_with_document(&s, case.get("snapshot").unwrap());
+    let m = PreviewManager::new(s, TestEnv::new(None, true)).unwrap();
+    let started = std::time::Instant::now();
+    let png = m.request(&id, 0, 0, 30.0).unwrap().expect("a page image");
+    assert!(started.elapsed() < Duration::from_secs(25));
+    assert!(notes_preview::png_valid(&png, 1080, 1527));
+    // Served again at once (stand-in on disk).
+    assert_eq!(m.request(&id, 0, 0, 0.0).unwrap(), Some(png));
+    m.close();
+    m.join(Duration::from_secs(2));
 }

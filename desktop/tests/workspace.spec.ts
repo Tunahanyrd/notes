@@ -175,17 +175,18 @@ test('typing during serialized save stays dirty and uses updated revision',async
   await expect(page.getByRole('button',{name:'Favorilere ekle',exact:true})).toBeDisabled();
   await page.getByRole('button',{name:'Not seçenekleri'}).click();
   await page.getByLabel('Not içeriği').fill('İkinci');await expect(page.getByRole('button',{name:'Kaydet',exact:true})).toBeEnabled();
-  await page.keyboard.press('ControlOrMeta+s');await expect(page.getByText('Yerel kayıt tamam')).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.editor-footer').getByText('Kaydedildi',{exact:true})).toBeVisible();
   expect(requests.filter(r=>r.method==='PUT').map(r=>r.data.expectedRevision)).toEqual([1,2]);
 });
 test('readonly copy leaves original untouched, favorite and recoverable trash work',async({page})=>{
   const {requests}=await setup(page);await openNote(page,/Tablet çizimleri/);
   await expect(page.getByLabel('Not içeriği')).toHaveAttribute('readonly','');
-  await expect(page.getByText('Yalnızca metin önizlemesi',{exact:true})).toBeVisible();
-  await expect(page.getByText('Başlık ve çıkarılabilen metin gösterilir; çizimler, el yazısı ve sayfa düzeni bu görünümde yer almaz.',{exact:false})).toBeVisible();
-  await expect(page.getByRole('button',{name:'Dışa aktar',exact:true})).toHaveAttribute('title','Yalnızca metin önizlemesini dışa aktar');
+  // One calm sentence, no mode switch and no jargon about extraction.
+  await expect(page.getByText('Bu notun sayfaları burada gösterilemiyor; yalnızca metni görünüyor.',{exact:true})).toBeVisible();
+  await expect(page.getByText(/çıkarılabilen|Yalnızca metin önizlemesi/)).toHaveCount(0);await expect(page.getByRole('button',{name:'Metni göster'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Dışa aktar',exact:true})).toHaveAttribute('title','Metin dosyası olarak kaydet');
   await page.screenshot({path:'tests/artifacts/readonly-text-preview.png',fullPage:true});
-  await page.getByRole('button',{name:'Metin kopyasını düzenle'}).click();
+  await noteAction(page,'Metni yeni nota kopyala');
   await expect(page.getByLabel('Not başlığı')).toHaveValue('Tablet çizimleri — kopya');
   await expect(page.getByLabel('Not içeriği')).toBeEditable();
   expect(requests.some(r=>r.method==='PUT'&&r.path.endsWith('/rich'))).toBe(false);
@@ -242,10 +243,11 @@ test('drawing-only notes never invite typing or pretend to render an empty page'
   await page.route('**/api/notes/rich',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({note:{...base,id:'rich',title:'Yalnız çizim içeren not',body:'',preview:'',editable:false,readOnlyReason:'Bu not çizimler içeriyor.'}})}));
   await openNote(page,/Tablet çizimleri/);
   await expect(page.getByLabel('Not içeriği')).toHaveValue('');
-  await expect(page.getByLabel('Not içeriği')).toHaveAttribute('placeholder','Bu notta gösterilebilecek metin bulunmuyor.');
-  await expect(page.getByRole('button',{name:'Metin kopyasını düzenle'})).toBeDisabled();
-  await expect(page.getByText('Yalnızca metin gösteriliyor',{exact:true})).toBeVisible();
-  await expect(page.getByRole('button',{name:'Sayfalar',exact:true})).toBeDisabled();await expect(page.getByRole('button',{name:'Sayfalar',exact:true})).toHaveAttribute('title','Bu not için sayfa önizlemesi bulunmuyor');
+  await expect(page.getByLabel('Not içeriği')).toHaveAttribute('placeholder','Bu notta metin yok.');
+  await expect(page.getByText('Bu notun sayfaları burada gösterilemiyor.',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Not seçenekleri'}).click();await expect(page.getByRole('button',{name:'Metni yeni nota kopyala'})).toBeDisabled();await expect(page.getByRole('button',{name:'Metni yeni nota kopyala'})).toHaveAttribute('title','Bu notta kopyalanacak metin yok.');await page.getByRole('button',{name:'Not seçenekleri'}).click();
+  await expect(page.locator('.editor-footer').getByText('Salt okunur',{exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Sayfalar',exact:true})).toBeDisabled();await expect(page.getByRole('button',{name:'Sayfalar',exact:true})).toHaveAttribute('title','Bu notta sayfa yok');
 });
 test('Windows reference layout captures use synthetic content and local font faces',async({page})=>{
   await page.setViewportSize({width:1920,height:1014});
@@ -259,7 +261,7 @@ test('Windows reference layout captures use synthetic content and local font fac
   await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:'tests/artifacts/windows-clone-editor.png',fullPage:true});
   const paper=await page.locator('.document').boundingBox();expect(paper?.width).toBeCloseTo(718,2); // macOS reports 718.00006 (float layout rounding)
   await expect(page.getByRole('button',{name:'Kalem',exact:true})).toBeDisabled();
-  await expect(page.getByLabel('Yazı boyutu')).toHaveCount(0);await expect(page.getByText('Biçimlendirme bu notta henüz kullanılamıyor.',{exact:true})).toBeVisible();
+  await expect(page.getByLabel('Yazı boyutu')).toHaveCount(0);await expect(page.getByText('Bu notta yazı biçimlendirme şimdilik kullanılamıyor.',{exact:true})).toBeVisible();
 });
 test('all pages stack like Samsung Notes: pending images poll, missing pages say so, dark pages stay dark, URLs are revoked',async({page})=>{
   await setup(page);let attempts=0;
@@ -274,13 +276,13 @@ test('all pages stack like Samsung Notes: pending images poll, missing pages say
   await openNote(page,/Tablet çizimleri/);
   await expect(page.locator('.page-sheet')).toHaveCount(4);
   await expect(page.locator('.page-sheet[data-page-index="0"] .page-image')).toBeVisible();expect(attempts).toBeGreaterThanOrEqual(2);
-  await expect(page.locator('.page-sheet[data-page-index="1"]')).toContainText('Bu sayfanın görüntüsü henüz hazırlanamıyor.');
-  await expect(page.getByText('Sayfa önizlemesi · Salt okunur',{exact:true})).toBeVisible();await expect(page.getByText('Bilinmeyen biçimlendirme sözdizimi.',{exact:true})).toHaveCount(0);await expect(page.getByText('Bu notun metin biçimleri henüz düzenlenemiyor.',{exact:true})).toHaveCount(0);
+  await expect(page.locator('.page-sheet[data-page-index="1"]')).toContainText('Bu sayfanın görüntüsü bu cihazda oluşturulamıyor.');
+  await expect(page.locator('.editor-footer').getByText('Salt okunur',{exact:true})).toBeVisible();await expect(page.getByRole('complementary',{name:'Kalem araçları'})).toBeVisible();await expect(page.getByText('Bilinmeyen biçimlendirme sözdizimi.',{exact:true})).toHaveCount(0);await expect(page.getByText(/düzenlenemiyor|biçimlendirme/)).toHaveCount(0);
   await page.getByRole('button',{name:'Sayfalar',exact:true}).click();await expect(page.getByLabel('Gösterilen sayfa')).toBeFocused();
   await page.emulateMedia({media:'print'});await expect(page.locator('.page-navigation')).toBeHidden();await expect(page.locator('.page-sheet[data-page-index="0"] .page-image')).toBeVisible();await page.emulateMedia({media:'screen'});
-  await page.getByRole('button',{name:'Metni göster',exact:true}).click();await expect(page.getByLabel('Not içeriği')).toHaveValue('Çizim notunun metin önizlemesi.');
-  await page.getByRole('button',{name:'Sayfayı göster',exact:true}).click();await page.getByLabel('Gösterilen sayfa').selectOption('3');
-  await expect(page.getByAltText('Notun 4. sayfası')).toBeVisible();await expect(page.getByText('PDF zemini gösteriliyor; çizimler henüz eklenmedi.',{exact:true})).toBeVisible();
+  // A page note has no 'show text' mode: pages are the note.
+  await expect(page.getByRole('button',{name:'Metni göster',exact:true})).toHaveCount(0);await page.getByLabel('Gösterilen sayfa').selectOption('3');
+  await expect(page.getByAltText('Notun 4. sayfası')).toBeVisible();await expect(page.getByText('Bu sayfadaki çizimler henüz gösterilemiyor; yalnızca PDF görünüyor.',{exact:true})).toBeVisible();
   await expect(page.getByLabel('Gösterilen sayfa').locator('option')).toHaveCount(4);await expect(page.getByLabel('Gösterilen sayfa').locator('option[value="1"]')).toHaveJSProperty('disabled',true);
   await expect(page.locator('.page-sheet[data-page-index="3"]')).toHaveCSS('background-color','rgb(0, 0, 0)');await expect(page.locator('.page-sheet[data-page-index="0"]')).toHaveCSS('background-color','rgb(255, 255, 255)');
   const url=await page.getByAltText('Notun 4. sayfası').getAttribute('src');expect(url).toMatch(/^blob:/);
@@ -307,7 +309,7 @@ test('bulk favorites advance existing draft revision without losing unsaved text
   await page.getByRole('button',{name:'Favorilere ekle',exact:true}).click();
   await expect(page.getByRole('button',{name:'Düzenle',exact:true})).toBeVisible();
   await openNote(page,/Aklımda kalanlar/);await expect(page.getByLabel('Not içeriği')).toHaveValue('Toplu seçimden önce korunacak taslak');
-  await page.keyboard.press('ControlOrMeta+s');await expect(page.getByText('Yerel kayıt tamam',{exact:true})).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.editor-footer').getByText('Kaydedildi',{exact:true})).toBeVisible();
   expect(requests.find(r=>r.method==='PUT')?.data.expectedRevision).toBe(2);
 });
 
@@ -391,7 +393,7 @@ test('real rich editor selection, formatting, lists, history and revisioned API 
 test('unsupported native typing anchors keep original rich content read-only instead of flattening it',async({page})=>{
   const {notes,requests}=await setup(page);const note=notes.find(n=>n.id==='rich');note.titleEditable=true;
   await page.route('**/api/notes/rich/editor',route=>route.fulfill({json:{schemaVersion:1,capabilities:{titleEdit:true,textEdit:true,richStyle:true,inkEdit:false},model:{schemaVersion:1,text:note.body,spans:[{start:0,end:0,kind:'bold',value:false,interval:3}],paragraphs:[]},reason:null,revision:note.revision}}));
-  await openNote(page,/Tablet çizimleri/);await expect(page.getByText(/konuma bağlı yazım biçimi/)).toBeVisible();await expect(page.getByLabel('Not içeriği')).toHaveAttribute('readonly','');await expect(page.getByLabel('Not başlığı')).toBeEditable();await expect(page.getByRole('button',{name:'Kalın',exact:true})).toHaveCount(0);await expect(page.getByText('Biçimlendirme bu notta henüz kullanılamıyor.',{exact:true})).toBeVisible();expect(requests.filter(r=>r.method==='PUT')).toHaveLength(0);
+  await openNote(page,/Tablet çizimleri/);await expect(page.getByText('Bu notun sayfaları burada gösterilemiyor; yalnızca metni görünüyor.',{exact:true})).toBeVisible();await expect(page.getByLabel('Not içeriği')).toHaveAttribute('readonly','');await expect(page.getByLabel('Not başlığı')).toBeEditable();await expect(page.getByRole('button',{name:'Kalın',exact:true})).toHaveCount(0);await expect(page.getByText('Bu notta yazı biçimlendirme şimdilik kullanılamıyor.',{exact:true})).toBeVisible();expect(requests.filter(r=>r.method==='PUT')).toHaveLength(0);
 });
 
 test('numbered selections continue on Enter and completed checklists create unchecked items',async({page})=>{

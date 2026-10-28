@@ -3,7 +3,7 @@
 .shortcut-intro{display:flex;align-items:center;gap:8px;margin:0 0 17px;color:#737379;font-size:12px;line-height:1.7}
 .shortcut-intro svg{flex-shrink:0}
 .shortcut-row{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:54px;border-top:1px solid #ededee;font-size:13px}
-.shortcut-row input{width:140px;min-width:120px;min-height:34px;text-align:center;background:#eeeef0;border:1px solid #d4d4d8;border-radius:8px;font:inherit;color:#393940;cursor:pointer;padding:6px 9px}
+.shortcut-row input{width:140px;min-width:120px;min-height:34px;text-align:center;background:#eeeef0;border:1px solid #d4d4d8;border-radius:8px;font:inherit;color:#393940;cursor:default;padding:6px 9px}
 .shortcut-row input.capturing{outline:2px solid #e9836e;outline-offset:2px;background:#fff7f4}
 .shortcut-row input:disabled{opacity:.55;cursor:default}
 .shortcut-help{font-size:11px;line-height:1.75;color:#85858b;margin:12px 0}

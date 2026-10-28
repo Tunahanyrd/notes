@@ -8,6 +8,7 @@ use pyo3::prelude::*;
 pub mod pixels;
 pub mod dataclasses;
 pub mod raster;
+pub mod compose;
 pub mod pdf_layout;
 pub mod sandbox;
 pub mod pyhelp;

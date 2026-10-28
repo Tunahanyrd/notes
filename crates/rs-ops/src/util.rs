@@ -231,3 +231,47 @@ pub fn upload_copy(root: &Element) -> Element {
     upload.children.retain(|n| n.tag != "bodyText" && n.tag != "floatingObjectList");
     upload
 }
+
+/// `rs_ink::core::objects::passthrough_object` over an [`Element`]: a
+/// self-contained image/shape/line/text box an ink edit carries through
+/// byte-identically. `Some(Some(file))` for an image (its content file id).
+pub fn passthrough_object(o: &Element) -> Option<Option<String>> {
+    if o.tag != "object" {
+        return None;
+    }
+    _ink::core::objects::passthrough_object(&o.attrib, o.iter().skip(1).map(|n| (n.tag.as_str(), n.attrib.as_slice())))
+}
+
+/// Stroke objects of a page list, refusing anything that is neither a
+/// top-level stroke nor a carried-through object (no object outside a layer
+/// `objectList`, none nested). Returns (strokes, carried objects).
+pub fn ink_objects(pages: &Element) -> crate::err::R<(Vec<&Element>, Vec<&Element>)> {
+    let (mut strokes, mut others) = (Vec::new(), Vec::new());
+    for list in pages.iter_tag("objectList") {
+        for o in &list.children {
+            if o.get("type") == Some("stroke") {
+                strokes.push(o);
+            } else if passthrough_object(o).is_some() {
+                others.push(o);
+            } else {
+                return crate::err::ink("unsupported or ambiguous object inventory");
+            }
+        }
+    }
+    if pages.iter_tag("object").count() != strokes.len() + others.len() {
+        return crate::err::ink("unsupported or ambiguous object inventory");
+    }
+    Ok((strokes, others))
+}
+
+/// Keep only the matching children of every `objectList` below `e` (upload
+/// copies carry the edited objects only).
+pub fn retain_objects(e: &mut Element, keep: &dyn Fn(&Element) -> bool) {
+    if e.tag == "objectList" {
+        e.children.retain(|o| keep(o));
+        return;
+    }
+    for c in e.children.iter_mut() {
+        retain_objects(c, keep);
+    }
+}

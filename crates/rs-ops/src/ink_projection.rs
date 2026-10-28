@@ -16,7 +16,7 @@ use pyo3::types::{PyDict, PyList, PyTuple};
 use std::any::Any;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-pub const PROJECTION_RECIPE: &str = "ink-projection-v6:highlighter";
+pub const PROJECTION_RECIPE: &str = "ink-projection-v7:carried-objects";
 pub const MAX_PROJECTION_PAGES: usize = 2048;
 pub const MAX_PROJECTION_STROKES: usize = 20_000;
 pub const MAX_PROJECTION_POINTS: usize = 5_000_000;
@@ -88,17 +88,22 @@ pub fn note_ink_reason(root: &Element) -> Option<&'static str> {
     if tags.contains("strokeGroup") {
         return Some("Bu notta gruplanmış çizgiler var; kalem henüz desteklenmiyor.");
     }
-    let types: HashSet<Option<&str>> = root
+    // Self-contained images, shapes, lines and text boxes on page layers are
+    // carried through by every ink writer (util::passthrough_object); anything
+    // else (nested/grouped objects, cache-referencing or unknown objects)
+    // keeps the note fail-closed.
+    let foreign: Vec<&Element> = root
         .children
         .iter()
         .filter(|c| c.tag == "pageList")
         .flat_map(|pages| pages.iter_tag("object"))
-        .map(|o| o.get("type"))
+        .filter(|o| o.get("type") != Some("stroke"))
+        .filter(|o| passthrough_object(o).is_none())
         .collect();
-    if types.contains(&Some("image")) || tags.contains("image") {
+    if foreign.iter().any(|o| o.get("type") == Some("image")) || tags.contains("image") {
         return Some("Bu notta resim var; kalem henüz desteklenmiyor.");
     }
-    if types.iter().any(|t| *t != Some("stroke")) || tags.contains("customObject") || tags.contains("shape") {
+    if !foreign.is_empty() || tags.contains("customObject") || tags.contains("shape") {
         return Some("Bu notta şekil veya metin kutusu gibi nesneler var; kalem henüz desteklenmiyor.");
     }
     if root.children.iter().any(|n| n.tag == "floatingObjectList" && !n.is_empty()) {
@@ -218,7 +223,7 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
     if let Some(reason) = note_ink_reason(&root) {
         return Ok(disabled(reason));
     }
-    let objects: Vec<&Element> = pages.children.iter().flat_map(|p| p.iter_tag("object")).collect();
+    let (objects, _) = ink_objects(pages).remap(&[Kind::Ink], Kind::Ink, "mixed object inventory")?;
     let parts: Vec<&Part> = parsed.parts.iter().filter(|p| p.name.as_deref() == Some("strokeResource")).collect();
     // A note without strokes (e.g. a fresh PDF book) still lists its pages.
     if !(parts.len() == objects.len() && objects.len() <= MAX_PROJECTION_STROKES) {
@@ -275,11 +280,12 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
     }
     let mut append_source: Option<(String, i64, i64)> = None;
     let mut erase_probe: Option<(String, String, String)> = None;
-    // (page_reason, locked, strokes, templates, erasable, first_shape, category, marker_shape, marker_category)
+    // (page_reason, locked, strokes, objects, templates, erasable, first_shape, category, marker_shape, marker_category)
     #[allow(clippy::type_complexity)]
-    let mut facts: Vec<(Option<&'static str>, bool, usize, usize, usize, bool, (bool, bool), bool, (bool, bool, bool))> = Vec::new();
-    let mut first_probes: Vec<((bool, bool), (String, i64, i64))> = Vec::new();
-    let mut marker_probes: Vec<((bool, bool, bool), (String, i64, i64))> = Vec::new();
+    let mut facts: Vec<(Option<&'static str>, bool, usize, usize, usize, usize, bool, (bool, bool, bool), bool, (bool, bool, bool, bool))> =
+        Vec::new();
+    let mut first_probes: Vec<((bool, bool, bool), (String, i64, i64))> = Vec::new();
+    let mut marker_probes: Vec<((bool, bool, bool, bool), (String, i64, i64))> = Vec::new();
     for (index, (page, tp)) in pages.children.iter().zip(tree_pages.children.iter()).enumerate() {
         let pid = uuid_(page.get("id"))?;
         let width = integer(page.get("width"))?;
@@ -324,6 +330,9 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
                 return ink("layer/tree digest mismatch");
             }
             for o in obj {
+                if o.get("type") != Some("stroke") {
+                    continue; // carried image/shape/line/text box (never edited)
+                }
                 let key = o.get("id").unwrap_or("");
                 let (record, binding, template) = records.get(key).ok_or_else(|| Error::new(Kind::Key, format!("'{key}'")))?;
                 let mut template = *template;
@@ -446,15 +455,17 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
         if Some(digest.as_str()) != page.get("hash") || Some(digest.as_str()) != tp.get("h") || Some(tick.to_string().as_str()) != tp.get("t") {
             return ink("page/tree digest mismatch");
         }
+        // A drawn rectangle exists exactly when the page has objects (strokes
+        // or carried images/shapes/lines/text boxes).
         let first_shape = strokes.is_empty()
             && page_reason.is_none()
             && layers.len() == 1
             && !locked
             && layers.children[0].get_or("visible", "true").to_lowercase() == "true"
-            && page.find("drawnRect").is_none()
+            && page.find("drawnRect").is_some() == (page_objects > 0)
             && layers.children[0].children.iter().all(|n| n.tag == "objectList")
             && layers.children[0].len() <= 1;
-        let category = (page.find("pdfDataList").is_some(), page.find("canvasCacheDataMap").is_some());
+        let category = (page.find("pdfDataList").is_some(), page.find("canvasCacheDataMap").is_some(), page_objects > strokes.len());
         if first_shape && !first_probes.iter().any(|(c, _)| *c == category) {
             first_probes.push((category, (pid.clone(), width, height)));
         }
@@ -466,12 +477,12 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
             && layers.children[0].get_or("visible", "true").to_lowercase() == "true"
             && layers.children[0].children.iter().all(|n| n.tag == "objectList")
             && layers.children[0].len() <= 1
-            && page.find("drawnRect").is_some() == !strokes.is_empty();
-        let marker_category = (!strokes.is_empty(), category.0, category.1);
+            && page.find("drawnRect").is_some() == (page_objects > 0);
+        let marker_category = (!strokes.is_empty(), category.0, category.1, category.2);
         if marker_shape && !marker_probes.iter().any(|(c, _)| *c == marker_category) {
             marker_probes.push((marker_category, (pid.clone(), width, height)));
         }
-        facts.push((page_reason, locked, strokes.len(), templates, erasable_count, first_shape, category, marker_shape, marker_category));
+        facts.push((page_reason, locked, strokes.len(), page_objects, templates, erasable_count, first_shape, category, marker_shape, marker_category));
         result.push(PageDto { id: pid, index, width, height, pdf: category.0, strokes, ink: PageInk::default() });
     }
     let probe_errors = [Kind::Ink, Kind::Doc, Kind::Value, Kind::Type, Kind::Overflow];
@@ -505,7 +516,7 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
             Err(e) => return Err(e),
         }
     }
-    let mut first_ok: Vec<((bool, bool), bool)> = Vec::new();
+    let mut first_ok: Vec<((bool, bool, bool), bool)> = Vec::new();
     for (category, (pid, width, height)) in &first_probes {
         let attempt = (|| -> R<()> {
             let now = integer(root.get("syncModifiedTime"))? as i128 + 1;
@@ -518,7 +529,7 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
             Err(e) => return Err(e),
         }
     }
-    let mut marker_ok: Vec<((bool, bool, bool), bool)> = Vec::new();
+    let mut marker_ok: Vec<((bool, bool, bool, bool), bool)> = Vec::new();
     for (category, (pid, width, height)) in &marker_probes {
         let attempt = (|| -> R<()> {
             let now = integer(root.get("syncModifiedTime"))? as i128 + 1;
@@ -533,11 +544,13 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
     }
     let mut any_first = false;
     let mut any_marker = false;
-    for (page, (page_reason, locked, count, templates, erasable_count, first_shape, category, marker_shape, marker_category)) in
+    for (page, (page_reason, locked, count, object_count, templates, erasable_count, first_shape, category, marker_shape, marker_category)) in
         result.iter_mut().zip(facts)
     {
         let page_append = allowed && templates > 0;
-        let page_erase = erase && count >= 2 && erasable_count > 0;
+        // The delete writer keeps at least one object on the page; a carried
+        // image/shape/line/text box counts.
+        let page_erase = erase && object_count >= 2 && erasable_count > 0;
         let page_first = first_shape && first_ok.iter().any(|(c, ok)| *c == category && *ok);
         let page_marker = marker_shape && marker_ok.iter().any(|(c, ok)| *c == marker_category && *ok);
         any_first |= page_first;

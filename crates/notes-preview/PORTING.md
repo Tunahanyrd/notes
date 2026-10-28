@@ -50,7 +50,7 @@ and `allowed_url`.
 - **macOS:** no bwrap; `rs_render::sandbox::{pdf_args,ink_args}` run the same tools under `env -i` + Seatbelt (`notes_platform::isolation`) with the same rlimits minus `RLIMIT_AS`, and no PDEATHSIG (docs/MACOS_PORT.md).
 - **Canvas caches are decoded in-process by our own decoder** (`spi/`, since 2026-10-27). It replaces the former
   Python child that ran the user's SHA256-pinned native library under Unicorn; no Samsung binary, emulator or
-  interpreter is involved, so `provider_available()` is always true. Bounds: input 8 MiB, 4 Mi pixels, header
+  interpreter is involved, so `provider_available()` is always true. Bounds: input 32 MiB (8 MiB before 2026-10-28), 4 Mi pixels, header
   checked before any allocation, no partial images, malformed input is an error (never a panic). The PNG is
   produced by the same encoder as before (`rs_render::pixels::rgba_png`), so output bytes are unchanged and the
   recipe key stays `native-preview-v1`. The historical glue is in `reference/spi-emulator-glue/`.
@@ -79,6 +79,34 @@ and `allowed_url`.
   the axes), the path the live pen preview (crates/notes-ink-live) already draws. Samsung-written strokes keep
   their input byte for byte. `INK_INVENTORY_RECIPE` is `ink-inventory-v4:…:shape-skip:stylusless-inkpen2`.
   Tests: `tests/inkpen2_writer.rs` (synthetic note, real `prepare_append`, page render).
+
+- **Page composite (intended, 2026-10-28).** Pages the renderer-only path refuses are no longer left without an
+  image. `ink/prepare.rs` keeps the old admission byte for byte for renderer-only pages (`ink-reconstructed`, same
+  bodies, same `:ink-reconstructed-v2` cache key) and builds a *composite* body (`{"composite":1,…}`,
+  `ink/objects.rs`) for every other page of a page-based note: pictures (`fillEffect type=image imageId` = content
+  file id → its `fileHash`, fetched through the account transport, SHA256-verified, cached in
+  `page-previews/media/`), shapes and lines (ours and foreign, from the saved `path/segmentList`, frame-mapped
+  `drawnRect`→`rect`), page text boxes (sent to the GPL CLI as `textBoxes`, laid out by sdocx with its pinned fonts,
+  outlined), strokes the renderer does not admit (round polylines in the saved colour/width; eraser and replay-only
+  records are not painted), empty sheets and the trailing list-compatibility page of a text flow, and a calm
+  placeholder for unknown objects. Body formatting the renderer does not take is dropped (lenient flow, notice)
+  instead of refusing the note; a text-only flow note is drawn too. Paint order: page colour, composite items in
+  layer order, then the renderer layer (strokes, flow, text boxes) on top with its background stripped
+  (`rs_render::compose`, resvg with `raster-images`). Manifest: `previewKind: "page-reconstructed"`, `complete`
+  false with a calm `previewNotice` when something is approximated; cache key `:page-reconstructed-v1`. Pictures not
+  downloaded yet (offline) give a stand-in `<key>.partial.png` with a placeholder, served at once while the full
+  page is retried (at most every 10 min when connected). A renderer failure on a renderer-only page (sample range,
+  output size, text layout) falls back to a forced composite stand-in.
+  `INK_INVENTORY_RECIPE` is `ink-inventory-v5:…:page-composite` (inventory items may carry `kind`/`notice`).
+- **Canvas and PDF stand-ins (intended, 2026-10-28).** A canvas-cache page whose cache cannot be downloaded or
+  decoded (or any canvas page while offline) is drawn locally, scaled to the canvas size and cached as
+  `<key>.local.png`; offline pages the local renderer cannot draw keep `preview_offline` 503. A PDF page with
+  strokes but without Samsung's layer gets the page's own objects drawn over the Poppler image
+  (`:pdf-local-ink-v1:` key, `previewKind: "pdf-with-notes"`); when Samsung's layer fails the local layer stands in.
+  Signed picture links refused once are renewed by one read-only note GET per 10 min (as for PDFs).
+  `MAX_DOWNLOAD` and the SPI input bound are 32 MiB (photo-heavy canvas caches and pictures exceed 8 MiB).
+- **Page geometry for every page (intended, 2026-10-28).** Manifest pages without an image keep `width`/`height`
+  from the page XML (the pen and the placeholder use them).
 
 - **providerAvailable (intended, 2026-10-27).** With the built-in decoder the manifest reports
   `providerAvailable: true` for notes whose candidates include a canvas cache or that have no candidates, as the

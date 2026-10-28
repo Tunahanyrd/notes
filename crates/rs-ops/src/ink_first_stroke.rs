@@ -388,7 +388,8 @@ pub fn prepare_first_stroke(
     }
     {
         let pages = &root.children[pi];
-        let objects: Vec<&Element> = pages.iter_tag("object").collect();
+        // Images, shapes, lines and text boxes are carried through untouched.
+        let (objects, _) = ink_objects(pages)?;
         let wanted: std::collections::BTreeSet<&str> = ["type", "id", "modifiedTime", "hash"].into_iter().collect();
         if objects.iter().any(|o| o.get("type") != Some("stroke") || !o.is_empty() || o.attr_key_set() != wanted) {
             return ink("unsupported or ambiguous object inventory");
@@ -413,7 +414,7 @@ pub fn prepare_first_stroke(
         return ink("target page absent or duplicated");
     }
     let pg = matches[0];
-    let (width, height, layer_id, tpl, tp) = {
+    let (width, height, layer_id, tpl, tp, existing_hashes) = {
         let page = &root.children[pi].children[pg];
         if page.get_or("orientation", "0") != "0" || root.children[ai].get_or("orientation", "0") != "0" {
             return ink("page orientation transform is unsupported");
@@ -438,10 +439,14 @@ pub fn prepare_first_stroke(
         if layer.children.iter().any(|n| n.tag != "objectList") || layer.len() > 1 {
             return ink("unknown layer metadata");
         }
-        if !layer.is_empty() && !layer.children[0].is_empty() {
+        let existing: &[Element] = if layer.is_empty() { &[] } else { &layer.children[0].children };
+        if existing.iter().any(|o| o.get("type") == Some("stroke")) {
             return ink("page already has strokes; use the append recipe");
         }
-        if page.find("drawnRect").is_some() {
+        // A stroke-free page carrying only images/shapes/lines/text boxes has
+        // a drawn rectangle covering them; the new stroke is unioned into it.
+        // An empty page has none (the original first-stroke profile).
+        if page.find("drawnRect").is_some() != !existing.is_empty() {
             return ink("stroke-free page with a drawn rectangle is unverified");
         }
         let width = integer(page.get("width"))?;
@@ -461,10 +466,17 @@ pub fn prepare_first_stroke(
             return ink("layer absent from tree");
         }
         let tree_layer = &tree_layers.children[0];
-        if tree_layer.children.iter().any(|n| n.tag != "objectList" || !n.is_empty()) {
+        let tree_existing: &[Element] = match tree_layer.children.as_slice() {
+            [] => &[],
+            [list] if list.tag == "objectList" => &list.children,
+            _ => return ink("stroke tree differs from objects"),
+        };
+        let left: Vec<_> = existing.iter().map(|o| (o.get("id"), o.get("modifiedTime"), o.get("hash"))).collect();
+        let right: Vec<_> = tree_existing.iter().map(|o| (o.get("id"), o.get("t"), o.get("h"))).collect();
+        if left != right || tree_existing.iter().any(|o| !o.is_empty()) {
             return ink("stroke tree differs from objects");
         }
-        let layer_raw = parent_hash(layer.get("id"), integer(layer.get("modifiedTime"))?, &[])?;
+        let layer_raw = parent_hash(layer.get("id"), integer(layer.get("modifiedTime"))?, &hashes(existing)?)?;
         let layer_hash = hex(&layer_raw);
         if Some(layer_hash.as_str()) != layer.get("hash")
             || Some(layer_hash.as_str()) != tree_layer.get("h")
@@ -479,7 +491,7 @@ pub fn prepare_first_stroke(
         {
             return ink("page hash mismatch");
         }
-        (width, height, layer.get("id").unwrap_or("").to_string(), tpl, tp)
+        (width, height, layer.get("id").unwrap_or("").to_string(), tpl, tp, hashes(existing)?)
     };
     let mut max = i64::MIN;
     for n in root.iter() {
@@ -527,7 +539,9 @@ pub fn prepare_first_stroke(
     if binding.pen_name != PEN_NAME || binding.advanced_settings.as_deref() != Some(ADVANCED_SETTING) {
         return ink("brush binding mismatch");
     }
-    let layer_raw = parent_hash(Some(&layer_id), tick, &[digest_raw])?;
+    let mut children = existing_hashes;
+    children.push(digest_raw);
+    let layer_raw = parent_hash(Some(&layer_id), tick, &children)?;
     let layer_hash = hex(&layer_raw);
     let page_hash = hex(&parent_hash(Some(&page_id), tick, &[layer_raw])?);
     {
@@ -542,11 +556,26 @@ pub fn prepare_first_stroke(
         layer.set("hash", &layer_hash);
         page.set("modifiedTime", &ts);
         page.set("hash", &page_hash);
-        let rect: Vec<String> = bounds.iter().map(|v| py_float_repr(*v)).collect();
-        page.children.insert(
-            0,
-            Element::new("drawnRect", &[("l", &rect[0]), ("t", &rect[1]), ("r", &rect[2]), ("b", &rect[3])]),
-        );
+        if let Some(drawn) = page.find_mut("drawnRect") {
+            // Page with carried objects only: union, like the append recipe.
+            let mut original = [0.0; 4];
+            for (i, k) in ["l", "t", "r", "b"].iter().enumerate() {
+                original[i] = match drawn.get(k).and_then(crate::ink_erase::py_float) {
+                    Some(v) if v.is_finite() => v,
+                    _ => return ink("invalid page drawn rectangle"),
+                };
+            }
+            let merged = [original[0].min(bounds[0]), original[1].min(bounds[1]), original[2].max(bounds[2]), original[3].max(bounds[3])];
+            for (k, v) in ["l", "t", "r", "b"].iter().zip(merged) {
+                drawn.set(k, &py_float_repr(v));
+            }
+        } else {
+            let rect: Vec<String> = bounds.iter().map(|v| py_float_repr(*v)).collect();
+            page.children.insert(
+                0,
+                Element::new("drawnRect", &[("l", &rect[0]), ("t", &rect[1]), ("r", &rect[2]), ("b", &rect[3])]),
+            );
+        }
     }
     {
         let tree_page = &mut root.children[ti].children[tpl].children[tp];
@@ -572,6 +601,9 @@ pub fn prepare_first_stroke(
         upload.children[f].children.retain(|n| n.get("id").is_some_and(|i| changed_files.iter().any(|c| c == i)));
     }
     one_mut(&mut upload, "pagelist")?.children.retain(|p| p.get("id") == Some(page_id.as_str()));
+    // Only the new stroke travels; carried objects stay as the server has them
+    // (for an empty page this is the whole object list, as before).
+    retain_objects(one_mut(&mut upload, "pagelist")?, &|o| o.get("id") == Some(new_id.as_str()));
     let mut requested = vec![page_id.clone(), layer_id.clone(), new_id.clone()];
     requested.extend(changed_files.iter().cloned());
     Ok(FirstStroke {

@@ -178,7 +178,10 @@ pub(crate) fn load(
     {
         return ink("unsupported ink part inventory");
     }
-    let objects: Vec<&Element> = pages.iter_tag("object").collect();
+    // Images, shapes, lines and text boxes are carried through untouched
+    // (util::passthrough_object); only stroke objects are edited.
+    let (objects, carried) = ink_objects(pages).remap(&[Kind::Ink], Kind::Ink, "unsupported or ambiguous stroke inventory")?;
+    let carried_ticks: Vec<i64> = carried.iter().map(|o| integer(o.get("modifiedTime"))).collect::<R<_>>()?;
     let wanted: BTreeSet<&str> = ["type", "id", "modifiedTime", "hash"].into_iter().collect();
     if objects.len() != parts.len()
         || objects.iter().any(|o| o.get("type") != Some("stroke") || !o.is_empty() || o.attr_key_set() != wanted)
@@ -232,6 +235,10 @@ pub(crate) fn load(
     if stroke_ids.iter().any(|s| !layer_ids.contains(&Some(s.as_str()))) {
         return ink("stroke is not on the requested layer");
     }
+    // Images, shapes, lines and text boxes are never erased or moved.
+    if stroke_ids.iter().any(|s| !records.contains_key(s)) {
+        return ink("only stroke objects can be erased or moved");
+    }
     let old_objects = old_objects.unwrap();
     let tree_pages = &tree.children[sect(tree, "pageList")?];
     let tp: Vec<&Element> = tree_pages.children.iter().filter(|p| p.get("id") == Some(page_id.as_str())).collect();
@@ -271,6 +278,7 @@ pub(crate) fn load(
             ticks.push(integer(f.get("modifiedTime"))?);
         }
         ticks.extend([integer(attrs.get("modifiedTime"))?, page_time, layer_time]);
+        ticks.extend(carried_ticks.iter().copied());
         let revision = integer(attrs.get("fileRevision"))? as i128 + 1;
         let max = ticks.into_iter().chain(records.values().map(|(_, b)| b.modified_time)).max().unwrap();
         let tick = max as i128 + 1;

@@ -2,7 +2,7 @@ import {test,expect,type Page} from '@playwright/test';
 import {DEFAULT_SHORTCUTS} from '../src/useShortcuts';
 const TOKEN='synthetic_local_session_1234567890';
 const PNG=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lfoAAAAASUVORK5CYII=','base64');
-async function fixture(page:Page,options:{complete?:boolean;append?:boolean;failSave?:boolean;styles?:boolean;control?:{hold:boolean}}={}){
+async function fixture(page:Page,options:{complete?:boolean|null;append?:boolean;failSave?:boolean;styles?:boolean;control?:{hold:boolean};preview?:(index:number)=>number}={}){
   const requests:{path:string;method:string;data:any}[]=[];let pending:any[]=[];
   const base={folderId:null,metadataSync:{state:'synced',error:null},createdAt:1777000000000,modifiedAt:1777000000000,revision:1,syncState:'synced',editable:false,titleEditable:true,readOnlyReason:'Çizim notu.',favorite:false,trashed:false,contentLoaded:true,source:'cloud',error:null,body:'',preview:''};
   const notes=[{...base,id:'ink-one',title:'Çizim denemesi'},{...base,id:'ink-two',title:'İkinci çizim'}];
@@ -23,8 +23,8 @@ async function fixture(page:Page,options:{complete?:boolean;append?:boolean;fail
     const note=notes.find(item=>item.id===path.split('/')[3]);if(!note)return send({error:{code:'not_found',message:'Bulunamadı'}},404);
     if(path.endsWith('/thumbnail'))return route.fulfill({contentType:'image/png',body:PNG});
     if(path.endsWith('/editor'))return send({schemaVersion:1,revision:note.revision,model:null,reason:'Bilinmeyen biçimlendirme sözdizimi.',capabilities:{titleEdit:true,textEdit:false,richStyle:false,inkEdit:false}});
-    if(path.endsWith('/pages'))return send({providerAvailable:true,pages:pages.map(item=>({...item,available:true,complete:options.complete!==false}))});
-    if(path.endsWith('/preview'))return route.fulfill({contentType:'image/png',body:PNG});
+    if(path.endsWith('/pages'))return send({providerAvailable:true,pages:pages.map(item=>({...item,available:true,...(options.complete===null?{}:{complete:options.complete!==false})}))});
+    if(path.endsWith('/preview')){const status=options.preview?.(Number(url.searchParams.get('page')))??200;return status===200?route.fulfill({contentType:'image/png',body:PNG}):send({error:{code:'preview_unavailable',message:'Önizleme yok'}},status);}
     if(path.endsWith('/ink')&&method==='GET')return send({schemaVersion:1,revision:note.revision,pages,capabilities:{appendInk:options.append!==false&&note.syncState==='synced'},reason:null,rendering:{nativeEquivalent:false,mode:'geometry-only'},pendingStrokes:note.id==='ink-one'?pending:[]});
     if(path.endsWith('/ink')&&method==='PUT'){
       if(options.failSave||options.control?.hold)return send({error:{code:'revision_conflict',message:'Sürüm değişti'}},409);
@@ -42,11 +42,11 @@ async function draw(page:Page){
   await expect(page.locator('.editor-footer')).toContainText('çizgi kaydedilmedi');
 }
 test('ink autosaves like Samsung clients, keeps page identity and lets drawing continue while the batch syncs',async({page})=>{
-  const {requests}=await fixture(page);await expect(page.getByText('Sayfa ve çizim görünümü',{exact:true}).first()).toBeVisible();await expect(page.getByText('Salt okunur sayfa önizlemesi',{exact:true})).toHaveCount(0);await draw(page);await expect(page.getByLabel('Not başlığı')).toHaveAttribute('readonly','');
+  const {requests}=await fixture(page);await expect(page.locator('.editor-footer').getByText('Kaydedildi',{exact:true})).toBeVisible();await expect(page.getByText('Salt okunur',{exact:true})).toHaveCount(0);await draw(page);await expect(page.getByLabel('Not başlığı')).toHaveAttribute('readonly','');
   await expect.poll(()=>requests.filter(request=>request.method==='PUT').length,{timeout:5000}).toBe(1);const saved=requests.find(request=>request.method==='PUT')!;
   expect(saved.path).toBe('/api/notes/ink-one/ink');expect(saved.data.expectedRevision).toBe(1);expect(saved.data.strokes.map((stroke:any)=>[stroke.pageId,stroke.sourceStrokeId])).toEqual([['page-0','source-0']]);
   for(const stroke of saved.data.strokes){expect(Object.keys(stroke).sort()).toEqual(['pageId','points','sourceStrokeId']);expect(stroke.points[0].x).toBeCloseTo(250,0);expect(stroke.points[0].y).toBeCloseTo(200,0);expect(stroke.points[0].timeMs).toBe(0);expect(stroke.points.every((point:any)=>point.pressure===.5&&Number.isInteger(point.timeMs))).toBe(true);}
-  await expect(page.getByText('Çizim kaydı · Bulut bekleniyor',{exact:true})).toBeVisible();await expect(page.locator('.tool-rail').getByRole('button',{name:'Kalem',exact:true})).toBeEnabled();
+  await expect(page.getByText('Çizimler eşitleniyor',{exact:true})).toBeVisible();await expect(page.locator('.tool-rail').getByRole('button',{name:'Kalem',exact:true})).toBeEnabled();
   await page.getByLabel('Gösterilen sayfa').selectOption('1');await draw(page);await expect(page.getByText('1 çizgi kaydedilmedi')).toBeVisible();
   await page.waitForTimeout(2500);expect(requests.filter(request=>request.method==='PUT')).toHaveLength(1);
   await page.getByRole('button',{name:'Not listesine dön'}).click();await page.getByRole('button',{name:/İkinci çizim/}).click();await expect(page.getByLabel('Çizim alanı')).toBeAttached();await expect(page.getByText('1 çizgi kaydedilmedi')).toHaveCount(0);
@@ -58,8 +58,25 @@ test('ink autosaves like Samsung clients, keeps page identity and lets drawing c
   await expect(page.locator('.page-sheet[data-page-index="0"] .ink-overlay polyline')).toHaveCount(1);await expect(page.locator('.page-sheet[data-page-index="1"] .ink-overlay polyline')).toHaveCount(1);expect(requests.filter(request=>request.method==='PUT'&&request.path.endsWith('/ink'))).toHaveLength(1);
 });
 
-test('ink append stays disabled for an incomplete baseline even when the writer capability is true',async({page})=>{
-  const {requests}=await fixture(page,{complete:false});await expect(page.locator('.tool-rail').getByRole('button',{name:'Kalem',exact:true})).toBeDisabled();await expect(page.getByText(/Sayfanın tamamı gösterilmeden çizim açılamaz/)).toBeVisible();expect(requests.filter(request=>request.method==='PUT')).toHaveLength(0);
+// The page image no longer gates ink: an explicitly partial image is only a
+// hint; page identity, size and revision come from the projection.
+test('an incomplete page image is a hint, not a block: the pen draws and saves against the projection revision',async({page})=>{
+  const {requests}=await fixture(page,{complete:false});await expect(page.locator('.tool-rail').getByRole('button',{name:'Kalem',exact:true})).toBeEnabled();await expect(page.getByText(/tamamı gösterilmeden|tamamlanmadan/)).toHaveCount(0);
+  await draw(page);await expect(page.getByText(/çizgileriniz yine de bu sayfaya kaydedilir/)).toBeVisible();
+  await expect.poll(()=>requests.filter(request=>request.method==='PUT').length,{timeout:5000}).toBe(1);const saved=requests.find(request=>request.method==='PUT')!;expect(saved.data.expectedRevision).toBe(1);expect(saved.data.strokes[0].pageId).toBe('page-0');
+});
+test('a Samsung canvas page (no complete flag) accepts the pen',async({page})=>{
+  const {requests}=await fixture(page,{complete:null});await expect(page.locator('.tool-rail').getByRole('button',{name:'Kalem',exact:true})).toBeEnabled();await draw(page);
+  await expect(page.getByText(/yine de bu sayfaya kaydedilir/)).toHaveCount(0);
+  await expect.poll(()=>requests.filter(request=>request.method==='PUT').length,{timeout:5000}).toBe(1);expect(requests.find(request=>request.method==='PUT')!.data.expectedRevision).toBe(1);
+});
+test('a page whose image cannot be produced still takes ink on a blank sheet of the page size',async({page})=>{
+  const {requests}=await fixture(page,{complete:null,preview:()=>404});
+  await expect(page.locator('.page-sheet[data-page-index="0"] .page-placeholder')).toHaveText('Bu sayfanın görüntüsü bu cihazda oluşturulamıyor.');await expect(page.locator('.page-sheet[data-page-index="0"] img.page-image')).toHaveCount(0);await expect(page.getByText(/açılamadı/)).toHaveCount(0);
+  await draw(page);await expect(page.getByText(/çizgileriniz yine de bu sayfaya kaydedilir/)).toBeVisible();
+  await expect.poll(()=>requests.filter(request=>request.method==='PUT').length,{timeout:5000}).toBe(1);const saved=requests.find(request=>request.method==='PUT')!;expect(saved.data.expectedRevision).toBe(1);
+  // Same page coordinates as over an image (1000×1000 page, square sheet).
+  expect(saved.data.strokes[0].points[0].x).toBeCloseTo(250,0);expect(saved.data.strokes[0].points[0].y).toBeCloseTo(200,0);
 });
 test('failed ink save preserves the actual draft, blocks metadata and allows explicit undo without retry',async({page})=>{
   const {requests}=await fixture(page,{failSave:true});await draw(page);await page.locator('.save-button').click();await expect(page.getByText('Çizimler kaydedilemedi. Taslağınız bu pencerede korunuyor.')).toBeVisible();await expect(page.getByText('1 çizgi kaydedilmedi')).toBeVisible();
@@ -90,7 +107,7 @@ test('a remote revision with the same page and template moves the draft and auto
   await draw(page);await expect.poll(()=>requests.filter(r=>r.method==='PUT').length,{timeout:5000}).toBe(1);
   control.hold=false;notes[0].revision++;
   await expect.poll(()=>requests.filter(r=>r.method==='PUT'&&r.data.expectedRevision===2).length,{timeout:15000}).toBe(1);
-  await expect(page.getByText('Çizim kaydı · Bulut bekleniyor')).toBeVisible();
+  await expect(page.getByText('Çizimler eşitleniyor')).toBeVisible();
 });
 
 test('pen panel replaces disabled text tools, chooses an existing style and redoes undone lines',async({page})=>{
@@ -98,7 +115,7 @@ test('pen panel replaces disabled text tools, chooses an existing style and redo
   const panel=page.getByRole('complementary',{name:'Kalem araçları'});await expect(panel).toBeVisible();
   await expect(page.getByRole('button',{name:'Kalın',exact:true})).toHaveCount(0);await expect(page.getByLabel('Yazı boyutu')).toHaveCount(0);
   const styles=panel.getByRole('radio');await expect(styles).toHaveCount(2);await expect(styles.first()).toHaveAttribute('aria-checked','true');
-  await panel.getByRole('radio',{name:/#D03030, kalınlık 8/}).click();await expect(panel.getByRole('radio',{name:/#D03030/})).toHaveAttribute('aria-checked','true');
+  await expect(panel.getByRole('radio',{name:/#/})).toHaveCount(0);await panel.getByRole('radio',{name:/kalınlık 8$/}).click();await expect(panel.getByRole('radio',{name:/kalınlık 8$/})).toHaveAttribute('aria-checked','true');
   await expect(page.locator('.tool-rail').getByRole('button',{name:'Kalem',exact:true})).toHaveAttribute('aria-pressed','true');
   const svg=page.getByLabel('Çizim alanı');await expect(svg).toHaveClass(/drawing/);const box=(await svg.boundingBox())!;
   await page.mouse.move(box.x+box.width*.3,box.y+box.height*.3);await page.mouse.down();await page.mouse.move(box.x+box.width*.6,box.y+box.height*.4,{steps:4});await page.mouse.up();
@@ -106,7 +123,7 @@ test('pen panel replaces disabled text tools, chooses an existing style and redo
   const rail=page.locator('.tool-rail');await expect(rail.getByRole('button',{name:'Yinele',exact:true})).toBeDisabled();
   await rail.getByRole('button',{name:'Geri al',exact:true}).click();await expect(page.getByText('1 çizgi kaydedilmedi')).toHaveCount(0);
   await rail.getByRole('button',{name:'Yinele',exact:true}).click();await expect(page.getByText('1 çizgi kaydedilmedi')).toBeVisible();await expect(rail.getByRole('button',{name:'Yinele',exact:true})).toBeDisabled();
-  await page.locator('.save-button').click();await expect(page.getByText('Çizim kaydı · Bulut bekleniyor')).toBeVisible();
+  await page.locator('.save-button').click();await expect(page.getByText('Çizimler eşitleniyor')).toBeVisible();
   const puts=requests.filter(r=>r.method==='PUT');expect(puts).toHaveLength(1);expect(puts[0].data.strokes).toHaveLength(1);expect(puts[0].data.strokes[0].sourceStrokeId).toBe('source-red');expect(puts[0].data.strokes[0].pageId).toBe('page-0');
 });
 test('a new line after undo clears the redo stack',async({page})=>{
@@ -119,13 +136,13 @@ test('a new line after undo clears the redo stack',async({page})=>{
 test('chosen colour and size travel with the new line; template style sends no override',async({page})=>{
   const {requests}=await fixture(page,{styles:true});const panel=page.getByRole('complementary',{name:'Kalem araçları'});
   await panel.getByRole('button',{name:'Kalem rengi 1',exact:true}).click();await expect(panel.getByRole('button',{name:'Kalem rengi 1',exact:true})).toHaveAttribute('aria-pressed','true');
-  await panel.getByLabel('Kalem kalınlığı').fill('12');await expect(panel.getByText(/Yeni çizgi: #FF343B, kalınlık 12/)).toBeVisible();
+  await panel.getByLabel('Kalem kalınlığı').fill('12');await expect(panel.locator('.pen-size output')).toHaveText('12');await expect(panel.getByText(/#[0-9A-F]{6}/)).toHaveCount(0);
   const svg=page.getByLabel('Çizim alanı');await page.locator('.tool-rail').getByRole('button',{name:'Kalem',exact:true}).click();const box=(await svg.boundingBox())!;
   const line=async(y:number)=>{await page.mouse.move(box.x+box.width*.3,box.y+box.height*y);await page.mouse.down();await page.mouse.move(box.x+box.width*.6,box.y+box.height*(y+.05),{steps:4});await page.mouse.up();};
   await line(.3);await expect(page.locator('.ink-overlay polyline').last()).toHaveAttribute('stroke','#ff343b');await expect(page.locator('.ink-overlay polyline').last()).toHaveAttribute('stroke-width','12');
-  await panel.getByRole('radio').first().click();await expect(panel.getByText(/Yeni çizgi: #2462A0, kalınlık 4/)).toBeVisible();
+  await panel.getByRole('radio').first().click();await expect(panel.locator('.pen-size output')).toHaveText('4');
   await line(.6);await expect(page.getByText('2 çizgi kaydedilmedi')).toBeVisible();
-  await page.locator('.save-button').click();await expect(page.getByText('Çizim kaydı · Bulut bekleniyor')).toBeVisible();
+  await page.locator('.save-button').click();await expect(page.getByText('Çizimler eşitleniyor')).toBeVisible();
   const [put]=requests.filter(r=>r.method==='PUT');expect(put.data.strokes).toHaveLength(2);
   expect(put.data.strokes[0]).toMatchObject({sourceStrokeId:'source-0',colorARGB:0xffff343b,size:12});
   expect(Object.keys(put.data.strokes[1]).sort()).toEqual(['pageId','points','sourceStrokeId']);

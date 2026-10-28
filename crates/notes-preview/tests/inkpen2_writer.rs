@@ -225,16 +225,32 @@ fn stylusless_inkpen2_keeps_the_other_admission_gates() {
         }).collect();
         reparse(multipart(&out))
     };
-    assert_eq!(prepare::prepare_pages(&patch(&|_, _| {}), None, false).unwrap().len(), 1);
+    let admitted = prepare::prepare_pages(&patch(&|_, _| {}), None, false).unwrap();
+    assert_eq!(admitted.len(), 1);
+    assert!(!admitted[0].composite);
+    // Refused by the renderer route: the page is a composite whose stroke is
+    // approximated (notice), never a renderer-drawn page.
+    let approximated = |snapshot: &Val, label: &str| {
+        let pages = prepare::prepare_pages(snapshot, None, false).unwrap();
+        assert_eq!(pages.len(), 1, "{label}");
+        assert!(pages[0].composite, "{label}");
+        assert_eq!(pages[0].notice.as_deref(), Some(notes_preview::ink::objects::NOTICE_INK), "{label}");
+    };
     let tool1 = patch(&|body, r| {
         let at = 12 + r.frames[0].raw.len() + r.frames[1].flexible_start as usize - 2;
         body[at..at + 2].copy_from_slice(&1u16.to_le_bytes());
     });
-    assert_eq!(prepare::prepare_pages(&tool1, None, false).unwrap().len(), 0, "tool 1");
+    approximated(&tool1, "tool 1");
     let eraser = patch(&|body, r| {
         // PROPS bit 3 (eraser): first property-mask byte of the stroke frame.
         assert!(!r.frames[1].properties.is_empty());
         body[12 + r.frames[0].raw.len() + 11] |= 1 << 3;
     });
-    assert_eq!(prepare::prepare_pages(&eraser, None, false).unwrap().len(), 0, "eraser");
+    approximated(&eraser, "eraser");
+    // An eraser record is not painted as a line: nothing but the renderer's
+    // admitted source stroke remains on the page.
+    let built = prepare::prepare_pages(&eraser, None, true).unwrap();
+    let body = rs_store::val::loads(std::str::from_utf8(&built[0].body).unwrap()).unwrap();
+    assert_eq!(body.get("items"), Some(&Val::List(vec![])));
+    assert!(body.get("renderer").and_then(Val::as_str).is_some());
 }

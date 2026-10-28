@@ -25,7 +25,7 @@ function valueValid(span:EditorSpan){
   return typeof span.value==='string'&&/^#[\da-f]{8}$/i.test(span.value);
 }
 export function assertEditorModel(model:EditorModel){
-  if(model.schemaVersion!==1||typeof model.text!=='string'||model.text.length>262144||!Array.isArray(model.spans)||!Array.isArray(model.paragraphs)||model.spans.length+model.paragraphs.length>4096)throw invalid();
+  if(model.schemaVersion!==1||typeof model.text!=='string'||model.text.length>262144||!Array.isArray(model.spans)||!Array.isArray(model.paragraphs)||model.spans.length+model.paragraphs.length>32768)throw invalid();
   for(const span of model.spans){
     if(!spanKinds.includes(span.kind)||!boundary(model.text,span.start)||!boundary(model.text,span.end)||span.start>span.end||![0,1,2,3].includes(span.interval)||!valueValid(span))throw invalid();
     // A zero-length SDK annotation is a typing-style anchor, not an empty mark.

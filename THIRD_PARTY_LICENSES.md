@@ -17,14 +17,15 @@ separate program), bubblewrap (LGPL-2.0+, separate program).
 
 ## Rust: Rust engine workspace
 
-Lock file: `Cargo.lock` (114 packages)
+Lock file: `Cargo.lock` (122 packages)
 
-- MIT OR Apache-2.0: 75
-- MIT: 15
+- MIT OR Apache-2.0: 79
+- MIT: 16
 - Apache-2.0 OR MIT: 10
+- Unlicense OR MIT: 3
 - BSD-3-Clause: 2
+- MIT OR Apache-2.0 OR Zlib: 2
 - MIT OR Zlib OR Apache-2.0: 2
-- Unlicense OR MIT: 2
 - Zlib: 2
 - (MIT OR Apache-2.0) AND Unicode-3.0: 1
 - 0BSD OR MIT OR Apache-2.0: 1
@@ -46,8 +47,10 @@ Lock file: `Cargo.lock` (114 packages)
 | block-buffer | 0.12.1 | MIT OR Apache-2.0 | crates.io |
 | bumpalo | 3.20.3 | MIT OR Apache-2.0 | crates.io |
 | bytemuck | 1.25.2 | Zlib OR Apache-2.0 OR MIT | crates.io |
+| byteorder-lite | 0.1.0 | Unlicense OR MIT | crates.io |
 | cc | 1.10.0 | MIT OR Apache-2.0 | crates.io |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 | crates.io |
+| color_quant | 1.1.0 | MIT | crates.io |
 | const-oid | 0.10.2 | Apache-2.0 OR MIT | crates.io |
 | cpufeatures | 0.2.17 | MIT OR Apache-2.0 | crates.io |
 | cpufeatures | 0.3.1 | MIT OR Apache-2.0 | crates.io |
@@ -72,10 +75,12 @@ Lock file: `Cargo.lock` (114 packages)
 | futures-util | 0.3.34 | MIT OR Apache-2.0 | crates.io |
 | generic-array | 0.14.7 | MIT | crates.io |
 | getrandom | 0.4.3 | MIT OR Apache-2.0 | crates.io |
+| gif | 0.14.2 | MIT OR Apache-2.0 | crates.io |
 | hashbrown | 0.16.1 | MIT OR Apache-2.0 | crates.io |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 | crates.io |
 | hashlink | 0.12.1 | MIT OR Apache-2.0 | crates.io |
 | hybrid-array | 0.4.15 | MIT OR Apache-2.0 | crates.io |
+| image-webp | 0.2.4 | MIT OR Apache-2.0 | crates.io |
 | imagesize | 0.15.0 | MIT | crates.io |
 | itoa | 1.0.18 | MIT OR Apache-2.0 | crates.io |
 | js-sys | 0.3.104 | MIT OR Apache-2.0 | crates.io |
@@ -101,6 +106,7 @@ Lock file: `Cargo.lock` (114 packages)
 | png | 0.18.1 | MIT OR Apache-2.0 | crates.io |
 | polycool | 0.4.0 | MIT OR Apache-2.0 | crates.io |
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 | crates.io |
+| quick-error | 2.0.1 | MIT OR Apache-2.0 | crates.io |
 | quote | 1.0.47 | MIT OR Apache-2.0 | crates.io |
 | r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | crates.io |
 | redox_syscall | 0.9.5 | MIT | crates.io |
@@ -145,28 +151,31 @@ Lock file: `Cargo.lock` (114 packages)
 | wasm-bindgen-macro | 0.2.127 | MIT OR Apache-2.0 | crates.io |
 | wasm-bindgen-macro-support | 0.2.127 | MIT OR Apache-2.0 | crates.io |
 | wasm-bindgen-shared | 0.2.127 | MIT OR Apache-2.0 | crates.io |
+| weezl | 0.1.12 | MIT OR Apache-2.0 | crates.io |
 | windows-link | 0.2.1 | MIT OR Apache-2.0 | crates.io |
 | zeroize | 1.9.1 | Apache-2.0 OR MIT | crates.io |
 | zlib-rs | 0.6.8 | Zlib | crates.io |
 | zmij | 1.0.23 | MIT | crates.io |
+| zune-core | 0.5.3 | MIT OR Apache-2.0 OR Zlib | crates.io |
+| zune-jpeg | 0.5.15 | MIT OR Apache-2.0 OR Zlib | crates.io |
 
 ## Rust: Tauri desktop shell
 
-Lock file: `desktop/src-tauri/Cargo.lock` (455 packages)
+Lock file: `desktop/src-tauri/Cargo.lock` (463 packages)
 
-- MIT OR Apache-2.0: 224
-- MIT: 109
+- MIT OR Apache-2.0: 228
+- MIT: 110
 - Apache-2.0 OR MIT: 40
 - Unicode-3.0: 18
 - Zlib OR Apache-2.0 OR MIT: 17
-- Unlicense OR MIT: 11
+- Unlicense OR MIT: 12
 - Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT: 5
 - MPL-2.0: 5
 - BSD-3-Clause: 4
+- MIT OR Apache-2.0 OR Zlib: 4
 - Apache-2.0: 3
 - BSD-3-Clause OR MIT OR Apache-2.0: 2
 - MIT OR Apache-2.0 OR LGPL-2.1-or-later: 2
-- MIT OR Apache-2.0 OR Zlib: 2
 - MIT OR Zlib OR Apache-2.0: 2
 - Zlib: 2
 - (MIT OR Apache-2.0) AND Unicode-3.0: 1
@@ -209,6 +218,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (455 packages)
 | bumpalo | 3.20.3 | MIT OR Apache-2.0 | crates.io |
 | bytemuck | 1.25.2 | Zlib OR Apache-2.0 OR MIT | crates.io |
 | byteorder | 1.5.0 | Unlicense OR MIT | crates.io |
+| byteorder-lite | 0.1.0 | Unlicense OR MIT | crates.io |
 | bytes | 1.12.1 | MIT | crates.io |
 | cairo-rs | 0.18.5 | MIT | crates.io |
 | cairo-sys-rs | 0.18.2 | MIT | crates.io |
@@ -222,6 +232,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (455 packages)
 | cfg-expr | 0.15.8 | MIT OR Apache-2.0 | crates.io |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 | crates.io |
 | chrono | 0.4.45 | MIT OR Apache-2.0 | crates.io |
+| color_quant | 1.1.0 | MIT | crates.io |
 | combine | 4.6.9 | MIT | crates.io |
 | const-oid | 0.10.2 | Apache-2.0 OR MIT | crates.io |
 | cookie | 0.18.2 | MIT OR Apache-2.0 | crates.io |
@@ -304,6 +315,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (455 packages)
 | generic-array | 0.14.7 | MIT | crates.io |
 | getrandom | 0.3.4 | MIT OR Apache-2.0 | crates.io |
 | getrandom | 0.4.3 | MIT OR Apache-2.0 | crates.io |
+| gif | 0.14.2 | MIT OR Apache-2.0 | crates.io |
 | gio | 0.18.4 | MIT | crates.io |
 | gio-sys | 0.18.1 | MIT | crates.io |
 | glib | 0.18.5 | MIT | crates.io |
@@ -342,6 +354,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (455 packages)
 | ident_case | 1.0.1 | MIT OR Apache-2.0 | crates.io |
 | idna | 1.1.0 | MIT OR Apache-2.0 | crates.io |
 | idna_adapter | 1.2.2 | Apache-2.0 OR MIT | crates.io |
+| image-webp | 0.2.4 | MIT OR Apache-2.0 | crates.io |
 | imagesize | 0.15.0 | MIT | crates.io |
 | indexmap | 1.9.3 | Apache-2.0 OR MIT | crates.io |
 | indexmap | 2.14.2 | Apache-2.0 OR MIT | crates.io |
@@ -444,6 +457,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (455 packages)
 | proc-macro-error | 1.0.4 | MIT OR Apache-2.0 | crates.io |
 | proc-macro-error-attr | 1.0.4 | MIT OR Apache-2.0 | crates.io |
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 | crates.io |
+| quick-error | 2.0.1 | MIT OR Apache-2.0 | crates.io |
 | quick-xml | 0.42.0 | MIT | crates.io |
 | quote | 1.0.47 | MIT OR Apache-2.0 | crates.io |
 | r-efi | 5.3.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | crates.io |
@@ -591,6 +605,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (455 packages)
 | webview2-com | 0.39.1 | MIT | crates.io |
 | webview2-com-macros | 0.8.1 | MIT | crates.io |
 | webview2-com-sys | 0.39.1 | MIT | crates.io |
+| weezl | 0.1.12 | MIT OR Apache-2.0 | crates.io |
 | winapi | 0.3.9 | MIT OR Apache-2.0 | crates.io |
 | winapi-i686-pc-windows-gnu | 0.4.0 | MIT OR Apache-2.0 | crates.io |
 | winapi-util | 0.1.11 | Unlicense OR MIT | crates.io |
@@ -636,6 +651,8 @@ Lock file: `desktop/src-tauri/Cargo.lock` (455 packages)
 | zerovec-derive | 0.11.7 | Unicode-3.0 | crates.io |
 | zlib-rs | 0.6.8 | Zlib | crates.io |
 | zmij | 1.0.23 | MIT | crates.io |
+| zune-core | 0.5.3 | MIT OR Apache-2.0 OR Zlib | crates.io |
+| zune-jpeg | 0.5.15 | MIT OR Apache-2.0 OR Zlib | crates.io |
 
 ## Rust: ink-render CLI (GPL-3.0, links sdocx)
 

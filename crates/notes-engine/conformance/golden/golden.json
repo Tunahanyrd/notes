@@ -1,12 +1,12 @@
 {
  "note": "Frozen responses of the historical Python reference (NOTES_IMPL=rust python3 -m samsung_notes) over the synthetic library in library/ (reference/python/conformance/gen_library.py). Synthetic data only. Replay: run.py --replay --candidate target/debug/notes-engine",
- "recordedOn": "2026-10-27",
+ "recordedOn": "2026-10-28",
  "reference": "target/debug/notes-engine",
  "rootLength": 160,
  "scenarios": {
   "main": {
    "file": "main.json.gz",
-   "files": 58,
+   "files": 95,
    "responses": 1693,
    "tables": 18
   },
@@ -20,7 +20,7 @@
  "schemaVersion": 1,
  "toolVersions": {
   "bwrap": "bubblewrap 0.13.1",
-  "ink-render": "abe097a028c947766589452333f89403de57348b739119261dd24903d1641f51",
+  "ink-render": "f8236d8490206aa5a4241230c993063bb936d40c7e807fea1e123bb765c7acd0",
   "magick": "Version: ImageMagick 7.1.2-34 Q16-HDRI x86_64 c5d4ca8a0:20261014 https://imagemagick.org",
   "pdftoppm": "pdftoppm version 26.10.0",
   "rsvg-convert": "rsvg-convert version 2.63.3"
@@ -50,7 +50,7 @@
    },
    "toolVersions": {
     "bwrap": "bubblewrap 0.13.1",
-    "ink-render": "abe097a028c947766589452333f89403de57348b739119261dd24903d1641f51",
+    "ink-render": "f8236d8490206aa5a4241230c993063bb936d40c7e807fea1e123bb765c7acd0",
     "magick": null,
     "pdftoppm": "pdftoppm version 26.10.0",
     "rsvg-convert": "rsvg-convert version 2.63.3"

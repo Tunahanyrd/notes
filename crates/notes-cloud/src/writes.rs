@@ -406,7 +406,18 @@ impl CloudApi {
                 None => self.now_ms(),
             };
             let edit = editor::prepare_editor_edit(&fresh, title, &model, prepared_at)?;
-            let body = edit.body.clone().unwrap_or_else(|| fresh.body.clone());
+            // The readback compares the snapshot's extracted body, which also
+            // carries text of page objects; derive it from the draft itself.
+            let body = match &edit.body {
+                Some(text) => {
+                    let parsed = snapshot::parse_document(&edit.full_xml, "application/xml", None)?.body;
+                    if parsed != *text && !text.is_empty() && !parsed.starts_with(&format!("{text}\n")) {
+                        return Err(Fail::document("Taslağın metni modelle uyuşmuyor."));
+                    }
+                    parsed
+                }
+                None => fresh.body.clone(),
+            };
             let expected = Val::dict(vec![
                 ("title", Val::s(title)),
                 ("local_id", Val::opt_str(snapshot.local_id.as_deref())),

@@ -19,7 +19,7 @@ fn digest() -> String {
 
 fn cand(index: i64, objects: i64, rect: (i64, i64, i64, i64)) -> PdfBackground {
     PdfBackground { page_index: 0, pdf_page_index: index, width: 30, height: 20, rect, annotation_objects: objects,
-                    sha256: digest(), download_url: Some(URL.into()), overlay: None }
+                    sha256: digest(), download_url: Some(URL.into()), overlay: None, local_ink: None }
 }
 
 fn write_pdf(path: &Path) -> Result<(u16, Option<String>), Fail> {

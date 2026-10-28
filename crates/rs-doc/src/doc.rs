@@ -110,6 +110,55 @@ fn py_strip_empty(s: &str) -> bool {
 /// `_plain_structure(resource)`. Errors: `Document` (specific reason) or
 /// `Value` (any other ValueError/UnicodeError the Python version raised).
 pub fn plain_structure(resource: &Element, payload_limits: &Limits, max_text: usize) -> Result<PlainStructure> {
+    structure(resource, payload_limits, max_text, false)
+}
+
+/// Structure gate of the rich text editor (title/body text objects only).
+///
+/// Unlike [`plain_structure`] it accepts pages whose layers hold objects
+/// (handwriting, images, shapes) and their content files: an editor upload
+/// sends the note tree and the changed text objects only (the page list and
+/// content file list go out empty, exactly like a title edit), so every page
+/// object and binary part stays byte-for-byte on the server. A text object
+/// without a `<text>` child is a native empty text box. Still rejected:
+/// objects outside the page list, free-floating objects, voice recordings /
+/// attachments, and the inventory, identity and text-object checks of the
+/// plain gate.
+pub fn editor_structure(resource: &Element, payload_limits: &Limits, max_text: usize) -> Result<PlainStructure> {
+    structure(resource, payload_limits, max_text, true)
+}
+
+/// Index of the at most one child with this lower local name.
+fn optional_one(parent: &Element, name: &str) -> Result<Option<usize>> {
+    let mut found = None;
+    for (i, child) in parent.children.iter().enumerate() {
+        if child.local() == name {
+            if found.is_some() {
+                return Err(Error::document(STRUCTURE));
+            }
+            found = Some(i);
+        }
+    }
+    Ok(found)
+}
+
+/// Addresses of every node under the given subtrees (the subtree roots included).
+fn subtree_set<'a>(roots: impl IntoIterator<Item = &'a Element>) -> std::collections::HashSet<usize> {
+    let mut out = std::collections::HashSet::new();
+    for root in roots {
+        for n in root.iter() {
+            out.insert(n as *const Element as usize);
+        }
+    }
+    out
+}
+
+pub const EDITOR_FLOATING: &str = "Bu nottaki serbest yerleşimli nesneler yüzünden metin henüz güvenle düzenlenemiyor.";
+pub const EDITOR_MEDIA: &str = "Ses kaydı veya ek dosya içeren notlarda metin henüz güvenle düzenlenemiyor.";
+pub const EDITOR_INCONSISTENT: &str = "Notun sayfa içeriği kendi içinde tutarsız görünüyor; metin güvenle düzenlenemiyor.";
+pub const EDITOR_FOREIGN_OBJECT: &str = "Bu notta metnin içine yerleşmiş nesneler var; metin henüz güvenle düzenlenemiyor.";
+
+fn structure(resource: &Element, payload_limits: &Limits, max_text: usize, editor: bool) -> Result<PlainStructure> {
     let d = Error::document;
     let attrs_i = one(resource, "attributes")?;
     let tree_i = one(resource, "notetree")?;
@@ -133,7 +182,8 @@ pub fn plain_structure(resource: &Element, payload_limits: &Limits, max_text: us
         if obj.get("type") != Some("textBox") {
             return Err(d("Bu not düz metinden farklı nesneler içeriyor."));
         }
-        let encoded = obj.children[one(obj, "text")?].text.clone().unwrap_or_default();
+        let text_i = if editor { optional_one(obj, "text")? } else { Some(one(obj, "text")?) };
+        let encoded = text_i.and_then(|i| obj.children[i].text.clone()).unwrap_or_default();
         if obj.children.iter().any(|n| !ALLOWED.contains(&n.local().as_str())) {
             return Err(d("Ek metin biçimlendirmesi bu sürümde salt okunur."));
         }
@@ -164,7 +214,33 @@ pub fn plain_structure(resource: &Element, payload_limits: &Limits, max_text: us
             }
         }
     }
-    if resource.iter().filter(|n| n.local() == "object").count() != 2 {
+    // Page content is carried unchanged by an editor write: the page and
+    // content-file lists (and their note-tree mirrors) and the attributes'
+    // string table that page objects refer to (pen/brush names).
+    let page_content = if editor {
+        let mut roots: Vec<&Element> = Vec::new();
+        roots.extend(resource.children.iter().filter(|n| matches!(n.local().as_str(), "pagelist" | "contentfilelist")));
+        roots.extend(tree.children.iter().filter(|n| matches!(n.local().as_str(), "pagelist" | "contentfilelist")));
+        roots.extend(attrs.children.iter().filter(|n| n.local() == "stringidlist"));
+        subtree_set(roots)
+    } else {
+        Default::default()
+    };
+    let in_pages = |n: &Element| page_content.contains(&(n as *const Element as usize));
+    if editor {
+        for node in resource.iter() {
+            let name = node.local();
+            if matches!(name.as_str(), "floatingobjectlist") && !node.children.is_empty() {
+                return Err(d(EDITOR_FLOATING));
+            }
+            if matches!(name.as_str(), "attachment" | "voice" | "extrabundle") {
+                return Err(d(EDITOR_MEDIA));
+            }
+        }
+        if resource.iter().filter(|n| n.local() == "object" && !in_pages(n)).count() != 2 {
+            return Err(d(EDITOR_FOREIGN_OBJECT));
+        }
+    } else if resource.iter().filter(|n| n.local() == "object").count() != 2 {
         return Err(d("Çizim veya ek nesne içeren notlar salt okunur."));
     }
     let body_text = &resource.children[body_text_i];
@@ -208,18 +284,37 @@ pub fn plain_structure(resource: &Element, payload_limits: &Limits, max_text: us
         }
         for layer in layers.iter().chain(tlayers.iter()) {
             if layer.local() != "layer"
-                || layer.children.iter().any(|n| {
-                    n.local() != "objectlist" || !n.children.is_empty() || !py_strip_empty(n.text.as_deref().unwrap_or(""))
-                })
+                || (!editor
+                    && layer.children.iter().any(|n| {
+                        n.local() != "objectlist" || !n.children.is_empty() || !py_strip_empty(n.text.as_deref().unwrap_or(""))
+                    }))
             {
                 return Err(d("Çizim içeren notlar salt okunur."));
             }
         }
+        if editor {
+            // The note tree is uploaded as the server's own inventory of the
+            // pages: refuse a document whose page objects and tree disagree.
+            let ids = |layer: &Element| -> Vec<Option<String>> {
+                layer
+                    .children
+                    .iter()
+                    .filter(|n| n.local() == "objectlist")
+                    .flat_map(|list| list.children.iter().map(|o| o.get("id").map(str::to_string)))
+                    .collect()
+            };
+            if layers.iter().zip(tlayers.iter()).any(|(a, b)| ids(a) != ids(b)) {
+                return Err(d(EDITOR_INCONSISTENT));
+            }
+        }
     }
-    if resource.iter().any(|n| n.has_attr("id") && !known.contains(&ptr(n))) {
+    if resource.iter().any(|n| n.has_attr("id") && !known.contains(&ptr(n)) && !in_pages(n)) {
         return Err(d("Ek kaynak içeren notlar salt okunur."));
     }
     for node in resource.iter() {
+        if in_pages(node) {
+            continue;
+        }
         let name = node.local();
         if matches!(name.as_str(), "contentfile" | "downloadurl" | "stroke" | "attachment" | "voice" | "extrabundle") {
             return Err(d("Ek veya gömülü veri içeren notlar salt okunur."));

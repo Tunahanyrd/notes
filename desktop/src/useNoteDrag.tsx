@@ -34,7 +34,8 @@ export function useNoteDrag(options:NoteDragOptions) {
   const suppressNote=useRef<string|null>(null);
   const expand=useRef<{id:string;timer:number}|null>(null);
   const listeners=useRef<(()=>void)|null>(null);
-  const update=(next:DragState|null)=>{dragRef.current=next;setDrag(next);};
+  // The cursor says whether a drop here would work: grabbing, or no-drop over an invalid target.
+  const update=(next:DragState|null)=>{dragRef.current=next;setDrag(next);document.documentElement.classList.toggle('note-drag-blocked',!!next&&(next.hover!==undefined?!next.valid:!!next.baseReason));};
 
   const place=useCallback(()=>{
     const node=ghost.current;if(!node)return;
@@ -49,7 +50,7 @@ export function useNoteDrag(options:NoteDragOptions) {
     const current=press.current;press.current=null;
     if(current){window.clearTimeout(current.timer);if(current.dragging){suppressUntil.current=performance.now()+600;suppressNote.current=current.noteId;try{if(current.element.hasPointerCapture(current.pointerId))current.element.releasePointerCapture(current.pointerId);}catch{/* pointer already gone */}}}
     clearExpand();listeners.current?.();listeners.current=null;
-    document.documentElement.classList.remove('note-dragging');
+    document.documentElement.classList.remove('note-dragging','note-drag-blocked');
     if(dragRef.current)update(null);
   };
   const hitTest=(x:number,y:number)=>{

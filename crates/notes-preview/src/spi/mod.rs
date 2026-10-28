@@ -20,7 +20,7 @@ use intra::{clip_byte, wrap16, Recon};
 /// Largest image (pixels) the decoder accepts.
 pub const MAX_PIXELS: usize = 4 * 1024 * 1024;
 /// Largest input accepted (bytes).
-pub const MAX_INPUT: usize = 8 * 1024 * 1024;
+pub const MAX_INPUT: usize = 32 * 1024 * 1024;
 const MAX_DIMENSION: usize = 32768;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

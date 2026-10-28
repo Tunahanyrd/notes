@@ -19,11 +19,15 @@ pub struct Snapshot {
 pub trait Backend {
     /// object_hash(id, tick) digest bytes.
     fn object_hash(&self, id: Option<&str>, tick: i128) -> Result<Vec<u8>>;
-    /// _plain_structure(ET.fromstring(resource_xml)).
-    fn plain_structure(&self, resource_xml: &[u8]) -> Result<()>;
-    /// Every MIME part of the snapshot body is XML.
-    fn only_xml_parts(&self) -> Result<bool>;
+    /// rs_doc::doc::editor_structure(ET.fromstring(resource_xml)).
+    fn editor_structure(&self, resource_xml: &[u8]) -> Result<()>;
 }
+
+/// Version of the capability rules below. Cached projections computed under
+/// another recipe are recomputed (rs-store drops them on open).
+/// v2: text objects next to page objects (handwriting, images, shapes) and
+/// binary parts; native empty text boxes without `<text>`; 32768 annotations.
+pub const PROJECTION_RECIPE: &str = "editor-projection-v2";
 
 /// The `now_ms` argument after defaulting: an int, or a non-int object.
 pub enum Now { Int(PyInt), NotInt }
@@ -50,15 +54,10 @@ impl Backend for DocBackend {
     fn object_hash(&self, id: Option<&str>, tick: i128) -> Result<Vec<u8>> {
         Ok(rs_doc::writer::object_hash(id.unwrap_or(""), tick)?.to_vec())
     }
-    fn plain_structure(&self, resource_xml: &[u8]) -> Result<()> {
+    fn editor_structure(&self, resource_xml: &[u8]) -> Result<()> {
         let resource = rs_doc::xml::fromstring(resource_xml)?;
-        rs_doc::doc::plain_structure(&resource, &self.limits.payload, self.limits.max_text)?;
+        rs_doc::doc::editor_structure(&resource, &self.limits.payload, self.limits.max_text)?;
         Ok(())
-    }
-    fn only_xml_parts(&self) -> Result<bool> {
-        let parts = rs_doc::mime::parts(&self.raw_body, &self.content_type, self.limits.max_readonly_parts,
-            &self.limits.payload, &mut rs_doc::mime::NoHooks)?;
-        Ok(parts.iter().all(|p| p.content_type == "application/xml" || p.content_type == "text/xml"))
     }
 }
 
@@ -101,17 +100,49 @@ fn records(obj: &Element, name: &str) -> Result<Vec<Record>> {
     Ok(values)
 }
 
+/// Index of the text object's `<text>` child; None for a native empty text
+/// box (Samsung omits `<text>` when the box holds no text).
+fn text_child(obj: &Element) -> Result<Option<usize>> {
+    let found: Vec<usize> = obj.children.iter().enumerate().filter(|(_, n)| n.local() == "text").map(|(i, _)| i).collect();
+    match found.len() {
+        0 => Ok(None),
+        1 => Ok(Some(found[0])),
+        _ => doc("Belgenin yapısı güvenli düzenleme için uygun değil."),
+    }
+}
+
 /// editor_document._object_rich
 pub fn object_rich(obj: &Element) -> Result<Rich> {
-    let text = obj.children[one(obj, "text")?].text.clone().unwrap_or_default();
     let span_order = records(obj, "spanorderdatalist")?;
     let zero_length = records(obj, "zerolengthspanlist")?;
+    let text = match text_child(obj)? {
+        Some(i) => obj.children[i].text.clone().unwrap_or_default(),
+        None if span_order.is_empty() && zero_length.is_empty() => String::new(),
+        None => return doc("Belgenin yapısı güvenli düzenleme için uygun değil."),
+    };
     read_rich_text(&text, &span_order, &zero_length)
 }
 
-/// editor_document._put_rich
-pub fn put_rich(obj: &mut Element, rich: &Rich) -> Result<()> {
+/// True when a rich value has no text, formatting or page slices at all.
+pub fn rich_is_empty(rich: &Rich) -> bool {
+    model_text(&rich.model).is_empty() && model_spans(&rich.model).is_empty()
+        && model_paragraphs(&rich.model).is_empty() && rich.sections.is_empty()
+}
+
+/// editor_document._put_rich. A missing `<text>` (native empty text box) is
+/// added as the last child. With `native_empty`, an empty value is written
+/// the native way: Samsung clients store an empty title/body text box without
+/// a `<text>` child (seen on every handwriting-only and untitled device note).
+pub fn put_rich(obj: &mut Element, rich: &Rich, native_empty: bool) -> Result<()> {
+    text_child(obj)?;
     obj.children.retain(|n| !sidecar(n));
+    if native_empty && rich_is_empty(rich) {
+        obj.children.retain(|n| n.local() != "text");
+        return Ok(());
+    }
+    if text_child(obj)?.is_none() {
+        obj.children.push(Element::new("text"));
+    }
     for (tag, child, values) in [("spanOrderDataList", "spanOrderData", &rich.span_order),
                                  ("zeroLengthSpanList", "zeroLengthSpan", &rich.zero_length)] {
         if !values.is_empty() {
@@ -235,7 +266,7 @@ pub fn prepare_title_edit(snap: &Snapshot, title: &Val, now: &Now, be: &dyn Back
     }
     if title.is_empty() { *dget_mut(fields, "paragraphs").unwrap() = Val::List(vec![]); }
     let rich = encode_rich_text(&model, &[])?;
-    put_rich(&mut root.children[ai].children[tti].children[oi], &rich)?;
+    put_rich(&mut root.children[ai].children[tti].children[oi], &rich, true)?;
     let now = check_now_after(now, &root, false)?;
     let attrs = &root.children[ai];
     let obj = &attrs.children[tti].children[oi];
@@ -292,6 +323,7 @@ fn projection_inner(snap: Result<&Snapshot>, be: &dyn Backend, p: &mut Projectio
     {
         let body = &mut temporary.children[bi].children[boi];
         body.children.retain(|n| !sidecar(n));
+        if text_child(body)?.is_none() { body.children.push(Element::new("text")); }
         let t = one(body, "text")?;
         body.children[t].text = Some(encode_text(model_text(&rich.model))?);
     }
@@ -306,8 +338,7 @@ fn projection_inner(snap: Result<&Snapshot>, be: &dyn Backend, p: &mut Projectio
         let t = one(temp_title, "text")?;
         temp_title.children[t].text = Some(encode_text(model_text(&title_rich.model))?);
     }
-    be.plain_structure(&etree::xml_bytes(&temporary))?;
-    if !be.only_xml_parts()? { return doc("Ek kaynak içeren gövde henüz düzenlenemiyor."); }
+    be.editor_structure(&etree::xml_bytes(&temporary))?;
     p.text_edit = true;
     Ok(())
 }
@@ -327,7 +358,7 @@ pub fn new_editor_document<T>(model: &Val, make: impl FnOnce(&str) -> Result<(T,
     let mut root = parse_xml(&xml)?;
     let bi = one(&root, "bodytext")?;
     let oi = one(&root.children[bi], "object")?;
-    put_rich(&mut root.children[bi].children[oi], &rich)?;
+    put_rich(&mut root.children[bi].children[oi], &rich, false)?;
     Ok((identity, etree::xml_bytes(&root)))
 }
 
@@ -365,7 +396,7 @@ pub fn prepare_editor_edit(snap: &Snapshot, title: &Val, model: &Val, now: &Now,
     let mut requested = Vec::new();
     if body_changed {
         let body = &mut root.children[bi].children[boi];
-        put_rich(body, &rich)?;
+        put_rich(body, &rich, true)?;
         body.set("modifiedTime", tick.to_string());
         let hash = hex(&be.object_hash(body.get("id"), tick)?);
         body.set("hash", hash.clone());

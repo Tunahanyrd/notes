@@ -81,18 +81,21 @@ fn file_contract(t: &Tree, node: NodeId, max_count: i64) -> R<Contract> {
     let prefix = format!("{ident}{bind}{name}");
     let suffix = format!("{count}{tick}");
     let hash = t.get(node, "hash");
-    let matches: Vec<bool> = [false, true]
+    // Legacy (no flag) or modern (flag as stored; observed "true" and "True",
+    // the digest covers the stored spelling). Exactly one must match.
+    let stored = t.get_or(node, "isFileAttached", "").to_string();
+    let mut variants = vec![String::new(), attached.clone()];
+    if stored != attached {
+        variants.push(stored);
+    }
+    let matches: Vec<String> = variants
         .into_iter()
-        .filter(|modern| {
-            let s = format!("{prefix}{suffix}{}", if *modern { attached.as_str() } else { "" });
-            Some(sha256_hex(s.as_bytes()).as_str()) == hash
-        })
+        .filter(|flag| Some(sha256_hex(format!("{prefix}{suffix}{flag}").as_bytes()).as_str()) == hash)
         .collect();
     if matches.len() != 1 {
         return Err(fail());
     }
-    Ok(Contract { identity: ident.to_string(), count, tick, prefix,
-                  suffix: if matches[0] { attached } else { String::new() } })
+    Ok(Contract { identity: ident.to_string(), count, tick, prefix, suffix: matches.into_iter().next().unwrap() })
 }
 
 /// ink_cache.release_page_cache. `page` may be absent from the tree.
@@ -121,6 +124,23 @@ pub fn release_page_cache(t: &mut Tree, page: Option<NodeId>, tick: i128) -> R<V
             }
         }
     }
+    // Images on page layers reference their content file by id (fill
+    // `imageId`); such a file keeps its exact metadata, like a PDF.
+    let mut image_refs: Vec<(String, i64)> = Vec::new();
+    for node in t.iter(pages) {
+        if t.tag(node) != "object" || t.get(node, "type") == Some("stroke") {
+            continue;
+        }
+        match super::objects::tree_passthrough(t, node) {
+            Some(Some(file)) => match image_refs.iter_mut().find(|(f, _)| *f == file) {
+                Some((_, n)) => *n += 1,
+                None => image_refs.push((file, 1)),
+            },
+            // Admission of the objects themselves is the writers' job; an image
+            // that is not self-contained leaves its file unaccounted (refused below).
+            _ => {}
+        }
+    }
     let files = t.one(root, "contentfilelist")?;
     let tree = t.one(root, "notetree")?;
     let tree_files: Vec<NodeId> = t.children(tree).iter().copied().filter(|n| t.tag(*n) == "contentFileList").collect();
@@ -139,7 +159,9 @@ pub fn release_page_cache(t: &mut Tree, page: Option<NodeId>, tick: i128) -> R<V
     let page_count = t.len(pages) as i64;
     for node in t.children(files).to_vec() {
         let is_pdf = pdf_refs.iter().any(|(h, _)| Some(h.as_str()) == t.get(node, "id"));
-        let c = file_contract(t, node, if is_pdf { page_count } else { 1 })?;
+        let images = image_refs.iter().find(|(f, _)| Some(f.as_str()) == t.get(node, "id")).map_or(0, |(_, n)| *n);
+        let bound = if is_pdf { page_count } else if images > 0 { images } else { 1 };
+        let c = file_contract(t, node, bound)?;
         let bind = doc_integer(t.get(node, "bindNumber"))?;
         if contracts.iter().any(|(b, _, _)| *b == bind) || by_id.contains_key(&c.identity) {
             return ink("duplicate cache file binding");
@@ -184,9 +206,17 @@ pub fn release_page_cache(t: &mut Tree, page: Option<NodeId>, tick: i128) -> R<V
     if pdf_refs.iter().any(|(h, _)| !by_id.contains_key(h)) {
         return ink("PDF background file missing");
     }
+    if image_refs.iter().any(|(f, _)| !by_id.contains_key(f) || pdf_refs.iter().any(|(h, _)| h == f)) {
+        return ink("image file missing or shared");
+    }
     for (bind, _, c) in &contracts {
         let referenced = references.iter().any(|(b, _)| b == bind);
-        if let Some((_, uses)) = pdf_refs.iter().find(|(h, _)| *h == c.identity) {
+        if let Some((_, uses)) = image_refs.iter().find(|(f, _)| *f == c.identity) {
+            // An image file is never a cache and keeps its exact metadata.
+            if referenced || c.count != *uses {
+                return ink("image reference count differs");
+            }
+        } else if let Some((_, uses)) = pdf_refs.iter().find(|(h, _)| *h == c.identity) {
             // A PDF entry is never a cache and keeps its exact metadata.
             if referenced || c.count != *uses {
                 return ink("PDF reference count differs");

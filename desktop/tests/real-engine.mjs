@@ -35,7 +35,7 @@ try{
  const content='Tamamen sentetik bir not.\nTürkçe: çığ, ışık, düşünce 🌱';
  const richBody=page.getByLabel('Not içeriği');await expect(richBody).toHaveAttribute('contenteditable','true');await richBody.fill('Tamamen sentetik bir not.');await page.keyboard.press('Control+End');await page.keyboard.press('Enter');await page.keyboard.type('Türkçe: çığ, ışık, düşünce 🌱');
  await richBody.locator('p').first().evaluate(element=>{const range=document.createRange();range.selectNodeContents(element);const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);});await page.getByRole('button',{name:'Kalın',exact:true}).click();await page.getByRole('button',{name:'Yapılacaklar listesi',exact:true}).click();await page.getByRole('checkbox',{name:'Yapılacak öğesini tamamla'}).click();await page.keyboard.press('Control+s');
- await page.getByText('Yerel kayıt tamam',{exact:true}).waitFor();
+ await page.locator('.editor-footer').getByText('Kaydedildi',{exact:true}).waitFor();
  assert.equal(new URL(page.url()).hash,'');
  await page.reload();await page.getByRole('button',{name:/Gerçek yerel hizmet testi/}).click();
  assert.equal(await page.getByLabel('Not içeriği').locator('p').evaluateAll(paragraphs=>paragraphs.map(p=>Array.from(p.childNodes).filter(node=>!(node.nodeType===1&&node.classList.contains('native-check-control'))).map(node=>node.textContent).join('')).join('\n')),content);

@@ -70,6 +70,13 @@ pub struct PageInput {
     pub height: i64,
     pub dark_mode: bool,
     pub body: Vec<u8>,
+    /// A `page-reconstructed` composite (images, shapes, text boxes, blank
+    /// sheet, approximated ink) rather than a renderer-only ink page.
+    pub composite: bool,
+    /// Why the composite is approximate/incomplete (None: complete).
+    pub notice: Option<String>,
+    /// A PDF page's own objects, drawn over its Poppler page image.
+    pub over_pdf: bool,
 }
 
 // ---------------------------------------------------------------- element helpers
@@ -614,26 +621,75 @@ pub fn flow_body(body: &Element) -> P<Option<Flow>> {
     if body.children.len() != 1 || body.children[0].tag != "object" {
         return fail("Metin ve çizim birleşimi desteklenmiyor.");
     }
-    let obj = &body.children[0];
-    if obj.get("type") != Some("textBox") || obj.get("shapeType") != Some("4")
+    text_object(&body.children[0], false, false)
+}
+
+/// `flow_body` keeping the text when some of its formatting is not taken by
+/// the renderer: unsupported spans/paragraph fields are dropped.
+pub fn flow_body_lenient(body: &Element) -> P<Option<Flow>> {
+    if body.children.len() != 1 || body.children[0].tag != "object" {
+        return fail("Metin ve çizim birleşimi desteklenmiyor.");
+    }
+    text_object(&body.children[0], false, true)
+}
+
+/// A page text box as renderer input (`textBoxes` item): Ok(None) when it
+/// paints no text; the flag tells whether formatting was dropped.
+fn text_box_input(obj: &Element, at: usize) -> P<Option<(J, bool)>> {
+    let rect = obj.findall("rect");
+    if rect.len() != 1 {
+        return fail("Metin kutusu geometrisi desteklenmiyor.");
+    }
+    let bbox: Vec<f64> = ["l", "t", "r", "b"].iter().map(|k| pyfloat(rect[0].get_or(k, "nan"))).collect::<P<_>>()?;
+    if bbox.iter().any(|v| !v.is_finite()) || bbox[2] <= bbox[0] || bbox[3] <= bbox[1] {
+        return fail("Metin kutusu geometrisi desteklenmiyor.");
+    }
+    let (flow, approximate) = match text_object(obj, true, false) {
+        Ok(f) => (f, false),
+        Err(_) => (text_object(obj, true, true)?, true),
+    };
+    let Some(flow) = flow else { return Ok(None) };
+    let gravity = pyint(Some(obj.get_or("textGravity", "0"))).unwrap_or(0).clamp(0, 2);
+    Ok(Some((J::obj(vec![
+        ("at", J::Int(at as i128)),
+        ("bbox", J::List(bbox.iter().map(|v| J::Float(*v)).collect())),
+        ("text", J::Str(flow.text)),
+        ("spans", J::List(flow.spans)),
+        ("paragraphs", J::List(flow.paragraphs)),
+        ("margins", J::List(flow.margins.iter().map(|m| J::Float(*m)).collect())),
+        ("gravity", J::Int(gravity)),
+    ]), approximate || obj.get("originalDegree").is_some_and(|d| pyfloat(d).map_or(true, |d| d != 0.0)))))
+}
+
+/// The text object reader behind `flow_body` (`page_box`: a text box on a
+/// page, whose frame is real and whose attributes vary; `lenient`: drop
+/// formatting the renderer does not take instead of failing).
+fn text_object(obj: &Element, page_box: bool, lenient: bool) -> P<Option<Flow>> {
+    if page_box {
+        if obj.get("type") != Some("textBox") {
+            return fail("Metin nesnesinin biçimi desteklenmiyor.");
+        }
+    } else if obj.get("type") != Some("textBox") || obj.get("shapeType") != Some("4")
         || !matches!(obj.get("originalDegree"), Some("0") | Some("0.0")) || obj.get_or("textGravity", "0") != "0"
         || obj.attrib.iter().any(|(k, _)| !BODY_ATTRS.contains(&k.as_str()))
     {
         return fail("Metin nesnesinin biçimi desteklenmiyor.");
     }
-    let allowed = ["rect", "originalRect", "text", "lineColorEffect", "lineStyleEffect", "spanOrderDataList", "zeroLengthSpanList"];
-    if obj.children.iter().any(|c| !allowed.contains(&c.tag.as_str())) {
-        return fail("Metne gömülü nesne veya biçim desteklenmiyor.");
-    }
-    let mut copy = Element { tag: "object".into(), attrib: obj.attrib.clone(), ..Default::default() };
-    for c in &obj.children {
-        if !matches!(c.tag.as_str(), "text" | "spanOrderDataList" | "zeroLengthSpanList") {
-            copy.children.push(c.clone());
+    if !page_box {
+        let allowed = ["rect", "originalRect", "text", "lineColorEffect", "lineStyleEffect", "spanOrderDataList", "zeroLengthSpanList"];
+        if obj.children.iter().any(|c| !allowed.contains(&c.tag.as_str())) {
+            return fail("Metne gömülü nesne veya biçim desteklenmiyor.");
         }
-    }
-    let shell = Element { tag: "bodyText".into(), children: vec![copy], ..Default::default() };
-    if !empty_body_for_ink(&shell)? || obj.findall("rect").len() != 1 || obj.findall("originalRect").len() != 1 {
-        return fail("Metin kutusu geometrisi desteklenmiyor.");
+        let mut copy = Element { tag: "object".into(), attrib: obj.attrib.clone(), ..Default::default() };
+        for c in &obj.children {
+            if !matches!(c.tag.as_str(), "text" | "spanOrderDataList" | "zeroLengthSpanList") {
+                copy.children.push(c.clone());
+            }
+        }
+        let shell = Element { tag: "bodyText".into(), children: vec![copy], ..Default::default() };
+        if !empty_body_for_ink(&shell)? || obj.findall("rect").len() != 1 || obj.findall("originalRect").len() != 1 {
+            return fail("Metin kutusu geometrisi desteklenmiyor.");
+        }
     }
     let texts = obj.findall("text");
     if texts.len() != 1 || !texts[0].children.is_empty() {
@@ -751,13 +807,14 @@ pub fn flow_body(body: &Element) -> P<Option<Flow>> {
                 quiet = false;
             }
         }
-        if quiet {
+        if quiet || lenient {
             return Ok(None);
         }
         return fail("Boş satırlardaki metin biçimi desteklenmiyor.");
     }
     let mut spans = Vec::new();
     for s in spans_in {
+        let span = (|| -> P<J> {
         let kind = kind_of(s)?;
         if !FLOW_SPANS.contains(&kind.as_str()) {
             return fail("Metin biçimi desteklenmiyor.");
@@ -774,13 +831,19 @@ pub fn flow_body(body: &Element) -> P<Option<Flow>> {
             pack_u32(model_int(value)?)?
         };
         let Some(id) = lookup(rs_editor::rich::SPAN_TYPES, &kind) else { return fail("span type") };
-        spans.push(J::obj(vec![("kind", J::Int(id as i128)), ("start", model_json(field("start")?)?),
-            ("end", model_json(field("end")?)?), ("interval", model_json(field("interval")?)?), ("payload", payload)]));
+        Ok(J::obj(vec![("kind", J::Int(id as i128)), ("start", model_json(field("start")?)?),
+            ("end", model_json(field("end")?)?), ("interval", model_json(field("interval")?)?), ("payload", payload)]))
+        })();
+        match span {
+            Ok(span) => spans.push(span),
+            Err(_) if lenient => {}
+            Err(e) => return Err(e),
+        }
     }
     let mut paragraphs = Vec::new();
     for p in paragraphs_in {
         let Some(d) = p.dict() else { return fail("paragraph") };
-        if d.iter().any(|(k, _)| !matches!(k.as_str(), Some("index") | Some("alignment") | Some("parsingState"))) {
+        if !lenient && d.iter().any(|(k, _)| !matches!(k.as_str(), Some("index") | Some("alignment") | Some("parsingState"))) {
             return fail("Paragraf biçimi desteklenmiyor.");
         }
         let index = || -> P<i128> {
@@ -791,11 +854,14 @@ pub fn flow_body(body: &Element) -> P<Option<Flow>> {
             }
         };
         if let Some(alignment) = pyval::dget(d, "alignment") {
-            let Some(value) = alignment.as_str().and_then(|a| lookup(rs_editor::rich::ALIGNMENTS, a)) else {
-                return fail("KeyError: alignment");
-            };
-            let i = index()?;
-            paragraphs.push(J::obj(vec![("kind", J::Int(3)), ("start", J::Int(i)), ("end", J::Int(i + 1)), ("payload", pack_u32(value as i128)?)]));
+            match alignment.as_str().and_then(|a| lookup(rs_editor::rich::ALIGNMENTS, a)) {
+                Some(value) => {
+                    let i = index()?;
+                    paragraphs.push(J::obj(vec![("kind", J::Int(3)), ("start", J::Int(i)), ("end", J::Int(i + 1)), ("payload", pack_u32(value as i128)?)]));
+                }
+                None if lenient => {}
+                None => return fail("KeyError: alignment"),
+            }
         }
         if let Some(state) = pyval::dget(d, "parsingState") {
             let value = model_int(state)?;
@@ -805,7 +871,12 @@ pub fn flow_body(body: &Element) -> P<Option<Flow>> {
     }
     let mut margins = [0.0; 4];
     for (i, k) in ["leftMargin", "topMargin", "rightMargin", "bottomMargin"].iter().enumerate() {
-        margins[i] = pyfloat(obj.get_or(k, "0"))?;
+        margins[i] = match pyfloat(obj.get_or(k, "0")) {
+            Ok(v) if lenient && !(v.is_finite() && (0.0..=1000.0).contains(&v)) => 0.0,
+            Ok(v) => v,
+            Err(_) if lenient => 0.0,
+            Err(e) => return Err(e),
+        };
     }
     if margins.iter().any(|v| !v.is_finite() || !(0.0..=1000.0).contains(v)) {
         return fail("Metin kutusu yerleşimi desteklenmiyor.");
@@ -916,7 +987,15 @@ fn verify(snapshot: &rs_doc::doc::DocumentSnapshot) -> P<Verified> {
     }
 }
 
-type Records = HashMap<String, Option<(Record, Binding)>>;
+/// A decoded stroke: its record, bound metadata and whether the renderer
+/// admits its pen (the others are approximated by the page composite).
+pub struct Rec {
+    pub record: Record,
+    pub binding: Binding,
+    pub admitted: bool,
+}
+
+type Records = HashMap<String, Option<Rec>>;
 
 /// Decode, bind and admit every stroke part.
 fn decode_records(resource: &[u8], bodies: &[Vec<u8>]) -> P<Records> {
@@ -954,7 +1033,7 @@ fn decode_records(resource: &[u8], bodies: &[Vec<u8>]) -> P<Records> {
         let binding = rs_ink::core::prepare::bind_stroke_metadata(&record.frames, (&tree, node), table)?;
         let rotation = i32_at(&base.raw, base.flexible_start - 5)?;
         let ok = admitted(&record, &binding) && rotation == 0;
-        records.insert(identity, if ok { Some((record, binding)) } else { None });
+        records.insert(identity, Some(Rec { record, binding, admitted: ok }));
     }
     Ok(records)
 }
@@ -965,8 +1044,15 @@ type SourceKey = ([u8; 32], [u8; 32], String, Option<String>, Option<String>);
 struct Prepared {
     pages: Element,
     flow: Option<Vec<(String, J)>>,
+    /// The body text needed the lenient (formatting-dropping) reading.
+    flow_approximate: bool,
     trailing: Option<i64>,
     records: Records,
+    /// contentFileList bindNumber -> SHA256 (images).
+    files: HashMap<String, String>,
+    /// Some page carries objects, a PDF or a canvas cache: a handwritten /
+    /// page-based note whose empty pages are shown as blank sheets.
+    page_based: bool,
 }
 
 static PREPARED: Mutex<VecDeque<(SourceKey, Arc<Prepared>)>> = Mutex::new(VecDeque::new());
@@ -998,26 +1084,50 @@ fn prepare_source(snapshot: &rs_doc::doc::DocumentSnapshot, key: &SourceKey) -> 
         return fail("Bu not eklenmiş nesneler taşıyor.");
     }
     let pages = one(&root, "pagelist")?;
-    let (mut flow, mut trailing) = (None, None);
+    let (mut flow, mut trailing, mut flow_approximate) = (None, None, false);
     if !empty_body_for_ink(body)? {
-        if let Some(parsed) = flow_body(body)? {
+        // Body text whose formatting the renderer does not take is shown with
+        // that formatting dropped (marked approximate) instead of hiding the note.
+        let parsed = match flow_body(body) {
+            Ok(parsed) => parsed,
+            Err(strict) => {
+                flow_approximate = true;
+                flow_body_lenient(body).map_err(|_| strict)?
+            }
+        };
+        if let Some(parsed) = parsed {
             let (f, t) = flow_layout(attrs, pages, parsed)?;
             flow = Some(f);
             trailing = t;
-            if !pages.children.iter().any(|p| iter_tag(p, "object").next().is_some()) {
-                return fail("Bu notta çizim bulunmuyor.");
-            }
         }
     }
+    let page_based = pages.children.iter().any(|p| {
+        p.iter().any(|n| n.tag == "object" || n.tag == "pdfDataList" || (n.tag == "canvasCacheDataMap" && !n.children.is_empty()))
+    });
     let bodies: Vec<Vec<u8>> = parts.into_iter().filter(|(name, _)| name.as_deref() == Some("strokeResource")).map(|(_, b)| b).collect();
     let records = decode_records(&snapshot.resource_xml, &bodies)?;
-    let prepared = Arc::new(Prepared { pages: pages.clone(), flow, trailing, records });
+    let files = super::objects::content_files(&root);
+    let prepared = Arc::new(Prepared { pages: pages.clone(), flow, flow_approximate, trailing, records, files, page_based });
     let mut guard = PREPARED.lock().unwrap();
     guard.push_back((key.clone(), prepared.clone()));
     while guard.len() > 2 {
         guard.pop_front();
     }
     Ok(prepared)
+}
+
+fn renderer_tail(text: &mut String, inkpen2: bool, marker4: bool) {
+    if inkpen2 {
+        text.push_str(",\"inkpen2Profile\":");
+        text.push_str(INKPEN2_PROFILE);
+        text.push_str(",\"admit\":\"calibrated\"");
+    } else if marker4 {
+        text.push_str(",\"admit\":\"calibrated\"");
+    }
+}
+
+fn admitted_stroke(records: &Records, o: &Element) -> bool {
+    o.get("type") == Some("stroke") && matches!(o.get("id").and_then(|i| records.get(i)), Some(Some(Rec { admitted: true, .. })))
 }
 
 fn page_inputs(prepared: &Prepared, only_index: Option<i64>, build: bool) -> P<Vec<PageInput>> {
@@ -1032,87 +1142,304 @@ fn page_inputs(prepared: &Prepared, only_index: Option<i64>, build: bool) -> P<V
         let width = integer(page.get("width"))?;
         let height = integer(page.get("height"))?;
         let all_objects: Vec<&Element> = iter_tag(page, "object").collect();
-        // Recognised shapes/lines are drawn by the UI overlay, not here.
+        // Recognised shapes/lines are drawn by the page composite.
         let (shapes, objects): (Vec<&Element>, Vec<&Element>) =
             all_objects.iter().copied().partition(|o| rs_ops::page_shapes::renderer_skippable_shape(o));
         let has_shape = !shapes.is_empty();
-        let skip = objects.iter().any(|o| {
-            o.get("type") != Some("stroke") || !o.get("id").and_then(|i| records.get(i)).is_some_and(|r| r.is_some())
-        });
-        if skip || page.iter().any(|n| blocked.contains(&n.tag.as_str())) {
+        let pdf = page.iter().any(|n| n.tag == "pdfDataList" || n.tag == "pdfData");
+        if width as i128 * height as i128 > MAX_PIXELS as i128 || page.get_or("orientation", "0") != "0" {
             continue;
         }
+        if pdf {
+            // PDF pages get their background from Poppler; the page's own
+            // objects become a local layer over it (`overPdf`), used when
+            // Samsung's canvas overlay is not available.
+            if !all_objects.is_empty() {
+                if let Some(page) = composite_layer(prepared, page, index, width, height, page_color(page).ok(), build, false, true)? {
+                    output.push(page);
+                }
+            }
+            continue;
+        }
+        if Some(index) == prepared.trailing {
+            // The empty list-compatibility page after a text flow: a blank
+            // sheet (the flow places no text on it).
+            if let Some(page) = composite_page(prepared, page, index, width, height, page_color(page).ok(), build, false)? {
+                output.push(page);
+            }
+            continue;
+        }
+        let skip = objects.iter().any(|o| !admitted_stroke(records, o));
         let children_ok = page.children.iter().all(|n| matches!(n.tag.as_str(), "layerList" | "drawnRect" | "canvasCacheDataMap"));
-        if width as i128 * height as i128 > MAX_PIXELS as i128 || page.attrib.iter().any(|(k, _)| !PAGE_ATTRS.contains(&k.as_str()))
-            || page.get_or("bgImageId", "-1") != "-1" || page.get_or("bgImageMode", "2") != "2"
-            || page.get_or("orientation", "0") != "0" || !children_ok
-        {
+        let strict = !skip && !page.iter().any(|n| blocked.contains(&n.tag.as_str())) && children_ok
+            && !page.attrib.iter().any(|(k, _)| !PAGE_ATTRS.contains(&k.as_str()))
+            && page.get_or("bgImageId", "-1") == "-1" && page.get_or("bgImageMode", "2") == "2";
+        let color = if strict {
+            // Pages the renderer always admitted keep their note-level checks.
+            if page.has("bgWidth") {
+                let w = integer(page.get("bgWidth"))?;
+                if !(0 < w && w <= 65535) {
+                    return fail("Bu sayfanın arka planı veya dönüşümü desteklenmiyor.");
+                }
+            }
+            if page.has("editableFormatVersion") {
+                let editable = page.get("editableFormatVersion");
+                if !(editable == page.get("formatVersion") && editable == Some("4000")) {
+                    return fail("Bu sayfanın sürümü henüz desteklenmiyor.");
+                }
+            }
+            Some(page_color(page)?)
+        } else {
+            page_color(page).ok()
+        };
+        let blank = prepared.flow.is_none() && all_objects.is_empty();
+        if blank && !prepared.page_based {
             continue;
         }
-        if page.has("bgWidth") {
-            let w = integer(page.get("bgWidth"))?;
-            if !(0 < w && w <= 65535) {
-                return fail("Bu sayfanın arka planı veya dönüşümü desteklenmiyor.");
+        let dark_of = |c: u32| ((c >> 16) & 255) + ((c >> 8) & 255) + (c & 255) < 384;
+        if strict && !has_shape && !blank && !prepared.flow_approximate {
+            let color = color.unwrap();
+            let dark = dark_of(color);
+            if !build {
+                output.push(PageInput { index, width, height, dark_mode: dark, body: Vec::new(), composite: false, notice: None, over_pdf: false });
+                continue;
             }
-        }
-        if page.has("editableFormatVersion") {
-            let editable = page.get("editableFormatVersion");
-            if !(editable == page.get("formatVersion") && editable == Some("4000")) {
-                return fail("Bu sayfanın sürümü henüz desteklenmiyor.");
+            let mut text = format!("{{\"schemaVersion\":1,\"width\":{width},\"height\":{height},\"backgroundArgb\":{color},\"strokes\":[");
+            let mut distance = 0.0f64;
+            let mut inkpen2 = false;
+            let mut marker4 = false;
+            let mut count = 0usize;
+            for o in &objects {
+                let Some(Some(Rec { record, binding, .. })) = records.get(o.get("id").unwrap_or("")) else { unreachable!("admitted page") };
+                if count > 0 {
+                    text.push(',');
+                }
+                count += 1;
+                inkpen2 |= binding.pen_name == INKPEN2;
+                marker4 |= binding.pen_name == MARKER4;
+                distance += stroke_json(&mut text, record, binding, width, height)?;
+                if distance > MAX_DISTANCE {
+                    break;
+                }
             }
-        }
-        let color = page_color(page)?;
-        if Some(index) == prepared.trailing || (prepared.flow.is_none() && all_objects.is_empty()) {
+            if (count == 0 && prepared.flow.is_none()) || distance > MAX_DISTANCE {
+                continue;
+            }
+            text.push(']');
+            if let Some(flow) = &prepared.flow {
+                let mut copy = flow.clone();
+                copy.push(("pageIndex".into(), J::Int(index as i128)));
+                text.push_str(",\"flow\":");
+                J::Obj(copy).dump(&mut text, true).map_err(PrepErr)?;
+            }
+            renderer_tail(&mut text, inkpen2, marker4);
+            text.push('}');
+            if text.len() > MAX_INPUT {
+                return fail("Çizim verisi boyut sınırını aşıyor.");
+            }
+            output.push(PageInput { index, width, height, dark_mode: dark, body: text.into_bytes(), composite: false, notice: None, over_pdf: false });
             continue;
         }
-        let dark = ((color >> 16) & 255) + ((color >> 8) & 255) + (color & 255) < 384;
-        if !build {
-            output.push(PageInput { index, width, height, dark_mode: dark, body: Vec::new() });
-            continue;
+        // Page composite: images, shapes, text boxes, approximated strokes
+        // and blank sheets.
+        if let Some(page) = composite_page(prepared, page, index, width, height, color, build, true)? {
+            output.push(page);
         }
-        let mut text = format!("{{\"schemaVersion\":1,\"width\":{width},\"height\":{height},\"backgroundArgb\":{color},\"strokes\":[");
-        let mut distance = 0.0f64;
-        let mut inkpen2 = false;
-        let mut marker4 = false;
-        let mut count = 0usize;
-        for o in &objects {
-            let (record, binding) = records.get(o.get("id").unwrap_or("")).and_then(|r| r.as_ref()).expect("admitted page");
-            if count > 0 {
-                text.push(',');
+    }
+    Ok(output)
+}
+
+/// A `page-reconstructed` page: the composite body (see `ink::render_composite`).
+#[allow(clippy::too_many_arguments)]
+fn composite_page(prepared: &Prepared, page: &Element, index: i64, width: i64, height: i64, color: Option<u32>, build: bool,
+                  with_flow: bool) -> P<Option<PageInput>> {
+    composite_layer(prepared, page, index, width, height, color, build, with_flow, false)
+}
+
+/// Composite name of the PDF page image a PDF page's local layer is drawn on.
+pub const PDF_UNDERLAY: &str = "pdf-underlay";
+
+#[allow(clippy::too_many_arguments)]
+fn composite_layer(prepared: &Prepared, page: &Element, index: i64, width: i64, height: i64, color: Option<u32>, build: bool,
+                   with_flow: bool, over_pdf: bool) -> P<Option<PageInput>> {
+    use super::objects::{self, Item};
+    let flow = if with_flow { prepared.flow.as_ref() } else { None };
+    let records = &prepared.records;
+    let mut notices: Vec<&'static str> = Vec::new();
+    let note = |notices: &mut Vec<&'static str>, n: &'static str| {
+        if !notices.contains(&n) {
+            notices.push(n);
+        }
+    };
+    let color = color.unwrap_or_else(|| {
+        note(&mut notices, objects::NOTICE_HIDDEN);
+        0xffff_ffff
+    });
+    if prepared.flow_approximate && flow.is_some() {
+        note(&mut notices, objects::NOTICE_TEXT);
+    }
+    if page.get_or("bgImageId", "-1") != "-1" || page.get_or("bgImageMode", "2") != "2" {
+        note(&mut notices, objects::NOTICE_BACKGROUND);
+    }
+    if page.children.iter().any(|n| !matches!(n.tag.as_str(), "layerList" | "drawnRect" | "canvasCacheDataMap")
+        && !(over_pdf && n.tag == "pdfDataList"))
+    {
+        note(&mut notices, objects::NOTICE_HIDDEN);
+    }
+    let mut ordered = objects::layer_objects(page);
+    if ordered.len() != iter_tag(page, "object").count() {
+        // Objects outside the plain layer/objectList structure (groups,
+        // containers): drawn where possible, flagged as incomplete.
+        note(&mut notices, objects::NOTICE_HIDDEN);
+        ordered = iter_tag(page, "object").filter(|o| o.get("type").is_some()).collect();
+    }
+    let mut items: Vec<Item> = Vec::new();
+    if over_pdf {
+        items.push(Item::Image { sha256: PDF_UNDERLAY.into(), rect: [0.0, 0.0, width as f64, height as f64], crop: None,
+                                 flip_h: false, flip_v: false, degrees: 0.0, opacity: 1.0 });
+    }
+    let mut strokes = String::new();
+    let mut fallback = String::new();
+    let mut boxes: Vec<J> = Vec::new();
+    let (mut count, mut distance, mut inkpen2, mut marker4) = (0usize, 0.0f64, false, false);
+    for o in ordered {
+        match o.get("type") {
+            Some("stroke") => {
+                let Some(Some(Rec { record, binding, admitted })) = o.get("id").and_then(|i| records.get(i)) else {
+                    note(&mut notices, objects::NOTICE_HIDDEN);
+                    continue;
+                };
+                if !build {
+                    if !admitted {
+                        note(&mut notices, objects::NOTICE_INK);
+                    }
+                    continue;
+                }
+                let polyline = objects::stroke_polyline(record, binding, width, height);
+                // The renderer refuses a whole page for samples far outside it
+                // (`EDGE`); such strokes are approximated instead.
+                let inside = rs_ink::core::coords::page_coordinate_scale(&record.frames[0], rs_ink::core::num::Val::Int(width as i128),
+                    rs_ink::core::num::Val::Int(height as i128), rs_ink::core::num::Val::Int(0)).is_ok_and(|scale| {
+                    record.samples.points.iter().all(|(x, y)| {
+                        let (x, y) = (x * scale, y * scale);
+                        x >= -500.0 && y >= -500.0 && x <= width as f64 + 500.0 && y <= height as f64 + 500.0
+                    })
+                });
+                if *admitted && inside && distance <= MAX_DISTANCE {
+                    let mut one = String::new();
+                    if let Ok(d) = stroke_json(&mut one, record, binding, width, height) {
+                        distance += d;
+                        if count > 0 {
+                            strokes.push(',');
+                        }
+                        strokes.push_str(&one);
+                        count += 1;
+                        inkpen2 |= binding.pen_name == INKPEN2;
+                        marker4 |= binding.pen_name == MARKER4;
+                        fallback.push_str(polyline.as_deref().unwrap_or(""));
+                        continue;
+                    }
+                }
+                note(&mut notices, objects::NOTICE_INK);
+                // Eraser and replay-only records paint nothing of their own.
+                let p = props(record);
+                if prop(&p, "eraser") || prop(&p, "replay_only") {
+                    continue;
+                }
+                match polyline {
+                    Some(svg) => items.push(Item::Svg(svg)),
+                    None => note(&mut notices, objects::NOTICE_HIDDEN),
+                }
             }
-            count += 1;
-            inkpen2 |= binding.pen_name == INKPEN2;
-            marker4 |= binding.pen_name == MARKER4;
-            distance += stroke_json(&mut text, record, binding, width, height)?;
-            if distance > MAX_DISTANCE {
-                break;
+            Some("textBox") => {
+                if let Some(frame) = objects::shape_family(o, &prepared.files) {
+                    items.extend(frame.items);
+                    for n in frame.notices {
+                        if n != objects::NOTICE_SHAPES {
+                            note(&mut notices, n);
+                        }
+                    }
+                }
+                match text_box_input(o, count) {
+                    Ok(None) => {}
+                    Ok(Some((input, approximate))) => {
+                        if approximate {
+                            note(&mut notices, objects::NOTICE_TEXT);
+                        }
+                        boxes.push(input);
+                    }
+                    Err(_) => note(&mut notices, objects::NOTICE_HIDDEN),
+                }
+            }
+            Some("shape") | Some("line") | Some("image") => {
+                if let Some(c) = objects::shape_family(o, &prepared.files) {
+                    items.extend(c.items);
+                    for n in c.notices {
+                        note(&mut notices, n);
+                    }
+                }
+                // Only this client's exact shape profile is drawn as written;
+                // any other shape/line is our approximation of Samsung's look.
+                if o.get("type") != Some("image") && !rs_ops::page_shapes::renderer_skippable_shape(o) {
+                    note(&mut notices, objects::NOTICE_SHAPES);
+                }
+            }
+            _ => {
+                let c = objects::unknown_object(o);
+                items.extend(c.items);
+                for n in c.notices {
+                    note(&mut notices, n);
+                }
             }
         }
-        // A page whose only objects are skipped shapes is a plain background.
-        if (count == 0 && prepared.flow.is_none() && !has_shape) || distance > MAX_DISTANCE {
-            continue;
+    }
+    let dark = ((color >> 16) & 255) + ((color >> 8) & 255) + (color & 255) < 384;
+    let notice = notices.first().map(|n| n.to_string());
+    if !build {
+        return Ok(Some(PageInput { index, width, height, dark_mode: dark, body: Vec::new(), composite: true, notice, over_pdf }));
+    }
+    let renderer = |with_boxes: bool| -> P<Option<String>> {
+        if count == 0 && flow.is_none() && (boxes.is_empty() || !with_boxes) {
+            return Ok(None);
         }
-        text.push(']');
-        if let Some(flow) = &prepared.flow {
+        let mut text = format!("{{\"schemaVersion\":1,\"width\":{width},\"height\":{height},\"backgroundArgb\":{},\"strokes\":[{strokes}]",
+                               color | 0xff00_0000);
+        if let Some(flow) = flow {
             let mut copy = flow.clone();
             copy.push(("pageIndex".into(), J::Int(index as i128)));
             text.push_str(",\"flow\":");
             J::Obj(copy).dump(&mut text, true).map_err(PrepErr)?;
         }
-        if inkpen2 {
-            text.push_str(",\"inkpen2Profile\":");
-            text.push_str(INKPEN2_PROFILE);
-            text.push_str(",\"admit\":\"calibrated\"");
-        } else if marker4 {
-            text.push_str(",\"admit\":\"calibrated\"");
+        if with_boxes && !boxes.is_empty() {
+            text.push_str(",\"textBoxes\":");
+            J::List(boxes.clone()).dump(&mut text, true).map_err(PrepErr)?;
         }
+        renderer_tail(&mut text, inkpen2, marker4);
         text.push('}');
-        if text.len() > MAX_INPUT {
+        Ok(Some(text))
+    };
+    let full = renderer(true)?;
+    let plain = if boxes.is_empty() { None } else { renderer(false)? };
+    let make = |fallback: String| J::obj(vec![
+        ("composite", J::Int(1)),
+        ("width", J::Int(width as i128)),
+        ("height", J::Int(height as i128)),
+        ("backgroundArgb", J::Int(color as i128)),
+        ("notices", J::List(notices.iter().map(|n| J::Str(n.to_string())).collect())),
+        ("items", J::List(items.iter().map(Item::json).collect())),
+        ("renderer", full.clone().map_or(J::Null, J::Str)),
+        ("rendererPlain", plain.clone().map_or(J::Null, J::Str)),
+        ("fallback", J::Str(fallback)),
+    ]).dumps(true).map_err(PrepErr);
+    let mut body = make(fallback)?;
+    if body.len() > MAX_INPUT {
+        // Drop the approximated-ink fallback first; then give up.
+        body = make(String::new())?;
+        if body.len() > MAX_INPUT {
             return fail("Çizim verisi boyut sınırını aşıyor.");
         }
-        output.push(PageInput { index, width, height, dark_mode: dark, body: text.into_bytes() });
     }
-    Ok(output)
+    Ok(Some(PageInput { index, width, height, dark_mode: dark, body: body.into_bytes(), composite: true, notice, over_pdf }))
 }
 
 /// `_prepare_pages(snapshot, only_index=None, build=True)` for a stored
@@ -1143,13 +1470,41 @@ pub fn prepare_pages(snapshot: &notes_host::Val, only_index: Option<i64>, build:
     Ok(pages)
 }
 
+/// The page as a composite body even when the renderer alone would take it:
+/// the stand-in drawn when the renderer fails on a renderer-only page
+/// (sample range, output size, text layout). Empty when not drawable.
+pub fn forced_composite(snapshot: &notes_host::Val, index: i64) -> Vec<u8> {
+    (|| -> P<Vec<u8>> {
+        let snapshot = notes_host::snapshot::from_dict(snapshot).map_err(|e| PrepErr(e.message))?;
+        let source: SourceKey = (sha256(&snapshot.raw_body), sha256(&snapshot.resource_xml), snapshot.content_type.clone(),
+                                 snapshot.local_id.clone(), snapshot.commit_id.clone());
+        let prepared = prepare_source(&snapshot, &source)?;
+        let Some(page) = usize::try_from(index).ok().and_then(|i| prepared.pages.children.get(i)) else { return fail("page") };
+        let (width, height) = (integer(page.get("width"))?, integer(page.get("height"))?);
+        let flow = Some(index) != prepared.trailing;
+        let built = composite_page(&prepared, page, index, width, height, page_color(page).ok(), true, flow)?;
+        Ok(built.map(|p| p.body).unwrap_or_default())
+    })().unwrap_or_default()
+}
+
 /// The inventory JSON the preparation child writes (Python `json.dumps`
 /// default separators): `[{"index": 0, "width": W, "height": H, "darkMode": false}]`.
 /// Failures give `[]` like the Python child.
 pub fn inventory_json(snapshot: &notes_host::Val) -> String {
     let pages = prepare_pages(snapshot, None, false).map(|p| p.to_vec()).unwrap_or_default();
-    let items: Vec<String> = pages.iter().map(|p| format!("{{\"index\": {}, \"width\": {}, \"height\": {}, \"darkMode\": {}}}",
-        p.index, p.width, p.height, if p.dark_mode { "true" } else { "false" })).collect();
+    let items: Vec<String> = pages.iter().map(|p| {
+        let base = format!("{{\"index\": {}, \"width\": {}, \"height\": {}, \"darkMode\": {}",
+            p.index, p.width, p.height, if p.dark_mode { "true" } else { "false" });
+        if !p.composite {
+            return base + "}";
+        }
+        let mut notice = String::new();
+        match &p.notice {
+            Some(n) => json_str(&mut notice, n),
+            None => notice.push_str("null"),
+        }
+        format!("{base}, \"kind\": \"{}\", \"notice\": {notice}}}", if p.over_pdf { "pdf-ink" } else { "page" })
+    }).collect();
     format!("[{}]", items.join(", "))
 }
 
@@ -1177,7 +1532,7 @@ pub fn pen_templates(snapshot: &notes_host::Val) -> P<String> {
         let height = integer(page.get("height"))?;
         for object in iter_tag(page, "object") {
             let Some(id) = object.get("id") else { continue };
-            let Some(Some((record, binding))) = prepared.records.get(id) else { continue };
+            let Some(Some(Rec { record, binding, admitted: true })) = prepared.records.get(id) else { continue };
             if binding.pen_name != FOUNTAIN && binding.pen_name != INKPEN2 {
                 continue;
             }

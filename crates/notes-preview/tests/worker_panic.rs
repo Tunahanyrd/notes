@@ -23,7 +23,7 @@ impl InkBackend for PanickyInk {
         true
     }
     fn inspect_render_pages(&self, _snapshot: &Val) -> Vec<InkPage> {
-        vec![InkPage { index: 0, width: 8, height: 8, dark_mode: None }]
+        vec![InkPage { index: 0, width: 8, height: 8, dark_mode: None, ..Default::default() }]
     }
     fn render_ink_page(&self, _snapshot: &Val, _index: i64) -> Result<Vec<u8>, Fail> {
         if self.calls.fetch_add(1, Ordering::SeqCst) < self.panics {

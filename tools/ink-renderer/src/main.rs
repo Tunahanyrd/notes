@@ -1,7 +1,7 @@
 //! GPL-3.0 bounded adapter to pinned sdocx. SVG output contains private geometry.
 use std::io::{Read,Write};
 use serde::Deserialize;
-use sdocx::{BoundingBox,Color,Document,DocumentMetadata,InkPen2RenderProfile,InkSupport,Page,RenderOptions,RenderTheme,RichTextBox,RichTextParagraph,RichTextParagraphType,RichTextSection,RichTextSpan,RichTextSpanType,SpanIntervalType,Stroke,TextAreaType};
+use sdocx::{BoundingBox,Color,Document,DocumentMetadata,InkPen2RenderProfile,InkSupport,Page,PageElement,PageObject,RenderOptions,RenderTheme,RichTextBox,RichTextParagraph,RichTextParagraphType,RichTextSection,RichTextSpan,RichTextSpanType,SpanIntervalType,Stroke,TextAreaType};
 const MAX_INPUT:u64=24*1024*1024;
 const MAX_OUTPUT:usize=16*1024*1024;
 /// Saved strokes may run slightly past the page edge (observed up to ~70
@@ -14,7 +14,12 @@ const INKPEN2:&str="com.samsung.android.sdk.pen.pen.preload.InkPen2";
 const MARKER4:&str="com.samsung.android.sdk.pen.pen.preload.Marker4";
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields,rename_all="camelCase")]
-struct Input {schema_version:u32,width:u32,height:u32,background_argb:u32,#[serde(default)] inkpen2_profile:Option<Profile>,#[serde(default)] admit:Option<String>,#[serde(default)] flow:Option<Flow>,strokes:Vec<Stroke>}
+struct Input {schema_version:u32,width:u32,height:u32,background_argb:u32,#[serde(default)] inkpen2_profile:Option<Profile>,#[serde(default)] admit:Option<String>,#[serde(default)] flow:Option<Flow>,strokes:Vec<Stroke>,#[serde(default)] text_boxes:Vec<TextBoxIn>}
+/// A page text box (object type 2) laid out by upstream's text pipeline with
+/// its pinned fonts, inserted before stroke number `at` (page z-order).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields,rename_all="camelCase")]
+struct TextBoxIn {at:usize,bbox:[f64;4],text:String,spans:Vec<SpanIn>,paragraphs:Vec<ParagraphIn>,margins:[f32;4],gravity:u8}
 /// Caller-declared InkPen2 V9 host profile; upstream never infers device state.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields,rename_all="camelCase")]
@@ -47,24 +52,9 @@ fn page_bounds(width:u32,height:u32)->bool{width>0&&height>0&&width<=32768&&heig
 /// Strict conversion into upstream's body model; anything outside the
 /// admitted span/paragraph kinds rejects the page instead of being dropped.
 fn body_text(flow:&Flow)->Result<RichTextBox,&'static str>{
+    if flow.gravity!=0{return Err("unsupported body frame");}
+    let mut text=rich_text(&flow.text,&flow.spans,&flow.paragraphs,flow.margins,flow.gravity)?;
     let length=flow.text.encode_utf16().count();
-    if flow.text.is_empty()||flow.text.len()>MAX_FLOW_TEXT||flow.spans.len()+flow.paragraphs.len()>8192{return Err("unsupported body bounds");}
-    if flow.margins.iter().any(|m|!m.is_finite()||!(0. ..=1000.).contains(m))||flow.gravity!=0{return Err("unsupported body frame");}
-    let mut spans=Vec::with_capacity(flow.spans.len());
-    for s in &flow.spans{
-        let kind=RichTextSpanType::from(s.kind);
-        let size=match kind{RichTextSpanType::Bold|RichTextSpanType::Italic|RichTextSpanType::Underline|RichTextSpanType::Strikethrough|RichTextSpanType::ForegroundColor|RichTextSpanType::BackgroundColor|RichTextSpanType::FontSize=>4,_=>return Err("unsupported body span")};
-        if s.payload.len()!=size||s.start>s.end||s.end as usize>length||s.interval>3{return Err("invalid body span");}
-        if kind==RichTextSpanType::FontSize{let v=f32::from_le_bytes(s.payload[..4].try_into().unwrap());if !v.is_finite()||!(0. ..=1000.).contains(&v){return Err("invalid body span");}}
-        spans.push(RichTextSpan{kind,start_utf16:s.start,end_utf16:s.end,interval_type:SpanIntervalType::from(s.interval),payload:s.payload.clone()});
-    }
-    let mut paragraphs=Vec::with_capacity(flow.paragraphs.len());
-    for p in &flow.paragraphs{
-        let kind=RichTextParagraphType::from(p.kind);
-        if !matches!(kind,RichTextParagraphType::Alignment|RichTextParagraphType::ParsingState)||p.payload.len()!=4||p.start>=p.end||p.end as usize>length+1{return Err("unsupported body paragraph");}
-        if kind==RichTextParagraphType::Alignment&&u32::from_le_bytes(p.payload[..4].try_into().unwrap())>3{return Err("unsupported body paragraph");}
-        paragraphs.push(RichTextParagraph{kind,start_paragraph:p.start,end_paragraph:p.end,payload:p.payload.clone()});
-    }
     let mut sections=Vec::with_capacity(flow.sections.len());
     for &(start,count) in &flow.sections{
         let valid=(start==-1&&count==0)||(start>=0&&count>=0&&(start as i64+count as i64)<=length as i64);
@@ -72,7 +62,37 @@ fn body_text(flow:&Flow)->Result<RichTextBox,&'static str>{
         sections.push(RichTextSection{start_utf16:start,length_utf16:count});
     }
     if !sections.is_empty()&&sections.len()!=flow.pages.len(){return Err("invalid body section");}
-    Ok(RichTextBox{text_area_type:Some(TextAreaType::Margin),bbox:BoundingBox::default(),rotation_degrees:None,text:flow.text.clone(),color:None,highlight_color:None,underline:false,font_size:None,runs:Vec::new(),spans,paragraphs,object_spans:Vec::new(),text_sections:sections,margins:Some(flow.margins),gravity:Some(flow.gravity)})
+    text.text_area_type=Some(TextAreaType::Margin);text.text_sections=sections;
+    Ok(text)
+}
+/// A page text box in page coordinates; same span/paragraph admission as the body.
+fn text_box(input:&TextBoxIn,width:u32,height:u32)->Result<RichTextBox,&'static str>{
+    let [l,t,r,b]=input.bbox;
+    if [l,t,r,b].iter().any(|v|!v.is_finite())||!(l<r&&t<b)||l< -EDGE||t< -EDGE||r>width as f64+EDGE||b>height as f64+EDGE||input.gravity>2{return Err("unsupported text box frame");}
+    let mut text=rich_text(&input.text,&input.spans,&input.paragraphs,input.margins,input.gravity)?;
+    text.bbox=BoundingBox{x_min:l,y_min:t,x_max:r,y_max:b};
+    Ok(text)
+}
+fn rich_text(source:&str,span_in:&[SpanIn],paragraph_in:&[ParagraphIn],margins:[f32;4],gravity:u8)->Result<RichTextBox,&'static str>{
+    let length=source.encode_utf16().count();
+    if source.is_empty()||source.len()>MAX_FLOW_TEXT||span_in.len()+paragraph_in.len()>8192{return Err("unsupported body bounds");}
+    if margins.iter().any(|m|!m.is_finite()||!(0. ..=1000.).contains(m)){return Err("unsupported body frame");}
+    let mut spans=Vec::with_capacity(span_in.len());
+    for s in span_in{
+        let kind=RichTextSpanType::from(s.kind);
+        let size=match kind{RichTextSpanType::Bold|RichTextSpanType::Italic|RichTextSpanType::Underline|RichTextSpanType::Strikethrough|RichTextSpanType::ForegroundColor|RichTextSpanType::BackgroundColor|RichTextSpanType::FontSize=>4,_=>return Err("unsupported body span")};
+        if s.payload.len()!=size||s.start>s.end||s.end as usize>length||s.interval>3{return Err("invalid body span");}
+        if kind==RichTextSpanType::FontSize{let v=f32::from_le_bytes(s.payload[..4].try_into().unwrap());if !v.is_finite()||!(0. ..=1000.).contains(&v){return Err("invalid body span");}}
+        spans.push(RichTextSpan{kind,start_utf16:s.start,end_utf16:s.end,interval_type:SpanIntervalType::from(s.interval),payload:s.payload.clone()});
+    }
+    let mut paragraphs=Vec::with_capacity(paragraph_in.len());
+    for p in paragraph_in{
+        let kind=RichTextParagraphType::from(p.kind);
+        if !matches!(kind,RichTextParagraphType::Alignment|RichTextParagraphType::ParsingState)||p.payload.len()!=4||p.start>=p.end||p.end as usize>length+1{return Err("unsupported body paragraph");}
+        if kind==RichTextParagraphType::Alignment&&u32::from_le_bytes(p.payload[..4].try_into().unwrap())>3{return Err("unsupported body paragraph");}
+        paragraphs.push(RichTextParagraph{kind,start_paragraph:p.start,end_paragraph:p.end,payload:p.payload.clone()});
+    }
+    Ok(RichTextBox{text_area_type:None,bbox:BoundingBox::default(),rotation_degrees:None,text:source.to_string(),color:None,highlight_color:None,underline:false,font_size:None,runs:Vec::new(),spans,paragraphs,object_spans:Vec::new(),text_sections:Vec::new(),margins:Some(margins),gravity:Some(gravity)})
 }
 fn render(mut input:Input)->Result<String,&'static str>{
     // "native" (default): native-derived routes only. "approximate": also accept
@@ -89,7 +109,9 @@ fn render(mut input:Input)->Result<String,&'static str>{
     // path, which upstream models as tool 2.
     for stroke in &mut input.strokes{if let Some(r)=stroke.rendering.as_mut(){if r.pen_name.as_deref()==Some(MARKER4)&&r.tool_type_raw==3{r.tool_type_raw=2;}}}
     // A body-text page may legitimately carry no strokes of its own.
-    if input.schema_version!=1||!page_bounds(input.width,input.height)||input.background_argb>>24!=255||(input.strokes.is_empty()&&input.flow.is_none())||input.strokes.len()>1024{return Err("unsupported input bounds");}
+    if input.schema_version!=1||!page_bounds(input.width,input.height)||input.background_argb>>24!=255||(input.strokes.is_empty()&&input.flow.is_none()&&input.text_boxes.is_empty())||input.strokes.len()>1024||input.text_boxes.len()>256{return Err("unsupported input bounds");}
+    let mut boxes=Vec::with_capacity(input.text_boxes.len());
+    for b in &input.text_boxes{if b.at>input.strokes.len()||boxes.last().is_some_and(|(at,_)|*at>b.at){return Err("unsupported text box order");}boxes.push((b.at,text_box(b,input.width,input.height)?));}
     let profile=match &input.inkpen2_profile{None=>None,Some(p) if (1..=32768).contains(&p.screen_width)&&(1..=32768).contains(&p.screen_height)=>Some(InkPen2RenderProfile{screen_width:p.screen_width,screen_height:p.screen_height,enhanced_antialias:p.enhanced_antialias}),_=>return Err("unsupported pen profile")};
     let mut count=0;let mut distance=0.;
     for stroke in &input.strokes{
@@ -108,12 +130,23 @@ fn render(mut input:Input)->Result<String,&'static str>{
         for pair in stroke.points.windows(2){distance+=(pair[0].x-pair[1].x).hypot(pair[0].y-pair[1].y);}
         if !distance.is_finite()||distance>500_000.{return Err("geometry budget exceeded");}
     }
-    let page_of=|uuid:String,width:u32,height:u32,argb:u32,strokes:Vec<Stroke>|Page{uuid,width,height,content_bbox:BoundingBox::default(),background_color:Some(rgb(argb)),template:None,background:Default::default(),objects:strokes.into_iter().map(Into::into).collect()};
+    // Strokes in order with each text box inserted before stroke number `at`.
+    let mut boxes=Some(boxes);
+    let mut page_of=|uuid:String,width:u32,height:u32,argb:u32,strokes:Vec<Stroke>,own:bool|{
+        let mut objects:Vec<PageObject>=Vec::with_capacity(strokes.len());
+        let mut pending=if own{boxes.take().unwrap_or_default()}else{Vec::new()}.into_iter().peekable();
+        for (i,stroke) in strokes.into_iter().enumerate(){
+            while pending.peek().is_some_and(|(at,_)|*at==i){objects.push(PageElement::TextBox(pending.next().unwrap().1).into());}
+            objects.push(stroke.into());
+        }
+        for (_,b) in pending{objects.push(PageElement::TextBox(b).into());}
+        Page{uuid,width,height,content_bbox:BoundingBox::default(),background_color:Some(rgb(argb)),template:None,background:Default::default(),objects}
+    };
     let strokes=std::mem::take(&mut input.strokes);
     let (doc,page_index)=match input.flow.take(){
         None=>{
             let metadata=DocumentMetadata{page_ids:vec!["page".into()],page_dimensions:Some((input.width,input.height)),dark_mode_compatibility:Some(false),..Default::default()};
-            (Document{pages:vec![page_of("page".into(),input.width,input.height,input.background_argb,strokes)],metadata},0)
+            (Document{pages:vec![page_of("page".into(),input.width,input.height,input.background_argb,strokes,true)],metadata},0)
         }
         Some(flow)=>{
             // Every physical page takes part in body pagination; only the
@@ -128,7 +161,7 @@ fn render(mut input:Input)->Result<String,&'static str>{
             if flow.font_size_delta.is_some_and(|d|d!=i32::MIN&&!(-100..=100).contains(&d)){return Err("invalid flow font size");}
             let note_text=body_text(&flow)?;
             let mut strokes=Some(strokes);
-            let pages=flow.pages.iter().enumerate().map(|(i,p)|page_of(format!("page{i}"),p.width,p.height,p.background_argb,if i==flow.page_index{strokes.take().unwrap_or_default()}else{Vec::new()})).collect::<Vec<_>>();
+            let pages=flow.pages.iter().enumerate().map(|(i,p)|page_of(format!("page{i}"),p.width,p.height,p.background_argb,if i==flow.page_index{strokes.take().unwrap_or_default()}else{Vec::new()},i==flow.page_index)).collect::<Vec<_>>();
             let metadata=DocumentMetadata{page_ids:pages.iter().map(|p|p.uuid.clone()).collect(),page_dimensions:Some((flow.pages[0].width,flow.pages[0].height)),default_page_dimensions:Some(flow.default_page),page_mode:Some(0),orientation:Some(0),body_font_size_delta:flow.font_size_delta,flow_dimensions:Some(flow.flow_size),flow_page_padding:Some(flow.padding),dark_mode_compatibility:Some(false),note_text:Some(note_text),..Default::default()};
             (Document{pages,metadata},flow.page_index)
         }
@@ -159,7 +192,7 @@ fn render(mut input:Input)->Result<String,&'static str>{
     }
     let output=sdocx::render_layout_page_svg_with_fonts(&doc,&layout,position,&options,&sdocx::fonts::FontBook::default()).ok_or("render unavailable")?;
     if !output.text_diagnostics.is_empty()||!output.object_diagnostics.is_empty()||!output.geometry_diagnostics.is_empty()||!output.paint_diagnostics.is_empty()||!output.background_diagnostics.is_empty(){return Err("incomplete rendering");}
-    let svg=if doc.metadata.note_text.is_some(){outline_text(output.svg)?}else{output.svg};
+    let svg=if doc.metadata.note_text.is_some()||output.svg.contains("<text"){outline_text(output.svg)?}else{output.svg};
     if svg.len()>MAX_OUTPUT||svg.contains("<image")||svg.contains("<script"){return Err("invalid render output");}
     Ok(svg)
 }

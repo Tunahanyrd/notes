@@ -7,7 +7,9 @@ use sha2::{Digest, Sha256};
 
 use crate::pyval::*;
 
-pub const MAX_ANNOTATIONS: usize = 4096;
+/// Annotation bound per text object. Long device notes carry one
+/// `parsingState` per paragraph (6.5k observed); 4096 kept them read-only.
+pub const MAX_ANNOTATIONS: usize = 32768;
 pub const MAX_ENCODED: usize = 4 * 1024 * 1024;
 pub const MAX_TEXT: usize = 256 * 1024;
 pub const SPAN_TYPES: &[(&str, i64)] = &[("foregroundColor", 1), ("fontSize", 3), ("bold", 5), ("italic", 6),

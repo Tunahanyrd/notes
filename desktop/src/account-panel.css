@@ -11,7 +11,7 @@
 .account-pending p{margin:0 0 5px;font-size:13px;color:#383842}
 .account-pending span{font-size:12px;color:#737379;line-height:1.7}
 .account-panel-actions{display:flex;align-items:center;gap:12px;margin:18px 0}
-.account-login,.account-disconnect{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:8px 14px;border:1px solid #c9c9cd;border-radius:5px;font:inherit;font-size:12px;line-height:1.4;cursor:pointer;background:#fff;color:#333}
+.account-login,.account-disconnect{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:8px 14px;border:1px solid #c9c9cd;border-radius:5px;font:inherit;font-size:12px;line-height:1.4;cursor:default;background:#fff;color:#333}
 .account-login{background:#ef624b;color:#fff;border-color:#df5943}
 .account-login:hover:not(:disabled){background:#df5943}
 .account-disconnect:hover:not(:disabled){background:#f1f1f4}

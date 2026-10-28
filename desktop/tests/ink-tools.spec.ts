@@ -97,12 +97,12 @@ test('unavailable tools explain the real reason, empty history is disabled with 
   await expect(r.getByRole('button',{name:'Geri al',exact:true})).toBeDisabled();
   await expect(r.getByRole('button',{name:'Geri al',exact:true})).toHaveAttribute('title','Geri al: Geri alınacak çizim işlemi yok.');
   await expect(r.getByRole('button',{name:'Yinele',exact:true})).toHaveAttribute('title','Yinele: Yinelenecek çizim işlemi yok.');
-  await expect(r.getByRole('button',{name:'Kalem',exact:true})).toHaveAttribute('title',/^Kalem: /);
+  await expect(r.getByRole('button',{name:'Kalem',exact:true})).toHaveAttribute('title',/^Kalem(: |$)/);
 });
 test('a stroke-free page takes a first stroke in the panel colour, saved alone without a template',async({page})=>{
   const {requests}=await fixture(page,{blank:true});
   const pen=rail(page).getByRole('button',{name:'Kalem',exact:true});await expect(pen).toBeEnabled();
-  await expect(page.getByText('Bu sayfa boş; ilk çizgi seçtiğiniz renk ve kalınlıkta eklenir.')).toBeVisible();
+  await expect(page.getByRole('complementary',{name:'Kalem araçları'}).getByLabel('Kalem kalınlığı')).toBeVisible();
   await expect(rail(page).getByRole('button',{name:'Silgi',exact:true})).toBeDisabled();
   await page.getByRole('button',{name:'Kalem rengi 1',exact:true}).click();
   await pen.click();const svg=page.getByLabel('Çizim alanı');await expect(svg).toHaveClass(/drawing/);const box=(await svg.boundingBox())!;

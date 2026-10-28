@@ -218,7 +218,8 @@ pub fn prepare_highlighter_stroke(
     }
     {
         let pages = &root.children[pi];
-        let objects: Vec<&Element> = pages.iter_tag("object").collect();
+        // Images, shapes, lines and text boxes are carried through untouched.
+        let (objects, _) = ink_objects(pages)?;
         let wanted: std::collections::BTreeSet<&str> = ["type", "id", "modifiedTime", "hash"].into_iter().collect();
         if objects.iter().any(|o| o.get("type") != Some("stroke") || !o.is_empty() || o.attr_key_set() != wanted) {
             return ink("unsupported or ambiguous object inventory");

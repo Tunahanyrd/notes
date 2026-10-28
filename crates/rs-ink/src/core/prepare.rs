@@ -263,9 +263,26 @@ pub fn prepare_ink_document(
     {
         return ink("unsupported ink part inventory");
     }
-    let objects: Vec<NodeId> = t.iter(pages).into_iter().filter(|n| t.tag(*n) == "object").collect();
+    // Top-level layer objects: strokes, plus (recipe 2+) self-contained images,
+    // shapes, lines and text boxes the edit carries through byte-identically
+    // (core::objects). Their content files are checked by release_page_cache.
+    let mut objects: Vec<NodeId> = Vec::new();
+    let mut passthrough_ticks: Vec<i64> = Vec::new();
+    for layer_objects in t.iter(pages).into_iter().filter(|n| t.tag(*n) == "objectList") {
+        for o in t.children(layer_objects).to_vec() {
+            if t.get(o, "type") == Some("stroke") {
+                objects.push(o);
+            } else if recipe_version >= 2 && super::objects::tree_passthrough(&t, o).is_some() {
+                passthrough_ticks.push(doc_integer(t.get(o, "modifiedTime"))?);
+            } else {
+                return ink("unsupported or ambiguous stroke inventory");
+            }
+        }
+    }
     let wanted: HashSet<&str> = HashSet::from(["type", "id", "modifiedTime", "hash"]);
+    let nested = t.iter(pages).into_iter().filter(|n| t.tag(*n) == "object").count();
     if objects.len() != stroke_count
+        || nested != objects.len() + passthrough_ticks.len()
         || objects.iter().any(|o| {
             let keys: HashSet<&str> = t.nodes[*o].attrs.iter().map(|(k, _)| k.as_str()).collect();
             t.get(*o, "type") != Some("stroke") || t.len(*o) != 0 || keys != wanted
@@ -412,6 +429,9 @@ pub fn prepare_ink_document(
     tick = tick.max(doc_integer(t.get(layer, "modifiedTime"))? as i128);
     for (_, b) in records.values() {
         tick = tick.max(b.modified_time as i128);
+    }
+    for t in &passthrough_ticks {
+        tick = tick.max(*t as i128);
     }
     tick += 1;
     let mut changed_files: Vec<String> = Vec::new();

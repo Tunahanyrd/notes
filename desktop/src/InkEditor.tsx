@@ -3,6 +3,7 @@ import {api,notePath} from './api';
 import {useInkLive,type InkPenTemplate,type LivePenSpec,type LiveRaster} from './inkLive';
 import type {Note} from './types';
 import './ink-editor.css';
+import {plainReason} from './plainText';
 
 export interface InkPoint {x:number;y:number;pressure:number;timeMs:number}
 // template:false marks a stroke the writer cannot copy (other pen/effects).
@@ -202,7 +203,7 @@ export function useInkDrafts(note:Note|null,enabled:boolean,onSaved:(note:Note)=
     for(const id of ids){
       const stroke=page.strokes.find(item=>item.id===id);
       if(!stroke){if(projection.pendingStrokes.some(item=>item.id===id))return 'Çizgi buluta eşitleniyor; eşitlenince taşınabilir.';return 'Çizgi bu sürümde bulunamadı.';}
-      if(stroke.erasable!==true||!stroke.layerId)return 'Bu çizgi korumalı; taşınamaz.';
+      if(stroke.erasable!==true||!stroke.layerId)return 'Bu çizgi taşınamıyor.';
       if(erasedNow.includes(id))return 'Silinmek üzere işaretli çizgi taşınamaz.';
       const [qx,qy]=queued.get(id)??[0,0],mx=moveMark?.dx??0,my=moveMark?.dy??0;
       const box=stroke.bounds;if(box&&(box[0]+qx+mx+dx<0||box[2]+qx+mx+dx>page.width||box[1]+qy+my+dy<0||box[3]+qy+my+dy>page.height))return 'Taşıma sayfanın dışına çıkıyor.';
@@ -222,7 +223,7 @@ export function useInkDrafts(note:Note|null,enabled:boolean,onSaved:(note:Note)=
     for(const id of ids){
       const page=pageOf(id);
       if(!page){if(projection.pendingStrokes.some(item=>item.id===id))return 'Çizgi buluta eşitleniyor; eşitlenince geri alınabilir.';return 'Çizgi bu sürümde bulunamadı.';}
-      if(page.strokes.find(item=>item.id===id)?.erasable!==true)return 'Bu çizgi korumalı; silinemez.';
+      if(page.strokes.find(item=>item.id===id)?.erasable!==true)return 'Bu çizgi silinemiyor.';
       if(moveMark?.ids.includes(id))return 'Taşınmak üzere işaretli çizgi silinemez.';
       const remaining=page.strokes.filter(item=>!erasedNow.includes(item.id)&&!ids.includes(item.id)).length;
       if(!remaining)return 'Sayfadaki son kayıtlı çizgi silinemez.';
@@ -234,14 +235,14 @@ export function useInkDrafts(note:Note|null,enabled:boolean,onSaved:(note:Note)=
     const sign=direction==='undo'?-1:1;
     switch(action.kind){
       case 'draw':if(direction==='undo')return strokesNow.some(stroke=>stroke.id===action.stroke.id)?'':'Bu çizgi artık taslakta değil.';
-        return !projection||projection.pages.some(page=>page.id===action.stroke.pageId&&(isHighlighter(action.stroke)||page.strokes.some(source=>source.id===action.stroke.sourceStrokeId)))?'':'Çizginin kalem şablonu bu sayfada artık yok.';
+        return !projection||projection.pages.some(page=>page.id===action.stroke.pageId&&(isHighlighter(action.stroke)||page.strokes.some(source=>source.id===action.stroke.sourceStrokeId)))?'':'Bu çizgi artık geri getirilemiyor.';
       case 'erase':if(direction==='undo')return action.saved.every(id=>erasedNow.includes(id))?'':'Silinen çizgiler kaydedildi; geri getirilemez.';
         return action.saved.length?eraseProblem(action.saved.filter(id=>!erasedNow.includes(id))):'';
       case 'move':if(!action.drafts.every(id=>strokesNow.some(stroke=>stroke.id===id)))return 'Taşınan çizgi artık taslakta değil.';
         return moveProblem(action.pageId,action.saved,sign*action.dx,sign*action.dy);
       case 'savedDraw':if(direction==='undo')return eraseProblem(action.ids);
         return action.ids.every(id=>erasedNow.includes(id))?'':'Silme kaydedildi; yinelenemez.';
-      case 'savedErase':return 'Kaydedilmiş silme geri alınamaz: buluttan silinen çizgi geri getirilemiyor.';
+      case 'savedErase':return 'Kaydedilen silme geri alınamaz.';
     }
   };
   const applyAction=(target:Note,action:InkAction,direction:'undo'|'redo')=>{
@@ -434,32 +435,35 @@ export function pageHighlighterMode(projection:InkProjection|null,page:InkPage|u
 function draftAllows(controller:InkController,mode:'template'|'first'|null){const strokes=controller.draft?.strokes??[];if(strokes.some(isFirstStroke))return false;if(controller.tool==='highlighter')return true;return mode==='template'||(mode==='first'&&!strokes.some(stroke=>!isHighlighter(stroke)));}
 // Drawing stays possible while our own previous batch is still syncing;
 // saving (canAppendInk) waits until the note is synced again.
-export function canDrawInk(controller:InkController,pageIndex:number,complete:boolean,blocked:boolean){const {projection,draft}=controller;const page=projection?.pages.find(item=>item.index===pageIndex);return (controller.tool==='highlighter'?pageHighlighterMode(projection,page):true)&&draftAllows(controller,controller.tool==='highlighter'?'template':pageDrawMode(projection,page))&&complete&&!blocked&&!controller.saving&&(!draft||draft.revision===projection!.revision);}
-export function canAppendInk(controller:InkController,pageIndex:number,complete:boolean,blocked:boolean){
-  const {projection,draft}=controller;if(!projection||!complete||blocked||controller.saving||(draft&&draft.revision!==projection.revision))return false;
+// The page image does not gate ink: page identity, size and revision come
+// from the projection, so a stroke drawn over a page whose image is still
+// loading (or missing) is placed and saved exactly the same. `_complete` stays
+// in the signatures for call-site stability only.
+export function canDrawInk(controller:InkController,pageIndex:number,_complete:boolean,blocked:boolean){const {projection,draft}=controller;const page=projection?.pages.find(item=>item.index===pageIndex);return (controller.tool==='highlighter'?pageHighlighterMode(projection,page):true)&&draftAllows(controller,controller.tool==='highlighter'?'template':pageDrawMode(projection,page))&&!!page&&!blocked&&!controller.saving&&(!draft||draft.revision===projection!.revision);}
+export function canAppendInk(controller:InkController,pageIndex:number,_complete:boolean,blocked:boolean){
+  const {projection,draft}=controller;if(!projection||blocked||controller.saving||(draft&&draft.revision!==projection.revision))return false;
   const all=draft?.strokes??[];const strokes=all.filter(stroke=>!isHighlighter(stroke));
   if(!strokes.length&&all.length)return pageHighlighterMode(projection,projection.pages.find(page=>page.id===all[0].pageId),false);
   if(strokes.some(isFirstStroke))return strokes.length===1&&pageDrawMode(projection,projection.pages.find(page=>page.id===strokes[0].pageId),false)==='first';
   return pageDrawMode(projection,projection.pages.find(page=>page.index===pageIndex),false)==='template';
 }
 // Stroke eraser: needs the writer's erase capability for the note and page
-// (or our own unsaved strokes on the page) and a complete page image.
-export function canEraseInk(controller:InkController,pageIndex:number,complete:boolean,blocked:boolean){const {projection,draft,erasure}=controller;const page=projection?.pages.find(item=>item.index===pageIndex);if(!page||!complete||blocked||controller.saving)return false;const own=!!draft?.strokes.some(stroke=>stroke.pageId===page.id);return (own&&(!draft||draft.revision===projection!.revision))||(projection!.capabilities.eraseInk===true&&page.ink?.eraseInk!==false&&page.strokes.some(stroke=>stroke.erasable===true)&&(!erasure||erasure.revision===projection!.revision));}
+// (or our own unsaved strokes on the page).
+export function canEraseInk(controller:InkController,pageIndex:number,_complete:boolean,blocked:boolean){const {projection,draft,erasure}=controller;const page=projection?.pages.find(item=>item.index===pageIndex);if(!page||blocked||controller.saving)return false;const own=!!draft?.strokes.some(stroke=>stroke.pageId===page.id);return (own&&(!draft||draft.revision===projection!.revision))||(projection!.capabilities.eraseInk===true&&page.ink?.eraseInk!==false&&page.strokes.some(stroke=>stroke.erasable===true)&&(!erasure||erasure.revision===projection!.revision));}
 // Lasso selection works on the same strokes the eraser may change.
 export function canSelectInk(controller:InkController,pageIndex:number,complete:boolean,blocked:boolean){const {projection,moveMark}=controller;return canEraseInk(controller,pageIndex,complete,blocked)&&(!moveMark||moveMark.revision===projection?.revision);}
 // Short Turkish reason a rail tool is unavailable on the current page.
 // Prefers the writer's own per-page / per-note reason from the projection.
-export function inkToolReason(controller:InkController,pageIndex:number,complete:boolean,blocked:boolean,tool:InkTool,pageMode:boolean):string {
+export function inkToolReason(controller:InkController,pageIndex:number,_complete:boolean,blocked:boolean,tool:InkTool,pageMode:boolean):string {
   const {projection,phase,draft}=controller;
-  if(phase==='idle')return pageMode?'Kalem bu notta kullanılamıyor.':'Metin olarak düzenlenen notlarda kalem henüz desteklenmiyor.';
-  if(phase==='loading')return 'Çizim verisi yükleniyor.';
-  if(phase==='unavailable'||!projection)return 'Bu notun çizim verisi okunamadı.';
+  if(phase==='idle')return pageMode?'Kalem bu notta kullanılamıyor.':'Yazı notlarında kalem şimdilik kullanılamıyor.';
+  if(phase==='loading')return 'Çizimler yükleniyor…';
+  if(phase==='unavailable'||!projection)return 'Bu notun çizimleri okunamadı.';
   const page=projection.pages.find(item=>item.index===pageIndex);
-  if(!page)return projection.reason||'Bu sayfanın çizim verisi yok.';
-  if(draft&&draft.revision!==projection.revision)return 'Not değişti; taslak çizgiler eski sürüme kaydedilmez.';
-  if(!complete)return 'Sayfa görüntüsü tamamlanmadan kalem açılamaz.';
+  if(!page)return projection.reason||'Bu sayfaya şimdilik çizim eklenemiyor.';
+  if(draft&&draft.revision!==projection.revision)return 'Not başka bir yerde değişti; yeni çizgileriniz bu pencerede korunuyor.';
   if(controller.saving)return 'Çizimler kaydediliyor.';
-  if(blocked)return 'Önce notun bekleyen düzenlemesi tamamlanmalı.';
+  if(blocked)return 'Notun önceki değişikliği eşitleniyor; birazdan çizebilirsiniz.';
   const reason=page.ink?.reason||projection.reason||'';
   if(tool==='highlighter'){
     if((draft?.strokes??[]).some(isFirstStroke))return 'Boş sayfadaki ilk çizgi kaydediliyor; eşitlenince vurgulayabilirsiniz.';
@@ -469,9 +473,9 @@ export function inkToolReason(controller:InkController,pageIndex:number,complete
     const mode=pageDrawMode(projection,page),strokes=(draft?.strokes??[]).filter(stroke=>!isHighlighter(stroke));
     if(strokes.some(isFirstStroke))return 'Boş sayfadaki ilk çizgi kaydediliyor; eşitlenince çizmeye devam edebilirsiniz.';
     if(mode==='first'&&strokes.length)return 'Boş sayfaya ilk çizgi için önce mevcut çizimler kaydedilmeli.';
-    return mode?'':reason||(page.strokes.some(stroke=>stroke.template!==false)?'Bu sayfaya şu anda çizgi eklenemiyor.':'Bu sayfada kopyalanabilecek kalem stili yok.');
+    return mode?'':reason||(page.strokes.some(stroke=>stroke.template!==false)?'Bu sayfaya şu anda çizgi eklenemiyor.':'Bu sayfaya şimdilik çizim eklenemiyor.');
   }
-  if(projection.capabilities.eraseInk!==true||page.ink?.eraseInk===false)return reason||'Bu notta kayıtlı çizgiler düzenlenemiyor.';
+  if(projection.capabilities.eraseInk!==true||page.ink?.eraseInk===false)return reason||'Bu nottaki çizgiler şimdilik düzenlenemiyor.';
   if(!page.strokes.some(stroke=>stroke.erasable===true))return page.ink?.reason||'Bu sayfada düzenlenebilir çizgi yok.';
   if(tool==='select'&&controller.moveMark&&controller.moveMark.revision!==projection.revision)return 'Not değişti; taşıma işareti kaydedilmedi.';
   return reason;
@@ -502,7 +506,7 @@ const ERASER_CSS_RADIUS=7;
 interface Selection {pageId:string;saved:string[];drafts:string[]}
 // One page of a note: saved page image plus its ink layer. Pen mode is shared
 // by all pages; only the page the user is reading shows notices.
-export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineComplete,blocked,imageUrl,onImageError,maskColor='#ffffff'}:{controller:InkController;pageIndex:number;current?:boolean;baselineComplete:boolean;blocked:boolean;imageUrl:string;onImageError:()=>void;maskColor?:string}){
+export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineComplete,blocked,imageUrl,onImageError,maskColor='#ffffff'}:{controller:InkController;pageIndex:number;current?:boolean;baselineComplete:boolean;blocked:boolean;imageUrl:string|null;onImageError:()=>void;maskColor?:string}){
   const {projection,draft,erasure,moveMark,phase,error,drawing,tool,setCapturing}=controller;
   const page=projection?.pages.find(item=>item.index===pageIndex);
   const [current,setCurrent]=useState<InkStroke|null>(null);const [notice,setNotice]=useState('');
@@ -720,7 +724,7 @@ export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineC
     // are not established); refuse marks that would remove the last one.
     const remaining=page.strokes.filter(stroke=>!erased.has(stroke.id)).length;
     if(saved.length&&saved.length>=remaining){saved=[];setNotice('Sayfadaki son kayıtlı çizgi silinemez.');}
-    else if(active.blocked)setNotice('Bazı çizgiler korumalı veya desteklenmeyen biçimde; silinmedi.');
+    else if(active.blocked)setNotice('Bazı çizgiler silinemedi.');
     else setNotice('');
     latest.current.erase(saved,[...active.drafts]);
   };
@@ -753,10 +757,13 @@ export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineC
       saved.push(stroke.id);
     }
     if(saved.length>MAX_ERASE){setNotice('Tek seferde en çok 64 kayıtlı çizgi seçilebilir.');saved.length=MAX_ERASE;}
-    else setNotice(protectedHit?'Bazı çizgiler korumalı veya desteklenmeyen biçimde; seçilmedi.':geometry?.status==='failed'?'Kayıtlı çizgilerin konumu okunamadı; yalnız kaydedilmemiş çizgiler seçilebilir.':!saved.length&&!drafts.length?'Seçim alanında çizgi yok.':'');
+    else setNotice(protectedHit?'Bazı çizgiler seçilemedi.':geometry?.status==='failed'?'Kayıtlı çizgiler okunamadı; yalnızca yeni çizgileriniz seçilebilir.':!saved.length&&!drafts.length?'Seçim alanında çizgi yok.':'');
     setSelection(saved.length||drafts.length?{pageId:page.id,saved,drafts}:null);
   };
-  const image=<img className="page-image" src={imageUrl} alt={`Notun ${pageIndex+1}. sayfası`} onError={onImageError}/>;
+  // Without an image (still loading, failed or none) the ink layer sits on a
+  // blank sheet of the page's own size and colour; PageStack keeps the calm
+  // placeholder text underneath.
+  const image=imageUrl?<img className="page-image" src={imageUrl} alt={`Notun ${pageIndex+1}. sayfası`} onError={onImageError}/>:null;
   if(phase!=='ready'||!page||!projection)return image;
   const geometryById=new Map((geometry?.strokes??[]).map(stroke=>[stroke.id,stroke]));
   const dragOffset=(id:string,draftStroke:boolean):[number,number]=>drag&&(draftStroke?selectedDrafts.has(id):selectedSaved.has(id))?drag:[0,0];
@@ -769,13 +776,13 @@ export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineC
   const reason=draft&&draft.revision!==projection.revision?'Notun sürümü değişti. Taslak çizgileriniz korunuyor ve eski sürümün üzerine kaydedilmiyor.':
     erasure&&erasure.revision!==projection.revision?'Notun sürümü değişti. Silinmek üzere işaretlenen çizgiler kaydedilmedi.':
     moveMark&&moveMark.revision!==projection.revision?'Notun sürümü değişti. Taşınan çizgiler kaydedilmedi.':
-    !baselineComplete?'Sayfanın tamamı gösterilmeden çizim açılamaz.':
-    blocked&&!pending.length?'Önce notun bekleyen düzenlemesini tamamlayın.':
-    (erasing||selecting)&&drawing&&!available?(page.ink?.reason||'Bu sayfada düzenlenebilir çizgi yok veya bu notta kayıtlı çizgiler düzenlenemiyor.'):
-    (erasing||selecting)&&drawing&&projection.capabilities.eraseInk&&geometry?.status==='failed'?'Kayıtlı çizgilerin konumu okunamadı; araç yalnız kaydedilmemiş çizgilerde çalışır.':
+    blocked&&!pending.length?'Notun önceki değişikliği eşitleniyor; birazdan çizebilirsiniz.':
+    (erasing||selecting)&&drawing&&!available?(page.ink?.reason||'Bu sayfadaki çizgiler şimdilik düzenlenemiyor.'):
+    (erasing||selecting)&&drawing&&projection.capabilities.eraseInk&&geometry?.status==='failed'?'Kayıtlı çizgiler okunamadı; yalnızca yeni çizgileriniz düzenlenebilir.':
     tool==='highlighter'&&drawing&&!available&&!pending.length?(page.ink?.reason||'Bu sayfaya fosforlu kalem çizgisi eklenemiyor.'):
     !erasing&&!selecting&&tool!=='highlighter'&&!pageDrawMode(projection,page)&&!pending.length?(page.ink?.reason||projection.reason||'Bu notta çizim ekleme şu anda kullanılamıyor.'):
-    !erasing&&!selecting&&drawing&&strokes.some(isFirstStroke)&&!strokes.some(stroke=>stroke.pageId===page.id)?'Başka sayfadaki ilk çizgi kaydediliyor; eşitlenince bu sayfada çizebilirsiniz.':'';
+    !erasing&&!selecting&&drawing&&strokes.some(isFirstStroke)&&!strokes.some(stroke=>stroke.pageId===page.id)?'Başka sayfadaki ilk çizgi kaydediliyor; eşitlenince bu sayfada çizebilirsiniz.':
+    drawing&&available&&(!imageUrl||!baselineComplete)?'Sayfa henüz tam yüklenmedi; çizgileriniz yine de bu sayfaya kaydedilir.':'';
   const mode=drawing&&available?(selecting?'selecting':erasing?'erasing':'drawing'):'';
   // Pen strokes the live renderer draws (same pixels as while drawing); the
   // rest (highlighters, one-sample taps, pens without a known template) stay SVG.
@@ -786,7 +793,7 @@ export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineC
   for(const id of [...shown.current.keys()])if(!pageStrokes.some(stroke=>stroke.id===id))shown.current.delete(id);
   const rasters=new Set(rastered.map(item=>item.stroke.id));
   return <>
-    {isCurrent&&reason&&<p className="ink-notice">{reason}</p>}
+    {isCurrent&&reason&&<p className="ink-notice">{plainReason(reason)}</p>}
     {isCurrent&&(error||notice)&&<p className="ink-notice" role="alert">{error||notice}</p>}
     <div className="ink-page" ref={pageBox}>{image}
       {(masks.length>0||movedSaved.length>0)&&<svg className="ink-underlay" style={{['--ink-erase-mask' as string]:maskColor}} viewBox={`0 0 ${page.width} ${page.height}`} preserveAspectRatio="none" aria-hidden="true">
@@ -795,7 +802,7 @@ export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineC
       </svg>}
       {pixel&&rastered.map(({stroke,raster})=>{const [dx,dy]=dragOffset(stroke.id,true);return <RasterCanvas key={stroke.id} id={stroke.id} raster={raster} unit={pixel.w/page.width} dx={dx*pixel.w/page.width} dy={dy*pixel.h/page.height} faded={hitDrafts.has(stroke.id)}/>;})}
       {live&&<canvas ref={liveCanvas} className="ink-live" aria-hidden="true"/>}
-      <svg ref={canvas} className={`ink-overlay ${mode}`} style={{['--ink-erase-mask' as string]:maskColor}} viewBox={`0 0 ${page.width} ${page.height}`} preserveAspectRatio="none" aria-label={isCurrent?(selecting?'Seçim alanı':erasing?'Silgi alanı':'Çizim alanı'):`${pageIndex+1}. sayfa`} onPointerDown={event=>{
+      <svg ref={canvas} className={`ink-overlay ${mode}${drag?" moving":""}`} style={{['--ink-erase-mask' as string]:maskColor}} viewBox={`0 0 ${page.width} ${page.height}`} preserveAspectRatio="none" aria-label={isCurrent?(selecting?'Seçim alanı':erasing?'Silgi alanı':'Çizim alanı'):`${pageIndex+1}. sayfa`} onPointerDown={event=>{
       if(!drawing||!available||gesture.current||eraseGesture.current||selectGesture.current||event.button!==0)return;
       if(selecting){
         const element=canvas.current;if(!element)return;const rect=element.getBoundingClientRect();if(!rect.width||!rect.height)return;

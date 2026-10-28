@@ -155,9 +155,40 @@ SDK/model offsets use exclusive ends. `spanOrderDataList` and
 `zeroLengthSpanList` records use the `val` attribute containing Base64 of
 `type,start,end,interval,value`.
 
-Body editing is enabled only for the bounded format-4000 text-only
-structure, without attachments, strokes, extra objects, or opaque MIME
-parts. Every page/layer and unknown permitted metadata value is preserved.
+Body editing is enabled for the bounded format-4000 title/body text
+objects. Since editor rules v2 (`editor-projection-v2`, 2026-10-28) the
+page content next to them no longer blocks it: layer objects (handwriting,
+images, shapes), the content-file lists, the attributes' string table and
+binary MIME parts are carried unchanged. An editor upload sends the note
+tree and the attributes, the changed body object, and an EMPTY page list
+and content-file list — the same recipe as the Cloud-verified title edit on
+pen notes — so no page object or binary part is re-sent or rewritten.
+Every page/layer and unknown permitted metadata value is preserved.
+
+A native empty text box has no `<text>` child (every handwriting-only and
+untitled device note in the 2026-10-28 survey). It reads as empty text; a
+first edit appends `<text>` as the last child (the native order is
+`rect, lineColorEffect, lineStyleEffect, originalRect, [sidecars], text`);
+clearing a title/body through an edit writes it back without `<text>`
+(new notes keep the research writer's `<text/>`). Page slices keep a cleared
+body's `<text>` (zero-length `sectionData`).
+
+Still read-only, with plain-language reasons: free-floating objects
+(`floatingObjectList` non-empty), voice/attachment/extra-bundle nodes,
+objects outside the page list, page objects whose ids disagree with the note
+tree's layer inventory, unknown annotation grammar, locked/encrypted notes,
+and more than 32768 annotations per text object (was 4096; long device notes
+carry one `parsingState` per paragraph). Cached projections carry no rule
+version, so the store drops synced notes' cached projections (and refused
+title flags) once per rules change (`metadata.editor_projection_recipe`).
+
+Re-encoding is canonical, not byte-preserving: on the private library copy
+(55 notes) a no-edit re-encode was byte-identical for 39 and
+document-equivalent (same model and page slices) for all 55; the differences
+are native paragraph-close positions, dropped identical `parsingState`
+duplicates and `15`→`15.0`. An unchanged body is never re-encoded.
+Measured with `cargo run --release -p notes-host --example editor_survey --
+<private copy> [--roundtrip]` (structural output only).
 Title-only changes preserve the full original body/page/content-file data;
 the upload contains the full unchanged note tree and changed attributes,
 without unchanged body/page data chunks.
@@ -170,6 +201,9 @@ content ticks advance independently of their observed unit domain.
 
 Readback must match the title, body, normalized rich model, expected full
 XML fingerprint, and opaque binary fingerprints where applicable. The
+expected body is the text extracted from the draft itself (the same
+extraction the readback snapshot uses, which also includes text of page
+objects), not just the model text. The
 editor fingerprint version 2 additionally treats absent and empty root
 `contentFileList`/`floatingObjectList` and layer `objectList` as equivalent:
 Cloud materializes those containers on downsync. Nonempty containers,

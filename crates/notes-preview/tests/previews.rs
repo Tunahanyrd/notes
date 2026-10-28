@@ -326,7 +326,12 @@ fn offline_canvas_without_cache_is_503_and_missing_page_is_404() {
     let env = TestEnv::new(None, true);
     let entry = entry_of(src(&["n", "c"]), Candidate::Canvas(candidate(b"x")));
     let e1 = entry.clone();
-    let m = manager(dir.path(), env, PreviewOptions { entry_hook: Some(Arc::new(move |_| Ok(e1.clone()))), ..Default::default() });
+    let m = manager(dir.path(), env, PreviewOptions { entry_hook: Some(Arc::new(move |_| Ok(e1.clone()))),
+        source_hook: Some(Arc::new(|_| Ok(src(&["n", "c"])))), ..Default::default() });
+    // Offline, a canvas page is first tried locally (2026-10-28); a note the
+    // local renderer cannot draw keeps the "not downloaded yet" answer.
+    assert_eq!(m.request("n", 0, 0, 0.0).unwrap(), None);
+    assert!(m.wait_idle(Some(Duration::from_secs(5))));
     let error = m.request("n", 0, 0, 0.0).unwrap_err();
     assert_eq!((error.code.as_str(), error.status), ("preview_offline", 503));
     let error = m.request("n", 1, 0, 0.0).unwrap_err();

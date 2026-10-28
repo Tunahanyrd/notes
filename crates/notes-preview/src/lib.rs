@@ -38,7 +38,9 @@ pub use rs_ink::core::payload::CanvasPreviewCandidate;
 pub use thumbnails::{downsample_page, thumbnail_size, PagePreviews, ThumbnailManager};
 
 /// `preview_contract.MAX_INPUT` (= `previews.MAX_DOWNLOAD`).
-pub const MAX_DOWNLOAD: usize = 8 * 1024 * 1024;
+/// Raised from 8 MiB (2026-10-28): canvas caches of photo-heavy pages and the
+/// pictures a page composite draws can exceed 8 MiB.
+pub const MAX_DOWNLOAD: usize = 32 * 1024 * 1024;
 /// `preview_contract.MAX_OUTPUT` (= `previews.MAX_PNG`).
 pub const MAX_PNG: usize = 64 * 1024 * 1024;
 /// `preview_contract.MAX_PIXELS`.
@@ -46,7 +48,7 @@ pub const MAX_PIXELS: i64 = 4 * 1024 * 1024;
 /// `previews.MAX_QUEUED`.
 pub const MAX_QUEUED: usize = 256;
 /// `previews.INK_INVENTORY_RECIPE`.
-pub const INK_INVENTORY_RECIPE: &str = "ink-inventory-v4:body-flow:calibrated-inkpen2:per-page:shape-skip:stylusless-inkpen2";
+pub const INK_INVENTORY_RECIPE: &str = "ink-inventory-v5:body-flow:calibrated-inkpen2:per-page:stylusless-inkpen2:page-composite";
 /// `previews.BROKER_HOSTS`.
 pub const BROKER_HOSTS: &[&str] = &["ew1a-api.samsungcloud.com"];
 /// `previews.FILE_HOSTS`.
