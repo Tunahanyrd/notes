@@ -53,6 +53,8 @@ async function openNote(page:Page,name:RegExp){
   if(await back.isVisible())await back.click();
   await page.getByRole('button',{name}).click();
 }
+const folderOption=(page:Page,list:string,name:string)=>page.getByRole('listbox',{name:list}).getByRole('option',{name:new RegExp('^'+name)});
+async function pickFolder(page:Page,list:string,name:string){await folderOption(page,list,name).click();await expect(folderOption(page,list,name)).toHaveAttribute('aria-selected','true');}
 async function noteAction(page:Page,name:string){
   const action=page.getByRole('button',{name,exact:true});
   if(!await action.isVisible())await page.getByRole('button',{name:'Not seçenekleri'}).click();
@@ -66,7 +68,8 @@ test('Windows surfaces use restrained corners and reduced-motion respects naviga
   await page.getByRole('button',{name:'Ayarlar',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'Ayarlar'});
   await expect(dialog).toBeVisible();await expect(dialog).toHaveCSS('border-radius','6px');
-  await expect(dialog).toHaveCSS('animation-name','dialog-enter');
+  // Surfaces open without an enter animation (on WebKitGTK/Wayland its compositing layer flickered).
+  await expect(dialog).toHaveCSS('animation-name','none');
   await dialog.evaluate(element=>Promise.all(element.getAnimations().map(animation=>animation.finished)));
   await page.screenshot({path:'/tmp/notes-settings-corners.png'});
   await page.getByRole('button',{name:'Ayarları kapat'}).click();
@@ -109,7 +112,7 @@ test('offline cloud favorites queue safely and folder move uses actual folder id
   await page.getByRole('button',{name:'Not seçenekleri'}).click();
   const note=notes.find(n=>n.id==='one');note.metadataSync={state:'synced',error:null};note.syncState='synced';
   await expect(page.getByText('Düzenleme işlemi buluta gönderilmeyi bekliyor.',{exact:false})).toHaveCount(0,{timeout:7000});
-  await noteAction(page,'Klasöre taşı');await page.getByLabel('Hedef klasör').selectOption('ideas');
+  await noteAction(page,'Klasöre taşı');await pickFolder(page,'Hedef klasör','Fikirler');
   await page.getByRole('button',{name:'Taşı',exact:true}).click();
   expect(requests.filter(r=>r.method==='PATCH').at(-1)?.data).toEqual({folderId:'ideas',expectedRevision:2});
   await page.getByRole('button',{name:'Not listesine dön'}).click();
@@ -312,7 +315,7 @@ test('folder lifecycle queues exact operations and disables pending changes',asy
   test.setTimeout(60000);
   const {requests,folders,state}=await setup(page);state.autoConfirm=false;
   await page.getByRole('button',{name:'Klasör oluştur',exact:true}).click();
-  await page.getByLabel('Klasör adı').fill('Yeni klasör');await page.getByLabel('Üst klasör').selectOption('work');
+  await page.getByLabel('Klasör adı').fill('Yeni klasör');await pickFolder(page,'Üst klasör','Çalışma');
   await page.getByRole('button',{name:'Oluştur',exact:true}).click();
   await expect(page.locator('.folder-item').filter({hasText:'Yeni klasör'})).toBeVisible();
   expect(requests.find(r=>r.path==='/api/folders'&&r.method==='POST')?.data).toEqual({name:'Yeni klasör',parentId:'work'});
@@ -322,7 +325,7 @@ test('folder lifecycle queues exact operations and disables pending changes',asy
   await page.getByRole('menuitem',{name:'Yeniden adlandır',exact:true}).click();await page.getByLabel('Klasör adı').fill('Yenilenen klasör');await page.getByRole('button',{name:'Kaydet',exact:true}).click();
   expect(requests.filter(r=>r.method==='PATCH').at(-1)?.data).toEqual({name:'Yenilenen klasör'});
   folder.syncState='synced';await page.locator('.folder-item').filter({hasText:'Yenilenen klasör'}).click({button:'right'});await expect(page.getByRole('menuitem',{name:'Klasörü taşı',exact:true})).toBeEnabled({timeout:7000});await page.getByRole('menuitem',{name:'Klasörü taşı',exact:true}).click();
-  await expect(page.getByLabel('Üst klasör').locator('option[value="created-folder"]')).toHaveCount(0);await page.getByLabel('Üst klasör').selectOption('ideas');await page.getByRole('button',{name:'Kaydet',exact:true}).click();
+  await expect(folderOption(page,'Üst klasör','Yenilenen klasör')).toHaveCount(0);await pickFolder(page,'Üst klasör','Fikirler');await page.getByRole('button',{name:'Kaydet',exact:true}).click();
   expect(requests.filter(r=>r.method==='PATCH').at(-1)?.data).toEqual({parentId:'ideas'});
   folder.syncState='synced';await page.locator('.folder-item').filter({hasText:'Yenilenen klasör'}).click({button:'right'});await expect(page.getByRole('menuitem',{name:'Çöp kutusuna taşı',exact:true})).toBeEnabled({timeout:7000});await page.getByRole('menuitem',{name:'Çöp kutusuna taşı',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Çöp kutusuna taşı',exact:true}).click();
   await page.getByRole('button',{name:'Çöp kutusu',exact:true}).click();await expect(page.getByText('Öğelerde, kalıcı olarak silinmelerine kalan gün sayısı gösterilir.')).toBeVisible();const trashCard=page.locator('.trash-folder-card').filter({hasText:'Yenilenen klasör'});await trashCard.click({button:'right'});await expect(page.getByRole('menuitem',{name:'Geri yükle',exact:true})).toBeDisabled();await page.keyboard.press('Escape');
@@ -486,7 +489,7 @@ test('note right click acts on clicked record without opening it or losing anoth
   await openNote(page,/Aklımda kalanlar/);await page.getByLabel('Not içeriği').fill('Başka notta korunacak taslak');await page.getByRole('button',{name:'Not listesine dön'}).click();
   const card=page.getByRole('button',{name:/Hafta sonu için/});await card.click({button:'right'});const menu=page.getByRole('menu',{name:'Not menüsü'});await expect(menu).toBeVisible();await expect(page.locator('.editor-panel')).toBeHidden();
   await page.keyboard.press('ControlOrMeta+s');await page.keyboard.press('ControlOrMeta+n');await expect(menu).toBeVisible();expect(requests.filter(request=>['PUT','POST','PATCH'].includes(request.method))).toHaveLength(0);
-  expect(requests.filter(request=>request.path==='/api/notes/two'&&request.method==='GET')).toHaveLength(0);await expect(menu.getByRole('menuitem')).toHaveText(['Taşı','Paylaş','Sil','Dosya olarak kaydet','Notu çoğalt','Favorilerden çıkar']);await expect(menu.getByRole('menuitem',{name:/Kilitle/})).toHaveCount(0);await menu.getByRole('menuitem',{name:'Taşı',exact:true}).click();await expect(page.getByLabel('Hedef klasör')).toHaveValue('ideas');await page.getByRole('button',{name:'Vazgeç',exact:true}).click();
+  expect(requests.filter(request=>request.path==='/api/notes/two'&&request.method==='GET')).toHaveLength(0);await expect(menu.getByRole('menuitem')).toHaveText(['Taşı','Paylaş','Sil','Dosya olarak kaydet','Notu çoğalt','Favorilerden çıkar']);await expect(menu.getByRole('menuitem',{name:/Kilitle/})).toHaveCount(0);await menu.getByRole('menuitem',{name:'Taşı',exact:true}).click();await expect(folderOption(page,'Hedef klasör','Fikirler')).toHaveAttribute('aria-current','location');await expect(folderOption(page,'Hedef klasör','Fikirler')).toHaveAttribute('aria-disabled','true');await page.getByRole('button',{name:'Vazgeç',exact:true}).click();
   expect(requests.filter(request=>request.method==='PATCH')).toHaveLength(0);await card.click({button:'right'});await menu.getByRole('menuitem',{name:'Favorilerden çıkar'}).click();
   await expect.poll(()=>requests.filter(request=>request.method==='PATCH').length).toBe(1);expect(requests.find(request=>request.method==='PATCH')).toMatchObject({path:'/api/notes/two',data:{favorite:false,expectedRevision:1}});
   await openNote(page,/Aklımda kalanlar/);await expect(page.getByLabel('Not içeriği')).toHaveValue('Başka notta korunacak taslak');
@@ -553,4 +556,138 @@ test('trash shows Samsung days left, folder cards first and only real restore ac
   await expect(page.getByRole('button',{name:/Boşalt|Kalıcı/})).toHaveCount(0);
   expect(requests.filter(r=>['PATCH','POST','PUT','DELETE'].includes(r.method))).toHaveLength(0);
   await page.screenshot({path:'/tmp/notes-trash-parity.png'});
+});
+
+test('dropdowns close on a press outside them and on Escape',async({page})=>{
+  await setup(page);
+  await page.getByRole('button',{name:'Görünüm'}).click();await expect(page.locator('.view-menu')).toBeVisible();
+  await page.locator('.list-title').click();await expect(page.locator('.view-menu')).toHaveCount(0);
+  await openNote(page,/Aklımda kalanlar/);
+  await page.getByRole('button',{name:'Not seçenekleri'}).click();await expect(page.locator('.note-menu')).toBeVisible();
+  await page.getByLabel('Not başlığı').click();await expect(page.locator('.note-menu')).toHaveCount(0);
+  await page.getByRole('button',{name:'Paylaş'}).click();await expect(page.locator('.share-menu')).toBeVisible();
+  await page.keyboard.press('Escape');await expect(page.locator('.share-menu')).toHaveCount(0);
+  // Another dropdown's toggle switches menus instead of stacking them.
+  await page.getByRole('button',{name:'Paylaş'}).click();await page.getByRole('button',{name:'Not seçenekleri'}).click();
+  await expect(page.locator('.share-menu')).toHaveCount(0);await expect(page.locator('.note-menu')).toBeVisible();
+});
+
+// Move dialog folder picker and press-and-hold drag (FolderPicker.tsx, useNoteDrag.tsx).
+const shot=(name:string)=>process.env.NOTES_SHOT_DIR?path.join(process.env.NOTES_SHOT_DIR,name):undefined;
+const center=async(locator:import('@playwright/test').Locator)=>{const box=(await locator.boundingBox())!;return {x:box.x+box.width/2,y:box.y+box.height/2};};
+async function holdOn(page:Page,locator:import('@playwright/test').Locator){const p=await center(locator);await page.mouse.move(p.x,p.y);await page.mouse.down();await page.waitForTimeout(470);}
+async function moveOver(page:Page,locator:import('@playwright/test').Locator){const p=await center(locator);await page.mouse.move(p.x,p.y,{steps:6});}
+const sidebarFolder=(page:Page,name:string)=>page.locator('.folder-item').filter({hasText:name});
+const patches=(requests:{method:string;path:string;data:any}[])=>requests.filter(r=>r.method==='PATCH');
+
+test('move dialog uses a light folder listbox with keyboard, type-ahead and mouse selection',async({page})=>{
+  const {requests,folders,state,notes}=await setup(page);state.autoConfirm=false;
+  folders.push({state:'normal',syncState:'synced',error:null,id:'memo',name:'Ekran kapalı notları',parentId:null,color:null,noteCount:0,system:true},{state:'normal',syncState:'pending',error:null,id:'later',name:'Bekleyen klasör',parentId:null,color:null,noteCount:0});
+  notes.push({...base,id:'memo-note',folderId:'memo',title:'Kısa not',body:'x',preview:'x'});
+  await page.reload();await expect(page.getByRole('button',{name:/Aklımda kalanlar/})).toBeVisible();
+  await page.getByRole('button',{name:/Aklımda kalanlar/}).click({button:'right'});await page.getByRole('menuitem',{name:'Taşı',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'Klasöre taşı'}),list=dialog.getByRole('listbox',{name:'Hedef klasör'});
+  await expect(dialog.locator('select')).toHaveCount(0);await expect(list).toBeFocused();
+  await expect(list.getByRole('option')).toHaveCount(5);
+  // Klasörsüz first and current; the system and the unsynced folder explain why they are unavailable.
+  const root=folderOption(page,'Hedef klasör','Klasörsüz');
+  await expect(list.getByRole('option').first()).toHaveAttribute('data-folder-id','');
+  await expect(root).toHaveAttribute('aria-current','location');await expect(root).toHaveAttribute('aria-disabled','true');await expect(root).toHaveAttribute('title','Not zaten burada.');
+  await expect(folderOption(page,'Hedef klasör','Ekran kapalı')).toHaveAttribute('title','Sistem klasörlerine not taşınamaz.');
+  await expect(folderOption(page,'Hedef klasör','Bekleyen klasör')).toHaveAttribute('title','Klasörün eşitlemesi tamamlanmalı.');
+  await expect(dialog.getByRole('button',{name:'Taşı',exact:true})).toBeDisabled();
+  // Child folders are indented under their parent.
+  const indent=async(name:string)=>folderOption(page,'Hedef klasör',name).evaluate(e=>parseFloat(getComputedStyle(e).paddingInlineStart));
+  expect(await indent('Fikirler')).toBeGreaterThan(await indent('Çalışma'));
+  const selectedName=()=>list.locator('[aria-selected="true"]').getAttribute('data-folder-id');
+  await page.keyboard.press('ArrowDown');expect(await selectedName()).toBe('work');
+  await expect(list).toHaveAttribute('aria-activedescendant',(await folderOption(page,'Hedef klasör','Çalışma').getAttribute('id'))!);
+  await page.keyboard.press('ArrowDown');expect(await selectedName()).toBe('ideas');
+  await page.keyboard.press('ArrowDown');expect(await selectedName()).toBe('ideas');// disabled rows are skipped
+  await page.keyboard.press('Home');expect(await selectedName()).toBe('work');
+  await page.keyboard.press('End');expect(await selectedName()).toBe('ideas');
+  await list.dispatchEvent('keydown',{key:'ç',bubbles:true});expect(await selectedName()).toBe('work');
+  await page.waitForTimeout(750);await page.keyboard.press('f');expect(await selectedName()).toBe('ideas');
+  await expect(folderOption(page,'Hedef klasör','Fikirler')).toHaveCSS('outline-style','solid');// focus ring only while navigating by keyboard
+  await expect(folderOption(page,'Hedef klasör','Fikirler')).toHaveCSS('background-color','rgb(253, 236, 232)');
+  if(shot('folder-picker.png'))await dialog.screenshot({path:shot('folder-picker.png')});
+  await page.keyboard.press('ArrowUp');await page.keyboard.press('Enter');
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(()=>patches(requests).length).toBe(1);expect(patches(requests)[0]).toMatchObject({path:'/api/notes/one',data:{folderId:'work',expectedRevision:1}});
+  // Mouse: a click selects (no keyboard ring), Taşı moves; Escape closes without writing.
+  await page.getByRole('button',{name:/Hafta sonu için/}).click({button:'right'});await page.getByRole('menuitem',{name:'Taşı',exact:true}).click();
+  await folderOption(page,'Hedef klasör','Fikirler').click();await expect(folderOption(page,'Hedef klasör','Fikirler')).toHaveAttribute('aria-selected','true');
+  await expect(folderOption(page,'Hedef klasör','Fikirler')).toHaveCSS('outline-style','none');
+  await folderOption(page,'Hedef klasör','Ekran kapalı').click({force:true});await expect(folderOption(page,'Hedef klasör','Fikirler')).toHaveAttribute('aria-selected','true');
+  await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);expect(patches(requests)).toHaveLength(1);
+  await page.getByRole('button',{name:/Hafta sonu için/}).click({button:'right'});await page.getByRole('menuitem',{name:'Taşı',exact:true}).click();
+  await folderOption(page,'Hedef klasör','Fikirler').click();await dialog.getByRole('button',{name:'Taşı',exact:true}).click();
+  await expect.poll(()=>patches(requests).length).toBe(2);expect(patches(requests)[1]).toMatchObject({path:'/api/notes/two',data:{folderId:'ideas',expectedRevision:1}});
+});
+
+test('press and hold drags a note card onto a sidebar folder through the same move request',async({page})=>{
+  const {requests,state}=await setup(page);state.autoConfirm=false;
+  const card=page.getByRole('button',{name:/Aklımda kalanlar/});
+  await holdOn(page,card);
+  const ghost=page.getByTestId('note-drag-ghost');
+  await expect(ghost).toBeVisible();await expect(ghost).toContainText('Aklımda kalanlar');await expect(ghost).toContainText('Bir klasörün üzerine bırakın');
+  await expect(ghost).toHaveCSS('animation-name','none');await expect(ghost).toHaveCSS('transition-duration','0s');
+  await expect(card).toHaveClass(/drag-source/);
+  // Hovering a collapsed parent opens it; the child becomes a drop target.
+  await moveOver(page,sidebarFolder(page,'Çalışma'));
+  await expect(sidebarFolder(page,'Çalışma')).toHaveClass(/drop-target/);await expect(ghost).toContainText('Çalışma klasörüne taşı');
+  await expect(sidebarFolder(page,'Fikirler')).toBeVisible({timeout:3000});
+  await moveOver(page,sidebarFolder(page,'Fikirler'));
+  await expect(sidebarFolder(page,'Fikirler')).toHaveClass(/drop-target/);await expect(sidebarFolder(page,'Çalışma')).not.toHaveClass(/drop-target/);
+  if(shot('drag-ghost.png'))await page.screenshot({path:shot('drag-ghost.png'),clip:{x:0,y:0,width:760,height:420}});
+  await page.mouse.up();
+  await expect(ghost).toHaveCount(0);
+  await expect.poll(()=>patches(requests).length).toBe(1);expect(patches(requests)[0]).toMatchObject({path:'/api/notes/one',data:{folderId:'ideas',expectedRevision:1}});
+  await expect(page.getByRole('button',{name:'Not listesine dön'})).toBeHidden();// the drop did not open the note
+  // A selection drags as "N not" and moves every selected note; "Tüm notlar" is not a target for notes already without a folder.
+  await page.getByRole('button',{name:'Düzenle'}).click();
+  await page.getByRole('button',{name:/Hafta sonu için/}).click();await page.getByRole('button',{name:/Tablet çizimleri/}).click();
+  await holdOn(page,page.getByRole('button',{name:/Hafta sonu için/}));await expect(ghost).toContainText('2 not');
+  await moveOver(page,page.locator('.nav-item').filter({hasText:'Tüm notlar'}));
+  await expect(ghost).toContainText('Seçili notlar zaten burada.');await expect(page.locator('.nav-item').filter({hasText:'Tüm notlar'})).not.toHaveClass(/drop-target/);
+  await moveOver(page,sidebarFolder(page,'Çalışma'));await expect(sidebarFolder(page,'Çalışma')).toHaveClass(/drop-target/);
+  if(shot('drag-ghost-multi.png'))await page.screenshot({path:shot('drag-ghost-multi.png'),clip:{x:0,y:0,width:760,height:420}});
+  await page.mouse.up();
+  await expect.poll(()=>patches(requests).length).toBe(3);
+  expect(patches(requests).slice(1).map(r=>[r.path,r.data])).toEqual([['/api/notes/two',{folderId:'work',expectedRevision:1}],['/api/notes/rich',{folderId:'work',expectedRevision:1}]]);
+});
+
+test('short click opens, right click menus, Escape and invalid folders cancel a drag',async({page})=>{
+  const {requests,folders,state}=await setup(page);state.autoConfirm=false;
+  folders.push({state:'normal',syncState:'pending',error:null,id:'later',name:'Bekleyen klasör',parentId:null,color:null,noteCount:0});
+  await page.reload();const card=page.getByRole('button',{name:/Aklımda kalanlar/});await expect(card).toBeVisible();
+  // Right click still opens the context menu and never starts a drag.
+  await card.click({button:'right'});await expect(page.getByRole('menu',{name:'Not menüsü'})).toBeVisible();await expect(page.getByTestId('note-drag-ghost')).toHaveCount(0);
+  await page.keyboard.press('Escape');await expect(page.getByRole('menu',{name:'Not menüsü'})).toHaveCount(0);
+  // Moving before the hold time is an ordinary press, not a drag: released on the card it is a click.
+  let p=await center(card);await page.mouse.move(p.x,p.y);await page.mouse.down();await page.mouse.move(p.x+20,p.y+30,{steps:3});await page.waitForTimeout(500);
+  await expect(page.getByTestId('note-drag-ghost')).toHaveCount(0);await page.mouse.up();
+  await page.getByRole('button',{name:'Not listesine dön'}).click();await expect(card).toBeVisible();
+  // Escape cancels: no write and the release does not open the note.
+  await holdOn(page,card);await moveOver(page,sidebarFolder(page,'Çalışma'));await expect(sidebarFolder(page,'Çalışma')).toHaveClass(/drop-target/);
+  await page.keyboard.press('Escape');await expect(page.getByTestId('note-drag-ghost')).toHaveCount(0);await expect(sidebarFolder(page,'Çalışma')).not.toHaveClass(/drop-target/);
+  await page.mouse.up();await page.waitForTimeout(150);
+  await expect(page.getByRole('button',{name:'Not listesine dön'})).toBeHidden();
+  // An unsynced folder is not a drop target: no highlight, reason in the ghost, release writes nothing.
+  await holdOn(page,card);await moveOver(page,sidebarFolder(page,'Bekleyen klasör'));
+  await expect(page.getByTestId('note-drag-ghost')).toContainText('Klasörün eşitlemesi tamamlanmalı.');await expect(sidebarFolder(page,'Bekleyen klasör')).not.toHaveClass(/drop-target/);
+  await page.mouse.up();await page.waitForTimeout(150);
+  // Dropping elsewhere cancels too.
+  await holdOn(page,card);await moveOver(page,page.locator('.list-title'));await page.mouse.up();
+  expect(patches(requests)).toHaveLength(0);await expect(page.getByRole('button',{name:'Not listesine dön'})).toBeHidden();
+  // A pen press-and-hold drags the same way (Pointer Events).
+  p=await center(card);const target=await center(sidebarFolder(page,'Çalışma'));
+  await card.dispatchEvent('pointerdown',{pointerType:'pen',pointerId:7,isPrimary:true,button:0,buttons:1,clientX:p.x,clientY:p.y,bubbles:true});
+  await page.waitForTimeout(470);
+  await page.evaluate(({x,y})=>{window.dispatchEvent(new PointerEvent('pointermove',{pointerType:'pen',pointerId:7,isPrimary:true,buttons:1,clientX:x,clientY:y,bubbles:true}));},target);
+  await expect(sidebarFolder(page,'Çalışma')).toHaveClass(/drop-target/);
+  await page.evaluate(({x,y})=>{window.dispatchEvent(new PointerEvent('pointerup',{pointerType:'pen',pointerId:7,isPrimary:true,clientX:x,clientY:y,bubbles:true}));},target);
+  await expect.poll(()=>patches(requests).length).toBe(1);expect(patches(requests)[0]).toMatchObject({path:'/api/notes/one',data:{folderId:'work',expectedRevision:1}});
+  // A short click still opens the note.
+  await page.getByRole('button',{name:/Hafta sonu için/}).click();await expect(page.getByRole('button',{name:'Not listesine dön'})).toBeVisible();
 });

@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './style.css';
 import './page-style.css';
+import {installSurfaceFade} from './surfaceFade';
 // Windows shows focus rectangles only while navigating with the keyboard. WebKit
 // also treats Escape after a mouse click as keyboard focus, so track the modality.
 const navigationKeys=new Set(['Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Home','End','PageUp','PageDown']);
@@ -14,4 +15,5 @@ const editable=(target:EventTarget|null)=>target instanceof Element&&!!target.cl
 document.addEventListener('contextmenu',event=>{if(!editable(event.target))event.preventDefault();});
 document.addEventListener('keydown',event=>{const key=event.key.toLowerCase(),mod=event.ctrlKey||event.metaKey;if(key==='f5'||key==='f12'||(mod&&(key==='r'||key==='u'))||(mod&&event.shiftKey&&['i','j','c'].includes(key)))event.preventDefault();},true);
 document.addEventListener('dragstart',event=>{if(event.target instanceof HTMLImageElement)event.preventDefault();});
+installSurfaceFade();
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);

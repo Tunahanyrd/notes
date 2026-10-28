@@ -66,7 +66,7 @@ try{
  await expect(page.getByText(/Düzenleme işlemi buluta gönderilmeyi bekliyor/)).toBeVisible();
  await page.getByRole('button',{name:'Not listesine dön'}).click();await page.getByRole('button',{name:/Tüm notlar/}).click();
  await page.getByRole('button',{name:/Önbellek taşıma testi/}).click();await action('Klasöre taşı');
- await page.getByLabel('Hedef klasör').selectOption('synthetic-folder');await page.getByRole('button',{name:'Taşı',exact:true}).click();
+ await page.getByRole('listbox',{name:'Hedef klasör'}).locator('[data-folder-id="synthetic-folder"]').click();await page.getByRole('button',{name:'Taşı',exact:true}).click();
  await expect(page.getByText(/Düzenleme işlemi buluta gönderilmeyi bekliyor/)).toBeVisible();
  await page.getByRole('button',{name:'Not listesine dön'}).click();await page.locator('.folder-item').filter({hasText:'Sentetik klasör'}).click();
  await expect(page.getByRole('button',{name:/Önbellek taşıma testi/})).toBeVisible();
@@ -76,7 +76,7 @@ try{
  const folderAction=async(name,action)=>{await page.locator('.folder-item').filter({hasText:name}).click({button:'right'});await page.getByRole('menuitem',{name:action,exact:true}).click();};
  await folderAction('Adlandırılacak klasör','Yeniden adlandır');await page.getByLabel('Klasör adı').fill('Yeni klasör adı');await page.getByRole('dialog').getByRole('button',{name:'Kaydet',exact:true}).click();
  await expect(page.locator('.folder-item').filter({hasText:'Yeni klasör adı'}).locator('.state-dot.pending')).toBeVisible();
- await folderAction('Taşınacak klasör','Klasörü taşı');await page.getByLabel('Üst klasör').selectOption('synthetic-folder');await page.getByRole('dialog').getByRole('button',{name:'Kaydet',exact:true}).click();
+ await folderAction('Taşınacak klasör','Klasörü taşı');await page.getByRole('listbox',{name:'Üst klasör'}).locator('[data-folder-id="synthetic-folder"]').click();await page.getByRole('dialog').getByRole('button',{name:'Kaydet',exact:true}).click();
  await expect(page.locator('.folder-item').filter({hasText:'Taşınacak klasör'}).locator('.state-dot.pending')).toBeVisible();
  await folderAction('Silinecek boş klasör','Çöp kutusuna taşı');await page.getByRole('dialog').getByRole('button',{name:'Çöp kutusuna taşı',exact:true}).click();
  await page.getByRole('button',{name:'Çöp kutusu',exact:true}).click();
