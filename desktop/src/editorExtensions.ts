@@ -19,7 +19,12 @@ function markStyle(kind:SpanKind,value:SpanValue){
   if(kind==='strikethrough')return `text-decoration-line:${value?'line-through':'none'}`;
   // The model's number is preserved. Visual scaling is a separate view concern.
   if(kind==='fontSize')return `font-size:${Number(value)}px`;
-  return `${kind==='foregroundColor'?'color':'background-color'}:${argbToCss(String(value))}`;
+  const original=argbToCss(String(value));
+  const rgb=[3,5,7].map(offset=>parseInt(String(value).slice(offset,offset+2),16));
+  const luminance=.2126*rgb[0]+.7152*rgb[1]+.0722*rgb[2];
+  const adjusted=kind==='foregroundColor'&&luminance<150?rgb.map(c=>Math.round(c+(255-c)*.8)):kind==='backgroundColor'&&luminance>150?rgb.map(c=>Math.round(c*.2)):rgb;
+  const dark='#'+adjusted.map(c=>c.toString(16).padStart(2,'0')).join('')+String(value).slice(1,3);
+  return `${kind==='foregroundColor'?'color':'background-color'}:${original};--dark-${kind}:${dark}`;
 }
 function nativeMark(kind:SpanKind){return Mark.create({
   // A link must not swallow text typed after it (stored notes use interval 2).

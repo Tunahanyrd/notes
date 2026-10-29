@@ -3,7 +3,7 @@ import {DEFAULT_SHORTCUTS} from '../src/useShortcuts';
 const TOKEN='settings_synthetic_session_123456789';
 async function setup(page:Page,options:{connected?:boolean;badStorage?:boolean}={}) {
   const writes:string[]=[];
-  let preferences={version:1,galleryMode:'grid',sortAscending:true,toolsOpen:true,defaultZoom:100};
+  let preferences:{version:number;theme?:string;darkPages?:boolean;galleryMode:string;sortAscending:boolean;toolsOpen:boolean;defaultZoom:number}={version:1,galleryMode:'grid',sortAscending:true,toolsOpen:true,defaultZoom:100};
   const errors:string[]=[];
   page.on('pageerror',e=>errors.push(e.message));
   if(options.badStorage)await page.addInitScript(()=>localStorage.setItem('samsung-notes.preferences.v1','{broken'));
@@ -34,7 +34,7 @@ test('settings persist only working device preferences and call explicit sync',a
   await page.getByLabel('Not sıralaması',{exact:true}).selectOption('newest');
   await page.getByRole('switch',{name:'Metin araçlarını göster'}).uncheck();
   await page.getByLabel('Varsayılan yakınlaştırma',{exact:true}).selectOption('125');
-  await expect.poll(getPreferences).toEqual({version:1,galleryMode:'list',sortAscending:false,toolsOpen:false,defaultZoom:125});
+  await expect.poll(getPreferences).toEqual({version:1,theme:'system',darkPages:false,galleryMode:'list',sortAscending:false,toolsOpen:false,defaultZoom:125});
   await expect(page.getByLabel('Varsayılan yakınlaştırma',{exact:true})).toHaveValue('125');
   expect(writes.every(path=>path==='PUT /api/preferences')).toBe(true);
   await page.getByRole('button',{name:'Şimdi eşitle',exact:true}).click();
@@ -68,4 +68,24 @@ test('settings narrow layout stays bounded, keyboard close restores focus',async
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole('button',{name:'Ayarlar',exact:true})).toBeFocused();
   expect(writes).toEqual([]);expect(errors).toEqual([]);
+});
+
+test('theme selection follows system and persists',async({page})=>{
+  await page.emulateMedia({colorScheme:'light'});
+  const {getPreferences}=await setup(page);
+  const theme=page.getByLabel('Tema',{exact:true});
+  const color=()=>page.locator('.sidebar').evaluate(el=>getComputedStyle(el).backgroundColor);
+  const light=await color();
+  await theme.selectOption('dark');
+  await expect.poll(color).not.toBe(light);
+  await expect.poll(()=>getPreferences().theme).toBe('dark');
+  await theme.selectOption('light');
+  await expect.poll(color).toBe(light);
+  await theme.selectOption('system');
+  await page.emulateMedia({colorScheme:'dark'});
+  await expect.poll(color).not.toBe(light);
+  await page.emulateMedia({colorScheme:'light'});
+  await expect.poll(color).toBe(light);
+  await page.getByRole('switch',{name:'Not sayfalarını koyu göster'}).check();
+  await expect.poll(()=>getPreferences().darkPages).toBe(true);
 });

@@ -11,6 +11,18 @@ result was also checked in the official app on a phone or tablet.
 
 ## [Unreleased]
 
+### Added
+
+- Dark theme: Settings → Tema (Sistem / Açık / Koyu). "Sistem" follows the
+  desktop colour scheme live (XDG portal on Linux, system appearance on macOS).
+- "Not sayfalarını koyu göster": optional dark note pages, display only — saved
+  text and ink colours are never changed.
+
+### Fixed
+
+- Card dates and untitled note names show the year when it is not the current
+  one.
+
 ### Security
 
 - The local engine serves static UI files only on exact-case paths.

@@ -104,7 +104,7 @@ function PageItem({noteId,revision,page,isCurrent,register,render,renderUnavaila
   const width=page.width&&page.height?page.width:size?.width,height=page.width&&page.height?page.height:size?.height;
   const ratio=width&&height?`${width} / ${height}`:'1 / 1.414';
   const text=page.previewNotice||(!page.available||phase==='final'?PAGE_UNRENDERABLE:PAGE_PENDING);
-  return <div ref={box} className={`page-sheet ${isCurrent?'current':''}`} style={{aspectRatio:ratio,backgroundColor:page.darkMode?'#000':'#fff'}} data-page-index={page.index} data-preview-phase={url?'ready':page.available?phase:'unavailable'}>
+  return <div ref={box} className={`page-sheet ${isCurrent?'current':''}`} style={{aspectRatio:ratio,backgroundColor:page.darkMode?'#000':'#fff'}} data-page-dark={String(page.darkMode===true)} data-page-index={page.index} data-preview-phase={url?'ready':page.available?phase:'unavailable'}>
     {!url&&<div className="page-placeholder" role="status">{text}</div>}
     {!url&&!page.available&&renderUnavailable?.(page,isCurrent)}
     {(url||near)&&render(page,url,isCurrent)}

@@ -1,13 +1,13 @@
 /* Trash screen like Windows Samsung Notes: subtitle, small folder cards first, days-left band on thumbnails. */
-.trash-subtitle{margin:0;padding:2px 25px 8px;font-size:12px;color:#737378}
+.trash-subtitle{margin:0;padding:2px 25px 8px;font-size:12px;color:var(--ui-text-737378)}
 .note-list .trash-folders{display:flex;flex-wrap:wrap;gap:16px;padding:8px 25px 18px;border-bottom:0}
 .trash-folder-card{position:relative;width:125px;padding:0;text-align:left;display:flex;flex-direction:column;border-radius:10px}
 .trash-folder-card:hover:not(:disabled){background:none}
-.trash-folder-tab{width:46px;height:9px;margin-left:8px;border-radius:6px 6px 0 0;background:#e3e3e7}
-.trash-folder-body{display:grid;gap:4px;min-height:74px;padding:10px 11px;border-radius:0 10px 10px 10px;background:#fcfcfc;border:1px solid #e3e3e7;box-shadow:0 1px 4px #00000012}
+.trash-folder-tab{width:46px;height:9px;margin-left:8px;border-radius:6px 6px 0 0;background:var(--ui-bg-e3e3e7)}
+.trash-folder-body{display:grid;gap:4px;min-height:74px;padding:10px 11px;border-radius:0 10px 10px 10px;background:var(--ui-bg-fcfcfc);border:1px solid var(--ui-border-e3e3e7);box-shadow:0 1px 4px #00000012}
 .trash-folder-card:hover .trash-folder-body{box-shadow:0 0 0 2px #d4d4d8}
 .trash-folder-body strong{font-size:13px;font-weight:600;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.trash-folder-body small{font-size:11px;color:#737378}
+.trash-folder-body small{font-size:11px;color:var(--ui-text-737378)}
 .trash-folder-state{color:#a8742c!important}
-.thumbnail-band{position:absolute;left:0;right:0;bottom:0;padding:3px 6px;background:#000000a6;color:#fff;font-size:11px;line-height:16px;text-align:center;z-index:1}
+.thumbnail-band{position:absolute;left:0;right:0;bottom:0;padding:3px 6px;background:#000000a6;color:var(--ui-text-ffffff);font-size:11px;line-height:16px;text-align:center;z-index:1}
 .gallery-list .thumbnail-band{font-size:8px;line-height:11px;padding:1px 2px}

@@ -14,24 +14,31 @@ const OPEN_SOURCE:readonly {name:string;license:string;note?:string}[]=[
 ];
 
 export interface SettingsPreferences {
+  theme:'system'|'light'|'dark';
+  darkPages:boolean;
   galleryMode:'grid'|'list';
   sortAscending:boolean;
   toolsOpen:boolean;
   defaultZoom:75|100|125|150;
 }
 export const SETTINGS_STORAGE_KEY='samsung-notes.preferences.v1';
-export const DEFAULT_SETTINGS:Readonly<SettingsPreferences>={galleryMode:'grid',sortAscending:true,toolsOpen:true,defaultZoom:100};
+export const DEFAULT_SETTINGS:Readonly<SettingsPreferences>={theme:'system',darkPages:false,galleryMode:'grid',sortAscending:true,toolsOpen:true,defaultZoom:100};
 /** Device-local display preferences only. Never put account data in this key. */
-export function loadSettingsPreferences():SettingsPreferences {
+function loadLocalSettingsPreferences():SettingsPreferences {
   try {
     const saved:unknown=JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY)||'null');
     if(!saved||typeof saved!=='object'||!('version' in saved)||saved.version!==1)return {...DEFAULT_SETTINGS};
     const p=saved as Record<string,unknown>;
-    return {galleryMode:p.galleryMode==='list'?'list':'grid',sortAscending:typeof p.sortAscending==='boolean'?p.sortAscending:DEFAULT_SETTINGS.sortAscending,toolsOpen:typeof p.toolsOpen==='boolean'?p.toolsOpen:DEFAULT_SETTINGS.toolsOpen,defaultZoom:[75,100,125,150].includes(p.defaultZoom as number)?p.defaultZoom as SettingsPreferences['defaultZoom']:100};
+    return {theme:p.theme==='light'||p.theme==='dark'?p.theme:'system',darkPages:p.darkPages===true,galleryMode:p.galleryMode==='list'?'list':'grid',sortAscending:typeof p.sortAscending==='boolean'?p.sortAscending:DEFAULT_SETTINGS.sortAscending,toolsOpen:typeof p.toolsOpen==='boolean'?p.toolsOpen:DEFAULT_SETTINGS.toolsOpen,defaultZoom:[75,100,125,150].includes(p.defaultZoom as number)?p.defaultZoom as SettingsPreferences['defaultZoom']:100};
   } catch {return {...DEFAULT_SETTINGS};}
 }
+export function loadSettingsPreferences():SettingsPreferences {
+  const settings=loadLocalSettingsPreferences();
+  const cached=document.cookie.match(/(?:^|;\s*)notes_theme_v1=(system|light|dark)\.([01])(?:;|$)/);
+  return cached?{...settings,theme:cached[1] as SettingsPreferences['theme'],darkPages:cached[2]==='1'}:settings;
+}
 export function saveSettingsPreferences(preferences:SettingsPreferences):boolean {
-  try {localStorage.setItem(SETTINGS_STORAGE_KEY,JSON.stringify({version:1,...preferences}));return true;}
+  try {localStorage.setItem(SETTINGS_STORAGE_KEY,JSON.stringify({version:1,...preferences}));document.cookie=`notes_theme_v1=${preferences.theme}.${preferences.darkPages?1:0}; Path=/; Max-Age=31536000; SameSite=Strict`;return true;}
   catch {return false;}
 }
 export interface SettingsPanelProps {
@@ -78,6 +85,8 @@ export function SettingsPanel({status,foldersInitialized,offlineView,busy,error,
           <p className="settings-group-help"><CloudOff size={15}/><span>Önceden yüklenmiş notları çevrimdışıyken de görüntüleyebilirsiniz. Değişiklikleriniz, bağlantı kurulduğunda eşitlenir.</span></p>
         </section>
         <section className="settings-group" aria-labelledby="settings-general-heading"><h3 id="settings-general-heading">Genel</h3>{preferenceError&&<p className="settings-inline-error" role="alert">{preferenceError}</p>}<div className="settings-card">
+          <label className="settings-option"><span><span className="settings-option-title">Tema</span><span className="settings-option-description">Uygulamanın görünümünü seçin.</span></span><select aria-label="Tema" value={preferences.theme} onChange={event=>change({theme:event.target.value as SettingsPreferences['theme']})}><option value="system">Sistem</option><option value="light">Açık</option><option value="dark">Koyu</option></select></label>
+          <label className="settings-option"><span><span className="settings-option-title">Not sayfalarını koyu göster</span><span className="settings-option-description">Sayfaları yalnızca ekranda koyu gösterir.</span></span><input className="settings-toggle" type="checkbox" role="switch" aria-label="Not sayfalarını koyu göster" checked={preferences.darkPages} onChange={event=>change({darkPages:event.target.checked})}/></label>
           <div className="settings-option settings-view-option"><div><span className="settings-option-title">Not listesi</span><span className="settings-option-description">Notlarınızın nasıl görüneceğini seçin.</span></div><div className="settings-view-choices" role="group" aria-label="Not listesi görünümü">{(['grid','list'] as const).map(mode=><button key={mode} aria-pressed={preferences.galleryMode===mode} onClick={()=>change({galleryMode:mode})}>{mode==='grid'?<Grid2X2 size={23}/>:<List size={23}/>}<span>{mode==='grid'?'Izgara':'Liste'}</span>{preferences.galleryMode===mode&&<Check size={13} className="settings-choice-check"/>}</button>)}</div></div>
           <label className="settings-option"><span><span className="settings-option-title">Değiştirilme tarihine göre sırala</span><span className="settings-option-description">Not listesinin sıralama yönü.</span></span><select aria-label="Not sıralaması" value={preferences.sortAscending?'oldest':'newest'} onChange={event=>change({sortAscending:event.target.value==='oldest'})}><option value="newest">En yeni önce</option><option value="oldest">En eski önce</option></select></label>
           <label className="settings-option"><span><span className="settings-option-title">Metin araçları</span><span className="settings-option-description">Düzenleyicide biçimlendirme ve kalem panelini göster.</span></span><input className="settings-toggle" type="checkbox" role="switch" aria-label="Metin araçlarını göster" checked={preferences.toolsOpen} onChange={event=>change({toolsOpen:event.target.checked})}/></label>

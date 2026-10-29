@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './style.css';
 import './page-style.css';
+import './theme.css';
 import {installSurfaceFade} from './surfaceFade';
 // Windows shows focus rectangles only while navigating with the keyboard. WebKit
 // also treats Escape after a mouse click as keyboard focus, so track the modality.

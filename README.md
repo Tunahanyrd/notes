@@ -22,6 +22,7 @@ emulator involved. A macOS build exists but has not yet been tested on a Mac.
 |---|---|
 | ![Note list with folders](docs/screenshots/list.png) | ![Rich text editor](docs/screenshots/editor.png) |
 | ![Handwriting note with pen tools](docs/screenshots/ink.png) | ![Move to folder](docs/screenshots/folders.png) |
+| ![Dark theme: note list](docs/screenshots/list-dark.png) | ![Dark theme: handwriting note](docs/screenshots/ink-dark.png) |
 
 <sub>Screenshots use an invented demo library (`desktop/tests/fixtures/demo-library`); regenerate with `node tools/screenshots.mjs`. The UI is shown in Turkish.</sub>
 

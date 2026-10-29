@@ -481,7 +481,7 @@ test('device preferences hydrate before writes and serialize the latest user int
     });
   });
   await page.getByRole('button',{name:'Ayarlar',exact:true}).click();await page.getByRole('button',{name:'Liste',exact:true}).click();await page.getByLabel('Varsayılan yakınlaştırma').selectOption('125');expect(writes).toHaveLength(0);
-  releaseRead();await expect.poll(()=>writes.length).toBe(1);expect(writes[0]).toEqual({version:1,galleryMode:'list',sortAscending:false,toolsOpen:false,defaultZoom:125});
+  releaseRead();await expect.poll(()=>writes.length).toBe(1);expect(writes[0]).toEqual({version:1,theme:'system',darkPages:false,galleryMode:'list',sortAscending:false,toolsOpen:false,defaultZoom:125});
   await page.getByLabel('Varsayılan yakınlaştırma').selectOption('150');expect(writes).toHaveLength(1);releaseWrite();await expect.poll(()=>writes.length).toBe(2);expect(writes[1]).toEqual({...writes[0],defaultZoom:150});
   await page.getByRole('button',{name:'Ayarları kapat'}).click();await expect(page.locator('.note-rows')).toHaveClass(/gallery-list/);
 });
@@ -719,4 +719,41 @@ test('short click opens, right click menus, Escape and invalid folders cancel a 
   await expect.poll(()=>patches(requests).length).toBe(1);expect(patches(requests)[0]).toMatchObject({path:'/api/notes/one',data:{folderId:'work',expectedRevision:1}});
   // A short click still opens the note.
   await page.getByRole('button',{name:/Hafta sonu için/}).click();await expect(page.getByRole('button',{name:'Not listesine dön'})).toBeVisible();
+});
+
+test('dark paper is a display preference and does not write the note',async({page})=>{
+  const {requests,notes}=await setup(page);
+  const original=JSON.stringify(notes.find(note=>note.id==='one'));
+  await page.getByRole('button',{name:'Ayarlar',exact:true}).click();
+  await page.getByLabel('Tema',{exact:true}).selectOption('dark');
+  await page.getByRole('button',{name:'Ayarları kapat'}).click();
+  await openNote(page,/Aklımda kalanlar/);
+  await expect(page.locator('.document')).toHaveCSS('background-color','rgb(252, 252, 252)');
+  await page.getByRole('button',{name:'Not listesine dön'}).click();
+  await page.getByRole('button',{name:'Ayarlar',exact:true}).click();
+  await page.getByRole('switch',{name:'Not sayfalarını koyu göster'}).check();
+  await page.getByRole('button',{name:'Ayarları kapat'}).click();
+  await openNote(page,/Aklımda kalanlar/);
+  await expect(page.locator('.document')).toHaveCSS('background-color','rgb(32, 32, 34)');
+  expect(JSON.stringify(notes.find(note=>note.id==='one'))).toBe(original);
+  expect(requests.filter(request=>request.path.startsWith('/api/notes/one')&&request.method!=='GET')).toEqual([]);
+});
+
+
+test('dark paper preserves rich text colours when saving',async({page})=>{
+  const {notes}=await setup(page);const note=notes.find(n=>n.id==='one');
+  const color={start:0,end:5,kind:'foregroundColor',value:'#FF000000',interval:3};
+  let model:any={schemaVersion:1,text:note.body,spans:[color],paragraphs:[]};const writes:any[]=[];
+  await page.route('**/api/notes/one/editor',route=>{
+    if(route.request().method()==='GET')return route.fulfill({json:{schemaVersion:1,capabilities:{titleEdit:true,textEdit:true,richStyle:true,inkEdit:false},model,reason:null,revision:note.revision}});
+    const data=route.request().postDataJSON();writes.push(data);model=data.model;note.revision++;return route.fulfill({json:{note}});
+  });
+  await page.getByRole('button',{name:'Ayarlar',exact:true}).click();
+  await page.getByRole('switch',{name:'Not sayfalarını koyu göster'}).check();
+  await page.getByRole('button',{name:'Ayarları kapat'}).click();
+  await openNote(page,/Aklımda kalanlar/);const editor=page.getByRole('textbox',{name:'Not içeriği'});
+  await expect(editor).toHaveAttribute('contenteditable','true');
+  await editor.click();await page.keyboard.press('ControlOrMeta+End');await page.keyboard.type(' ek');
+  await page.keyboard.press('ControlOrMeta+s');await expect.poll(()=>writes.length).toBe(1);
+  expect(writes[0].model.spans).toContainEqual(color);
 });

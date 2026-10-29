@@ -1,6 +1,6 @@
 {
  "note": "Frozen responses of the historical Python reference (NOTES_IMPL=rust python3 -m samsung_notes) over the synthetic library in library/ (reference/python/conformance/gen_library.py). Synthetic data only. Replay: run.py --replay --candidate target/debug/notes-engine",
- "recordedOn": "2026-10-28",
+ "recordedOn": "2026-10-29",
  "reference": "target/debug/notes-engine",
  "rootLength": 160,
  "scenarios": {

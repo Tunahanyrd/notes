@@ -1,37 +1,37 @@
 /* Move dialog folder list (FolderPicker.tsx) and press-and-hold note drag.
    No enter animation or opacity/transform transition: surfaces appear instantly
    (WebKitGTK's compositing layer flickers on its first frame under Wayland). */
-.folder-picker-label{display:block;margin:18px 0 8px;font-size:13px;font-weight:600;color:#3b3b3e}
-.folder-picker{position:relative;max-height:min(292px,46dvh);overflow:auto;scrollbar-width:thin;padding:4px;background:#fff;border:1px solid #d6d6d9;border-radius:6px;outline:none}
-.folder-option{position:relative;display:flex;align-items:center;gap:10px;min-height:36px;padding-inline-end:10px;border-radius:4px;font-size:14px;line-height:20px;color:#252525;cursor:default;transition:background-color var(--dur-faster,83ms) ease}
+.folder-picker-label{display:block;margin:18px 0 8px;font-size:13px;font-weight:600;color:var(--ui-text-3b3b3e)}
+.folder-picker{position:relative;max-height:min(292px,46dvh);overflow:auto;scrollbar-width:thin;padding:4px;background:var(--ui-bg-ffffff);border:1px solid var(--ui-border-d6d6d9);border-radius:6px;outline:none}
+.folder-option{position:relative;display:flex;align-items:center;gap:10px;min-height:36px;padding-inline-end:10px;border-radius:4px;font-size:14px;line-height:20px;color:var(--ui-text-252525);cursor:default;transition:background-color var(--dur-faster,83ms) ease}
 .folder-option+.folder-option{margin-top:1px}
 .folder-option .win-icon{flex:0 0 auto;width:16px;height:18px}
-.folder-option-root{flex:0 0 auto;color:#808085}
+.folder-option-root{flex:0 0 auto;color:var(--ui-text-808085)}
 .folder-option-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.folder-option small{flex:0 0 auto;font-size:12px;color:#717176}
-.folder-option-badge{flex:0 0 auto;font-size:11px;line-height:18px;padding:0 7px;border-radius:9px;background:#efeff1;color:#66666b}
+.folder-option small{flex:0 0 auto;font-size:12px;color:var(--ui-text-717176)}
+.folder-option-badge{flex:0 0 auto;font-size:11px;line-height:18px;padding:0 7px;border-radius:9px;background:var(--ui-bg-efeff1);color:var(--ui-text-66666b)}
 .folder-option:hover:not(.disabled):not(.selected){background:#0000000a}
 .folder-option:active:not(.disabled){background:#00000012}
 .folder-option.selected{background:#fdece8;font-weight:600}
 .folder-option.selected::before{content:'';position:absolute;left:0;top:50%;width:3px;height:16px;margin-top:-8px;border-radius:2px;background:var(--accent,#f26549)}
-.folder-option.disabled{color:#a3a3a8}
+.folder-option.disabled{color:var(--ui-text-a3a3a8)}
 .folder-option.disabled .win-icon{opacity:.45}
-.folder-option.disabled small{color:#b3b3b8}
-:root[data-keyboard] .folder-picker:focus .folder-option.active{outline:2px solid #1b1b1b;outline-offset:-2px}
-:root[data-keyboard] .folder-picker:focus{border-color:#8a8a8f}
-.move-modal .settings-actions .small-button:not(:disabled){background:var(--accent,#f26549);border-color:var(--accent,#f26549);color:#fff;min-width:88px}
+.folder-option.disabled small{color:var(--ui-text-b3b3b8)}
+:root[data-keyboard] .folder-picker:focus .folder-option.active{outline:2px solid var(--ui-border-1b1b1b);outline-offset:-2px}
+:root[data-keyboard] .folder-picker:focus{border-color:var(--ui-border-8a8a8f)}
+.move-modal .settings-actions .small-button:not(:disabled){background:var(--accent,#f26549);border-color:var(--accent,#f26549);color:var(--ui-text-ffffff);min-width:88px}
 .move-modal .settings-actions .small-button:not(:disabled):hover{background:#e05a3f;border-color:#e05a3f}
-.move-modal .move-reason{min-height:18px;margin:8px 2px 0;font-size:12px;color:#737378}
+.move-modal .move-reason{min-height:18px;margin:8px 2px 0;font-size:12px;color:var(--ui-text-737378)}
 
 /* press-and-hold drag of note cards onto sidebar folders */
 :root.note-dragging,:root.note-dragging *{cursor:grabbing!important;-webkit-user-select:none!important;user-select:none!important}
 .note-row.drag-source{opacity:.45}
-.note-drag-ghost{position:fixed;z-index:120;left:0;top:0;display:flex;align-items:center;gap:10px;max-width:260px;padding:6px 12px 6px 6px;background:#fcfcfc;border:1px solid #d2d2d5;border-radius:8px;box-shadow:var(--shadow-flyout,0 8px 16px rgba(0,0,0,.14));pointer-events:none;font-size:13px;color:#252525}
-.note-drag-thumb{flex:0 0 auto;width:36px;height:44px;border-radius:4px;border:1px solid #e1e1e4;background:#fff center top/cover no-repeat;display:grid;place-items:center;color:#9a9a9f}
+.note-drag-ghost{position:fixed;z-index:120;left:0;top:0;display:flex;align-items:center;gap:10px;max-width:260px;padding:6px 12px 6px 6px;background:var(--ui-bg-fcfcfc);border:1px solid var(--ui-border-d2d2d5);border-radius:8px;box-shadow:var(--shadow-flyout,0 8px 16px rgba(0,0,0,.14));pointer-events:none;font-size:13px;color:var(--ui-text-252525)}
+.note-drag-thumb{flex:0 0 auto;width:36px;height:44px;border-radius:4px;border:1px solid var(--ui-border-e1e1e4);background:var(--ui-bg-ffffff) center top/cover no-repeat;display:grid;place-items:center;color:var(--ui-text-9a9a9f)}
 .note-drag-stack{position:relative}
-.note-drag-stack::after{content:'';position:absolute;inset:3px -4px -4px 3px;z-index:-1;border-radius:4px;border:1px solid #e1e1e4;background:#f4f4f6}
+.note-drag-stack::after{content:'';position:absolute;inset:3px -4px -4px 3px;z-index:-1;border-radius:4px;border:1px solid var(--ui-border-e1e1e4);background:var(--ui-bg-f4f4f6)}
 .note-drag-text{display:flex;flex-direction:column;min-width:0}
 .note-drag-text strong{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.note-drag-text small{font-size:11px;color:#717176;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.note-drag-text small{font-size:11px;color:var(--ui-text-717176);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .note-drag-text small.blocked{color:#a33}
 .nav-item.drop-target,.nav-item.drop-target.active{background:#fdece8;box-shadow:inset 0 0 0 1px var(--accent,#f26549)}

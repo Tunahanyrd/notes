@@ -1,12 +1,13 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {api} from './api';
 import {loadSettingsPreferences,saveSettingsPreferences,type SettingsPreferences} from './SettingsPanel';
-const keys=['galleryMode','sortAscending','toolsOpen','defaultZoom'] as const;
+const keys=['theme','darkPages','galleryMode','sortAscending','toolsOpen','defaultZoom'] as const;
 const signature=(value:SettingsPreferences)=>JSON.stringify(keys.map(key=>value[key]));
 function parse(value:unknown):SettingsPreferences{
   const v=value as Record<string,unknown>|null;
   if(!v||v.version!==1||!['grid','list'].includes(String(v.galleryMode))||typeof v.sortAscending!=='boolean'||typeof v.toolsOpen!=='boolean'||![75,100,125,150].includes(v.defaultZoom as number))throw Error('preferences_invalid');
-  return {galleryMode:v.galleryMode as SettingsPreferences['galleryMode'],sortAscending:v.sortAscending,toolsOpen:v.toolsOpen,defaultZoom:v.defaultZoom as SettingsPreferences['defaultZoom']};
+  if(v.theme!==undefined&&!['system','light','dark'].includes(String(v.theme))||v.darkPages!==undefined&&typeof v.darkPages!=='boolean')throw Error('preferences_invalid');
+  return {theme:(v.theme??'system') as SettingsPreferences['theme'],darkPages:(v.darkPages??false) as boolean,galleryMode:v.galleryMode as SettingsPreferences['galleryMode'],sortAscending:v.sortAscending,toolsOpen:v.toolsOpen,defaultZoom:v.defaultZoom as SettingsPreferences['defaultZoom']};
 }
 /** SQLite owns device persistence. localStorage is only an origin-local fallback. */
 export function usePreferences(authorized:boolean){

@@ -1,27 +1,27 @@
 /* Native helper xbf-002f34d0.xaml uses #eeeeF0 keycaps and an 8 px radius; editing controls retain that treatment. */
-.keyboard-shortcuts{padding:18px 22px;background:#fff;border:1px solid #e7e7e9;border-radius:16px;min-width:0}
-.shortcut-intro{display:flex;align-items:center;gap:8px;margin:0 0 17px;color:#737379;font-size:12px;line-height:1.7}
+.keyboard-shortcuts{padding:18px 22px;background:var(--ui-bg-ffffff);border:1px solid var(--ui-border-e7e7e9);border-radius:16px;min-width:0}
+.shortcut-intro{display:flex;align-items:center;gap:8px;margin:0 0 17px;color:var(--ui-text-737379);font-size:12px;line-height:1.7}
 .shortcut-intro svg{flex-shrink:0}
-.shortcut-row{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:54px;border-top:1px solid #ededee;font-size:13px}
-.shortcut-row input{width:140px;min-width:120px;min-height:34px;text-align:center;background:#eeeef0;border:1px solid #d4d4d8;border-radius:8px;font:inherit;color:#393940;cursor:default;padding:6px 9px}
-.shortcut-row input.capturing{outline:2px solid #e9836e;outline-offset:2px;background:#fff7f4}
+.shortcut-row{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:54px;border-top:1px solid var(--ui-border-ededee);font-size:13px}
+.shortcut-row input{width:140px;min-width:120px;min-height:34px;text-align:center;background:var(--ui-bg-eeeef0);border:1px solid var(--ui-border-d4d4d8);border-radius:8px;font:inherit;color:var(--ui-text-393940);cursor:default;padding:6px 9px}
+.shortcut-row input.capturing{outline:2px solid #e9836e;outline-offset:2px;background:var(--ui-bg-fff7f4)}
 .shortcut-row input:disabled{opacity:.55;cursor:default}
-.shortcut-help{font-size:11px;line-height:1.75;color:#85858b;margin:12px 0}
+.shortcut-help{font-size:11px;line-height:1.75;color:var(--ui-text-85858b);margin:12px 0}
 .shortcut-error{font-size:12px;line-height:1.6;color:#a24132;margin:10px 0;overflow-wrap:anywhere}
-.shortcut-state{font-size:11px;color:#68686f;line-height:1.6;margin:10px 0}
+.shortcut-state{font-size:11px;color:var(--ui-text-68686f);line-height:1.6;margin:10px 0}
 .shortcut-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:16px}
-.shortcut-actions button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;border:1px solid #d0d0d5;border-radius:5px;padding:7px 11px;font-size:12px;background:#fff}
-.shortcut-actions button:hover:not(:disabled){background:#f4f4f7}
+.shortcut-actions button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;border:1px solid var(--ui-border-d0d0d5);border-radius:5px;padding:7px 11px;font-size:12px;background:var(--ui-bg-ffffff)}
+.shortcut-actions button:hover:not(:disabled){background:var(--ui-bg-f4f4f7)}
 .shortcut-actions button:focus-visible{outline:2px solid #596699;outline-offset:3px}
 .shortcut-actions button:disabled{opacity:.5;cursor:default}
 .shortcut-group{margin:0 0 14px}
-.shortcut-group h4{font-size:12px;font-weight:600;color:#6d6d73;margin:14px 0 4px}
+.shortcut-group h4{font-size:12px;font-weight:600;color:var(--ui-text-6d6d73);margin:14px 0 4px}
 .shortcut-row label,.shortcut-row dt{min-width:0;overflow-wrap:anywhere}
 .shortcut-controls{display:flex;align-items:center;gap:6px;flex-shrink:0}
-.shortcut-row input.unassigned{color:#8d8d93;font-style:italic}
-.shortcut-clear{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;color:#77777d}
+.shortcut-row input.unassigned{color:var(--ui-text-8d8d93);font-style:italic}
+.shortcut-clear{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;color:var(--ui-text-77777d)}
 .shortcut-fixed{margin-top:22px}
 .shortcut-fixed dl{margin:0}
 .shortcut-fixed dd{margin:0}
-.shortcut-fixed kbd{display:inline-block;font-size:12px;background:#eeeef0;border:1px solid #d4d4d8;border-radius:8px;padding:6px 10px;color:#393940;white-space:nowrap}
+.shortcut-fixed kbd{display:inline-block;font-size:12px;background:var(--ui-bg-eeeef0);border:1px solid var(--ui-border-d4d4d8);border-radius:8px;padding:6px 10px;color:var(--ui-text-393940);white-space:nowrap}
 @media(max-width:600px){.keyboard-shortcuts{padding:16px}.shortcut-row{gap:10px;font-size:12px}.shortcut-row input{width:125px;min-width:115px}.shortcut-actions button{font-size:11px}}

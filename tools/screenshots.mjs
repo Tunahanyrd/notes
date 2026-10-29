@@ -45,6 +45,10 @@ const engine=process.env.NOTES_ENGINE_BIN||['release','debug'].map(kind=>path.jo
 const frontend=path.resolve(process.env.NOTES_FRONTEND_DIR||path.join(root,'desktop/dist'));
 const out=path.resolve(process.env.SCREENSHOT_OUT||path.join(root,'docs/screenshots'));
 const scale=Number(process.env.SCREENSHOT_SCALE||2);
+const themeIndex=process.argv.indexOf('--theme');
+const theme=themeIndex<0?'light':process.argv[themeIndex+1];
+if(!['light','dark'].includes(theme))throw Error('--theme must be light or dark');
+const suffix=theme==='dark'?'-dark':'';
 if(!engine)throw Error('notes-engine not found: cargo build -p notes-engine');
 if(!existsSync(path.join(frontend,'index.html')))throw Error(`no built UI in ${frontend}: (cd desktop && npm run build)`);
 if(!existsSync(library))throw Error(`demo library missing: ${library}`);
@@ -67,7 +71,7 @@ try{
   if(!session)throw Error('engine did not become ready');
   const executablePath=process.env.CHROMIUM||(existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined);
   browser=await chromium.launch({executablePath,headless:true,args:['--no-sandbox','--font-render-hinting=none']});
-  const context=await browser.newContext({viewport:{width:1440,height:900},deviceScaleFactor:scale,locale:'tr-TR',timezoneId:'Europe/Istanbul',colorScheme:'light'});
+  const context=await browser.newContext({viewport:{width:1440,height:900},deviceScaleFactor:scale,locale:'tr-TR',timezoneId:'Europe/Istanbul',colorScheme:theme});
   const page=await context.newPage();
   const problems=[];
   page.on('pageerror',error=>problems.push('pageerror: '+error.message));
@@ -85,7 +89,7 @@ try{
     await page.waitForFunction(()=>[...document.images].filter(img=>img.getBoundingClientRect().width>0).every(img=>img.complete&&img.naturalWidth>0),null,{timeout:60000});
     await page.mouse.move(1439,899);await sleep(600);
   };
-  const shot=async name=>{await settle();await page.screenshot({path:path.join(out,name+'.png')});console.log('wrote',path.relative(root,path.join(out,name+'.png')));};
+  const shot=async name=>{await settle();await page.screenshot({path:path.join(out,name+suffix+'.png')});console.log('wrote',path.relative(root,path.join(out,name+suffix+'.png')));};
   await mkdir(out,{recursive:true});
 
   // (a) Notes grid with the folder sidebar (subfolder expanded).
@@ -129,8 +133,8 @@ try{
 // Optional size optimisation (lossless with oxipng; 256-colour quantization with magick).
 const have=cmd=>spawnSync('sh',['-c',`command -v ${cmd}`]).status===0;
 for(const name of ['list','editor','ink','folders']){
-  const file=path.join(out,name+'.png');
+  const file=path.join(out,name+suffix+'.png');
   if(have('magick')){const tmp=file+'.tmp.png';const r=spawnSync('magick',[file,'-strip','-dither','None','-colors','256',`PNG8:${tmp}`]);if(r.status===0)await rename(tmp,file);else await rm(tmp,{force:true});}
   if(have('oxipng'))spawnSync('oxipng',['-o','4','--strip','safe','-q',file]);
-  console.log(name+'.png',Math.round((await stat(file)).size/1024),'KB');
+  console.log(name+suffix+'.png',Math.round((await stat(file)).size/1024),'KB');
 }
