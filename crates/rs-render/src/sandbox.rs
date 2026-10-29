@@ -437,6 +437,22 @@ fn command(args: &[String], stdin: bool, limits: Limits, new_session: bool, cwd:
     command
 }
 
+/// Start a framed, bidirectional worker with the same isolation and limits as
+/// `spawn_streaming`. The caller owns both pipes and must reap the child.
+pub fn spawn_duplex(args: &[String], limits: Limits, new_session: bool, cwd: Option<&Path>)
+    -> io::Result<(std::process::Child, std::process::ChildStdin, std::process::ChildStdout)>
+{
+    let mut child = command(args, true, limits, new_session, cwd, false).spawn()?;
+    match (child.stdin.take(), child.stdout.take()) {
+        (Some(stdin), Some(stdout)) => Ok((child, stdin, stdout)),
+        _ => {
+            let _ = child.kill();
+            let _ = child.wait();
+            Err(io::Error::other("sandboxed worker has no pipes"))
+        }
+    }
+}
+
 /// Spawn with stdin fed from a thread; the caller reads stdout as a stream.
 pub fn spawn_streaming(args: &[String], input: Vec<u8>, limits: Limits, new_session: bool, cwd: Option<&Path>)
                        -> io::Result<(std::process::Child, std::process::ChildStdout)> {

@@ -9,7 +9,7 @@ use notes_host::{Fail, Kind};
 use notes_net::{DownloadError, Family, NetError, SendError};
 
 /// `previews._http` timeout and `fetch_pdf`'s download timeout.
-pub const PREVIEW_TIMEOUT: Duration = Duration::from_secs(20);
+pub const PREVIEW_TIMEOUT: Duration = Duration::from_secs(5);
 pub const PDF_TIMEOUT: Duration = Duration::from_secs(25);
 
 fn fail_of(e: &NetError) -> Fail {

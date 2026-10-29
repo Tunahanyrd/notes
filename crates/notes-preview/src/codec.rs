@@ -54,7 +54,7 @@ pub fn decode_spi(_root: &Path, raw: &[u8], expected_size: Option<(i64, i64)>) -
     }
     // Same PNG encoder (and bytes) as the historical worker: the codec's
     // four output bytes are written as R, G, B, A with straight alpha.
-    rs_render::pixels::rgba_png(width, height, &image.pixels)
+    crate::ink::measure_png(|| rs_render::pixels::rgba_png(width, height, &image.pixels))
         .map_err(|_| err("invalid_output", "Önizleme çıktısı doğrulanamadı."))
 }
 

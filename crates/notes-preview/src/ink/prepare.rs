@@ -14,6 +14,19 @@ use rs_ops::xml::Element;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
+thread_local! {
+    static PREP_TIMES: std::cell::Cell<[std::time::Duration; 3]> = const { std::cell::Cell::new([std::time::Duration::ZERO; 3]) };
+}
+fn measured<T>(index: usize, f: impl FnOnce() -> T) -> T {
+    let start = std::time::Instant::now();
+    let value = f();
+    PREP_TIMES.with(|cell| { let mut times = cell.get(); times[index] += start.elapsed(); cell.set(times); });
+    value
+}
+pub(crate) fn take_prep_times() -> [std::time::Duration; 3] {
+    PREP_TIMES.with(|cell| cell.replace([std::time::Duration::ZERO; 3]))
+}
+
 pub const MAX_INPUT: usize = 24 * 1024 * 1024;
 const MAX_PIXELS: i64 = 4 * 1024 * 1024;
 const MAX_DISTANCE: f64 = 500_000.0;
@@ -1093,7 +1106,7 @@ fn prepare_source(snapshot: &rs_doc::doc::DocumentSnapshot, key: &SourceKey) -> 
     if let Some((_, hit)) = PREPARED.lock().unwrap().iter().find(|(k, _)| k == key) {
         return Ok(hit.clone());
     }
-    let (parts, root) = match verify(snapshot)? {
+    let (parts, root) = match measured(1, || verify(snapshot))? {
         Verified::Reason(reason) => return fail(reason),
         Verified::Ok(parts, root) => (parts, root),
     };
@@ -1143,7 +1156,7 @@ fn prepare_source(snapshot: &rs_doc::doc::DocumentSnapshot, key: &SourceKey) -> 
         p.iter().any(|n| n.tag == "object" || n.tag == "pdfDataList" || (n.tag == "canvasCacheDataMap" && !n.children.is_empty()))
     });
     let bodies: Vec<Vec<u8>> = parts.into_iter().filter(|(name, _)| name.as_deref() == Some("strokeResource")).map(|(_, b)| b).collect();
-    let records = decode_records(&snapshot.resource_xml, &bodies)?;
+    let records = measured(2, || decode_records(&snapshot.resource_xml, &bodies))?;
     let files = super::objects::content_files(&root);
     let prepared = Arc::new(Prepared { pages: pages.clone(), flow, flow_approximate, trailing, records, files, page_based, floating,
                                        floating_lost });
@@ -1541,11 +1554,35 @@ pub fn forced_composite(snapshot: &notes_host::Val, index: i64) -> Vec<u8> {
     })().unwrap_or_default()
 }
 
+/// A single verified, decoded note shared by the streaming producer. The
+/// snapshot is decoded and hashed once, not once for every page in the note.
+pub(crate) struct PreparedSession(Arc<Prepared>);
+impl PreparedSession {
+    pub(crate) fn new(snapshot: &notes_host::Val) -> P<Self> {
+        let snapshot = measured(0, || notes_host::snapshot::from_dict(snapshot)).map_err(|e| PrepErr(e.message))?;
+        let key: SourceKey = (sha256(&snapshot.raw_body), sha256(&snapshot.resource_xml), snapshot.content_type.clone(),
+                              snapshot.local_id.clone(), snapshot.commit_id.clone());
+        Ok(Self(prepare_source(&snapshot, &key)?))
+    }
+    pub(crate) fn inventory(&self) -> String {
+        let pages = page_inputs(&self.0, None, false).unwrap_or_default();
+        inventory_from_pages(&pages)
+    }
+    pub(crate) fn page_body(&self, index: i64) -> Vec<u8> {
+        page_inputs(&self.0, Some(index), true).ok().and_then(|pages| pages.into_iter().find(|p| p.index == index))
+            .map(|p| p.body).unwrap_or_default()
+    }
+}
+
 /// The inventory JSON the preparation child writes (Python `json.dumps`
 /// default separators): `[{"index": 0, "width": W, "height": H, "darkMode": false}]`.
 /// Failures give `[]` like the Python child.
 pub fn inventory_json(snapshot: &notes_host::Val) -> String {
     let pages = prepare_pages(snapshot, None, false).map(|p| p.to_vec()).unwrap_or_default();
+    inventory_from_pages(&pages)
+}
+
+fn inventory_from_pages(pages: &[PageInput]) -> String {
     let items: Vec<String> = pages.iter().map(|p| {
         let base = format!("{{\"index\": {}, \"width\": {}, \"height\": {}, \"darkMode\": {}",
             p.index, p.width, p.height, if p.dark_mode { "true" } else { "false" });
@@ -1602,4 +1639,20 @@ pub fn pen_templates(snapshot: &notes_host::Val) -> P<String> {
         }
     }
     Ok(format!("{{{}}}", items.join(",")))
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+    #[test]
+    fn session_reuses_verified_note_and_preserves_page_bodies() {
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/objects_note.json")).unwrap();
+        let fixture = rs_store::val::loads(&text).unwrap();
+        let snapshot = fixture.get("snapshot").unwrap();
+        let session = PreparedSession::new(snapshot).unwrap();
+        assert_eq!(session.inventory(), inventory_json(snapshot));
+        for index in 0..3 {
+            assert_eq!(session.page_body(index), page_body(snapshot, index));
+        }
+    }
 }

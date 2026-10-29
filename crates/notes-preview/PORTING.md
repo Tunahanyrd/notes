@@ -128,6 +128,14 @@ and `allowed_url`.
   Python application did when its optional decoder was installed. The golden conformance fixtures were recorded
   without that decoder (`false`); see crates/notes-engine/PORTING.md.
 
+## Scheduling and diagnostics
+
+A foreground-only worker is added alongside the configured background pool. A foreground canvas first renders a local stand-in without downloading missing media, then queues its full image in the background; the transport timeout is five seconds per request. A foreground request can also supersede an already running background job for the same key. Source changes discard the old attempt and enqueue the current source again. Stand-in retries start at ten minutes and back off exponentially; a canvas decoder failure is memoized in memory by the cache recipe and expected geometry, so it is not retried during that manager's lifetime. Download errors remain retryable.
+
+Snapshots are reused per source in a four-entry, 128 MiB estimated-size LRU; the native backend keeps a separate four-entry, 64 MiB serialized-identity LRU. The isolated preparation child (or in-process producer) verifies and decodes its note once, then builds requested pages from that prepared state; inventory and page bodies share the worker. Foreground and background jobs use distinct slots so an occupied background producer cannot hold the foreground page. SQLite commits conservatively invalidate the snapshot and in-memory entry caches, including same-commit sync replacements; a link refresh also explicitly invalidates the snapshot. Download URL maps are cached with the snapshot, capped at 8 MiB each.
+
+`NOTES_PREVIEW_TIMING` appends content-free per-job JSON. `downloadMs`, `decodeMs` and `localMs` measure the canvas path; `rendererMs` includes sandbox/process startup, and `pngEncodeMs` records measured ink and SPI encoding. `snapshotMs`, `inventoryMs`, `bodyMs` (including producer wait), `mediaMs`, `payloadMs`, `compositeMs`, `rasterMs`, `identityMs`, and `cacheWriteMs` expose the local stages; these spans overlap and a zero does not imply work happened in a background preparation child for free. Child timing fields report spawn, readiness, input read, JSON and snapshot parsing, verification, stroke decoding, inventory, page body build and pipe write; initialization is attributed once to the first page waiter. The latter stages overlap `decodeMs` or `localMs`; other paths may not populate every field. `cargo run --release -p notes-preview --example stage_bench -- 5` uses only synthetic fixtures and prints medians. `cargo run --release -p notes-preview --example large_note_bench -- ink` (or `canvas`) generates 35 pages and 3,150 synthetic strokes with 192 samples each, uses the isolated preparation child, and reports per-page medians.
+
 ## Verification
 
 - **Tests:** `cargo test -p notes-preview` runs 50 tests (+3 ignored: fixture regeneration and long fuzz runs).

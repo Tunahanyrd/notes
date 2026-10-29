@@ -191,15 +191,17 @@ impl Queue {
         let mut guard = self.heap.lock().unwrap();
         guard.0.push(item);
         guard.1 += 1;
-        self.ready.notify_one();
+        self.ready.notify_all();
     }
 
-    fn get(&self, timeout: Duration) -> Option<QueueItem> {
+    fn get(&self, timeout: Duration, foreground_only: bool) -> Option<QueueItem> {
         let deadline = Instant::now() + timeout;
         let mut guard = self.heap.lock().unwrap();
         loop {
-            if let Some(item) = guard.0.pop() {
-                return Some(item);
+            if !foreground_only || guard.0.peek().is_some_and(|item| item.priority <= 0) {
+                if let Some(item) = guard.0.pop() {
+                    return Some(item);
+                }
             }
             let now = Instant::now();
             if now >= deadline {
@@ -243,6 +245,12 @@ struct State {
     /// Insertion-ordered `self.jobs`; replacing a key keeps its position.
     jobs: Vec<(String, Job)>,
     workers: usize,
+    decode_failures: BTreeSet<String>,
+    download_failures: BTreeSet<String>,
+    partial_canvas: BTreeSet<String>,
+    retry_counts: BTreeMap<String, u32>,
+    snapshots: Vec<(String, Source, Arc<Val>, usize, Option<Arc<BTreeMap<String, String>>>)>,
+    snapshot_epoch: Option<i64>,
 }
 
 impl State {
@@ -282,6 +290,7 @@ impl State {
 
 struct Inner {
     store: Arc<StoreCore>,
+    db_monitor: rs_store::db::Db,
     env: Arc<dyn PreviewEnv>,
     directory: PathBuf,
     root: PathBuf,
@@ -331,6 +340,7 @@ impl PreviewManager {
     /// `PreviewManager(engine, decoder=..., fetcher=...)` plus test hooks.
     pub fn with_options(store: Arc<StoreCore>, env: Arc<dyn PreviewEnv>, options: PreviewOptions) -> Result<PreviewManager, Fail> {
         let directory = private_directory(&store.directory.join("page-previews"))?;
+        let db_monitor = rs_store::db::Db::open(&store.path).map_err(store_fail)?;
         let root = env.project_root();
         let decoder = options.decoder.unwrap_or_else(|| {
             let root = root.clone();
@@ -341,7 +351,7 @@ impl PreviewManager {
         let ink = options.ink.unwrap_or_else(|| Arc::new(NativeInk::new(root.clone(), env.ink_child_executable())));
         Ok(PreviewManager {
             inner: Arc::new(Inner {
-                store, env, directory, root, decoder, fetcher, media_fetcher, ink,
+                store, db_monitor, env, directory, root, decoder, fetcher, media_fetcher, ink,
                 workers: options.workers.unwrap_or_else(crate::default_workers).max(1),
                 entry_hook: options.entry_hook, source_hook: options.source_hook,
                 state: Mutex::new(State::default()), finished: Condvar::new(),
@@ -476,6 +486,7 @@ impl Inner {
     }
 
     fn entry(&self, identity: &str) -> Result<Arc<Entry>, Fail> {
+        self.refresh_snapshot_epoch()?;
         if let Some(hook) = &self.entry_hook {
             return hook(identity).map(Arc::new);
         }
@@ -796,7 +807,11 @@ impl Inner {
             if let Some(raw) = read_cached(stand_in, MAX_PNG as u64)? {
                 if crate::png_valid(&raw, candidate.width(), candidate.height()) {
                     let mut state = this.lock();
-                    let retry = match state.job(&key) {
+                    let deterministic_failure = match candidate {
+                        Candidate::Canvas(c) => state.decode_failures.contains(&decode_failure_key(&key, c)) || state.download_failures.contains(&download_failure_key(&key, c)),
+                        _ => false,
+                    };
+                    let retry = !deterministic_failure && match state.job(&key) {
                         None => true,
                         Some(job) => match job.state {
                             JobState::Pending | JobState::Running => false,
@@ -817,10 +832,11 @@ impl Inner {
         if let Some(job) = state.job(&key).cloned() {
             match job.state {
                 JobState::Pending | JobState::Running => {
-                    if job.state == JobState::Pending && priority < job.priority {
+                    if priority < job.priority && (job.state == JobState::Pending || priority <= 0) {
                         // Re-queue at the higher priority; the stale entry is skipped.
                         if let Some(slot) = state.job_mut(&key) {
                             slot.priority = priority;
+                            slot.state = JobState::Pending;
                         }
                         this.queue.put(this.queue_item(&key, identity, &entry.source, candidate, &path, priority, job.local_pdf.clone()));
                     }
@@ -866,13 +882,15 @@ impl Inner {
     }
 
     fn spawn_workers(this: &Arc<Inner>, state: &mut State) {
-        while state.workers < this.workers {
+        // One additional worker is reserved for foreground requests, even when
+        // the configured background pool has only one worker.
+        while state.workers < this.workers + 1 {
             let number = state.workers;
             state.workers += 1;
             this.running.fetch_add(1, AtomicOrdering::SeqCst);
             let inner = this.clone();
             let spawned = std::thread::Builder::new().name(format!("notes-page-preview-{number}")).spawn(move || {
-                inner.worker();
+                inner.worker(number == 0);
                 inner.running.fetch_sub(1, AtomicOrdering::SeqCst);
                 let (lock, wake) = &inner.exited;
                 let _held = lock.lock().unwrap();
@@ -913,16 +931,18 @@ impl Inner {
 
     /// `_cache_png(path, png, width, height, guard)`
     fn cache_png(path: &Path, png: &[u8], width: i64, height: i64, guard: &dyn Fn() -> Result<(), Fail>) -> Result<(), Fail> {
-        if !crate::png_valid(png, width, height) {
-            return Err(preview("Sayfa görüntüsünün boyutu doğrulanamadı."));
-        }
-        util::write_private(path, png, 8, true, guard)
+        crate::ink::measure(crate::ink::CACHE_WRITE, || {
+            if !crate::png_valid(png, width, height) {
+                return Err(preview("Sayfa görüntüsünün boyutu doğrulanamadı."));
+            }
+            util::write_private(path, png, 8, true, guard)
+        })
     }
 
     /// `_loop()`
-    fn worker(&self) {
+    fn worker(self: &Arc<Self>, foreground_only: bool) {
         while !self.stop.load(AtomicOrdering::SeqCst) {
-            let Some(item) = self.queue.get(Duration::from_millis(500)) else { continue };
+            let Some(item) = self.queue.get(Duration::from_millis(500), foreground_only) else { continue };
             {
                 let mut state = self.lock();
                 match state.job_mut(&item.key) {
@@ -938,16 +958,51 @@ impl Inner {
             // the job would stay Running and, once every worker died, previews
             // would never be produced again until restart.
             let started = Instant::now();
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.process(&item)))
+            crate::ink::take_stage_times();
+            crate::ink::take_detail_times();
+            let mut stages = Stages::default();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.process(&item, &mut stages)))
                 .unwrap_or_else(|_| Err(Fail::os("preview worker panicked")));
-            timing(&item, started, &result);
+            (stages.renderer, stages.png) = crate::ink::take_stage_times();
+            stages.detail = crate::ink::take_detail_times();
+            timing(&item, started, &result, &stages);
             {
                 let mut state = self.lock();
+                // A foreground request can supersede a running background job.
+                // Its completion must not replace the newer job record.
+                if !state.job(&item.key).is_some_and(|job| job.state == JobState::Running && job.priority == item.priority) {
+                    drop(state);
+                    self.queue.task_done();
+                    continue;
+                }
+                if result.as_ref().is_err_and(|e| e.code == "preview_source_changed") {
+                    state.pop_job(&item.key);
+                    state.entries.retain(|(id, _)| id != &item.identity);
+                    self.finished.notify_all();
+                    drop(state);
+                    let page = match &item.candidate {
+                        Candidate::Canvas(c) => c.page_index as i64,
+                        Candidate::Pdf(c) => c.page_index,
+                        Candidate::Ink(c) => c.page_index,
+                    };
+                    if !self.stop.load(AtomicOrdering::SeqCst) {
+                        let _ = Inner::request_once(self, &item.identity, page, item.priority);
+                    }
+                    self.queue.task_done();
+                    continue;
+                }
+                let start_full = item.priority <= 0 && self.connected() && matches!(&item.candidate, Candidate::Canvas(_))
+                    && matches!(&result, Ok(Some(_)));
                 let job = match result {
-                    Ok(None) => Job { state: JobState::Ready, error: None, priority: 0, local_pdf: None, retry_after: None, served: None, offline: false },
+                    Ok(None) => { state.retry_counts.remove(&item.key); Job { state: JobState::Ready, error: None, priority: 0, local_pdf: None, retry_after: None, served: None, offline: false } },
                     // Served by a stand-in: retry the full image later only.
-                    Ok(Some(served)) => Job { state: JobState::Ready, error: None, priority: 0, local_pdf: None,
-                                              retry_after: Some(Instant::now() + RETRY_FULL), served: Some(served), offline: false },
+                    Ok(Some(served)) => {
+                        let count = state.retry_counts.entry(item.key.clone()).or_default();
+                        let delay = RETRY_FULL.saturating_mul(1u32 << (*count).min(6));
+                        *count = count.saturating_add(1);
+                        Job { state: JobState::Ready, error: None, priority: 0, local_pdf: None,
+                              retry_after: Some(Instant::now() + delay), served: Some(served), offline: false }
+                    },
                     Err(e) => {
                         let known = e.kind == Kind::Preview || e.kind == Kind::PdfBackground || e.is_api() || e.is_store();
                         let offline = e.is_store() && e.code == "preview_offline";
@@ -956,6 +1011,17 @@ impl Inner {
                     }
                 };
                 state.set_job(&item.key, job);
+                if start_full {
+                    if let Candidate::Canvas(c) = &item.candidate {
+                        if !state.decode_failures.contains(&decode_failure_key(&item.key, c))
+                            && !state.download_failures.contains(&download_failure_key(&item.key, c))
+                            && state.make_room(5)
+                        {
+                            if let Some(job) = state.job_mut(&item.key) { job.state = JobState::Pending; job.priority = 5; }
+                            self.queue.put(self.queue_item(&item.key, &item.identity, &item.source, &item.candidate, &item.path, 5, None));
+                        }
+                    }
+                }
                 self.finished.notify_all();
             }
             self.queue.task_done();
@@ -971,6 +1037,7 @@ impl Inner {
         match pdf::fetch_pdf(candidate, self.env.as_ref(), &directory, &account, Some(guard)) {
             Err(e) if pdf::is_link_expired(&e) => {
                 let fresh = self.env.refresh_note(identity)?;
+                self.invalidate_snapshot(identity);
                 let parsed = crate::payload::payload_from_snapshot(&fresh)?;
                 let renewed = pdf::inspect_pdf_backgrounds(&parsed)?
                     .into_iter()
@@ -985,7 +1052,7 @@ impl Inner {
         }
     }
 
-    fn process(&self, item: &QueueItem) -> Result<Option<PathBuf>, Fail> {
+    fn process(&self, item: &QueueItem, stages: &mut Stages) -> Result<Option<PathBuf>, Fail> {
         let candidate = &item.candidate;
         // Local pages and canvas pages (drawn locally when offline) run offline.
         let local_ok = matches!(candidate, Candidate::Ink(_) | Candidate::Canvas(_));
@@ -995,7 +1062,7 @@ impl Inner {
                 || self.source(&item.identity)? != item.source
                 || self.path(candidate)? != item.path
             {
-                return Err(preview("Not veya hesap değişti. Sayfayı yeniden açabilirsin."));
+                return Err(Fail::store("preview_source_changed", "Not veya hesap değişti.", 409));
             }
             Ok(())
         };
@@ -1005,9 +1072,9 @@ impl Inner {
             Candidate::Ink(c) => {
                 let snapshot = self.snapshot(&item.identity)?;
                 if !snapshot.get("raw_sha256").is_some_and(|v| py_eq(v, &Val::s(c.sha256.clone()))) {
-                    return Err(preview("Not değişti. Sayfayı yeniden açabilirsiniz."));
+                    return Err(Fail::store("preview_source_changed", "Not değişti.", 409));
                 }
-                let (png, complete) = self.render_local(&item.identity, c, &snapshot, &guard)?;
+                let (png, complete) = self.render_local(&item.identity, c, &snapshot, &guard, true, item.priority)?;
                 if !complete {
                     // Pictures not downloaded (or ink approximated): keep it as
                     // a stand-in; the full image is retried later.
@@ -1038,7 +1105,7 @@ impl Inner {
                         if !snapshot.get("raw_sha256").is_some_and(|v| py_eq(v, &Val::s(local.sha256.clone()))) {
                             return Err(e);
                         }
-                        let (layered, _) = self.render_local_over(&item.identity, local, &snapshot, &guard, Some(png))?;
+                        let (layered, _) = self.render_local_over(&item.identity, local, &snapshot, &guard, Some(png), true, item.priority)?;
                         let stand_in = local_path(&item.path);
                         guard()?;
                         Inner::cache_png(&stand_in, &layered, width, height, &guard)?;
@@ -1050,9 +1117,9 @@ impl Inner {
                     // The page's own objects drawn locally over the PDF page.
                     let snapshot = self.snapshot(&item.identity)?;
                     if !snapshot.get("raw_sha256").is_some_and(|v| py_eq(v, &Val::s(local.sha256.clone()))) {
-                        return Err(preview("Not değişti. Sayfayı yeniden açabilirsiniz."));
+                        return Err(Fail::store("preview_source_changed", "Not değişti.", 409));
                     }
-                    let (layered, complete) = self.render_local_over(&item.identity, local, &snapshot, &guard, Some(png))?;
+                    let (layered, complete) = self.render_local_over(&item.identity, local, &snapshot, &guard, Some(png), true, item.priority)?;
                     if !complete {
                         let partial = partial_path(&item.path);
                         guard()?;
@@ -1064,13 +1131,50 @@ impl Inner {
                 png
             }
             Candidate::Canvas(c) => {
+                // The page on screen must not wait for an unavailable network.
+                // Media missing locally remains a placeholder until background work.
+                if item.priority <= 0 {
+                    let start = Instant::now();
+                    let local = self.canvas_fallback(item, c);
+                    stages.local = start.elapsed();
+                    match local {
+                        Ok(Some(path)) => return Ok(Some(path)),
+                        Err(e) if e.code == "preview_source_changed" => return Err(e),
+                        _ => guard()?,
+                    }
+                }
                 let native = (|| -> Result<Vec<u8>, Fail> {
                     if !self.connected() {
                         return Err(Fail::store("preview_offline", "Bu sayfa henüz indirilmemiş. Bağlantı kurduğunda tekrar açabilirsin.", 503));
                     }
-                    let raw = (self.fetcher)(c, self.env.as_ref(), &guard)?;
+                    if self.lock().decode_failures.contains(&decode_failure_key(&item.key, c))
+                        || self.lock().download_failures.contains(&download_failure_key(&item.key, c)) {
+                        return Err(preview("Sayfa önbelleği çözümlenemedi."));
+                    }
+                    let start = Instant::now();
+                    let fetched = (self.fetcher)(c, self.env.as_ref(), &guard);
+                    stages.download = start.elapsed();
+                    let raw = match fetched {
+                        Ok(raw) => raw,
+                        Err(e) if e.code == "preview_cache_permanent" => {
+                            guard()?;
+                            self.lock().download_failures.insert(download_failure_key(&item.key, c));
+                            return Err(e);
+                        }
+                        Err(e) => return Err(e),
+                    };
                     guard()?;
-                    let png = (self.decoder)(&raw, (width, height))?;
+                    let start = Instant::now();
+                    let decoded = (self.decoder)(&raw, (width, height));
+                    stages.decode = start.elapsed();
+                    let png = match decoded {
+                        Ok(png) => png,
+                        Err(e) => {
+                            guard()?;
+                            self.lock().decode_failures.insert(decode_failure_key(&item.key, c));
+                            return Err(e);
+                        }
+                    };
                     if c.is_dark_mode { pdf::light_from_dark(&png, width, height) } else { Ok(png) }
                 })();
                 match native {
@@ -1080,12 +1184,21 @@ impl Inner {
                         // size, or a cache variant the decoder refuses): draw
                         // the page locally when the note allows it.
                         let stopped = self.stop.load(AtomicOrdering::SeqCst);
-                        if stopped || guard().is_err() {
-                            return Err(e);
+                        if stopped { return Err(e); }
+                        guard()?;
+                        let existing = local_path(&item.path);
+                        if !self.lock().partial_canvas.contains(&item.key) {
+                            if let Some(raw) = read_cached(&existing, MAX_PNG as u64)? {
+                                if crate::png_valid(&raw, c.width, c.height) { guard()?; return Ok(Some(existing)); }
+                            }
                         }
-                        match self.canvas_fallback(item, c) {
+                        let start = Instant::now();
+                        let fallback = self.canvas_fallback(item, c);
+                        stages.local = start.elapsed();
+                        match fallback {
                             Ok(Some(path)) => return Ok(Some(path)),
-                            _ => return Err(e),
+                            Err(changed) if changed.code == "preview_source_changed" => return Err(changed),
+                            _ => { guard()?; return Err(e); },
                         }
                     }
                 }
@@ -1123,29 +1236,113 @@ impl Inner {
         pdf::compose_pdf_canvas(png, &layer, c.width, c.height)
     }
 
-    fn snapshot(&self, identity: &str) -> Result<Val, Fail> {
-        let row = self.store.raw(identity).map_err(store_fail)?;
-        let text = row.get("base_document").and_then(Val::as_str)
-            .ok_or_else(|| Fail::type_("the JSON object must be str, bytes or bytearray, not NoneType"))?;
-        notes_host::snapshot::loads(text)
+    /// This connection only observes commits; StoreCore opens separate
+    /// connections for its operations. A commit may replace a snapshot even
+    /// when the note's visible source fields and commit id stay unchanged.
+    fn snapshot_epoch(&self) -> Result<i64, Fail> {
+        use rs_store::db::Sql;
+        let rows = self.db_monitor.query("PRAGMA data_version", &[]).map_err(store_fail)?;
+        rows.one().and_then(|row| row.at(0).as_i64())
+            .ok_or_else(|| Fail::os("snapshot version unavailable"))
+    }
+
+    fn refresh_snapshot_epoch(&self) -> Result<i64, Fail> {
+        let epoch = self.snapshot_epoch()?;
+        let mut state = self.lock();
+        if state.snapshot_epoch != Some(epoch) {
+            // A sync can change stored bytes while keeping the visible note
+            // revision and commit unchanged. Discard both derived caches.
+            state.snapshots.clear();
+            state.entries.clear();
+            state.snapshot_epoch = Some(epoch);
+        }
+        Ok(epoch)
+    }
+
+    fn snapshot(&self, identity: &str) -> Result<Arc<Val>, Fail> {
+        crate::ink::measure(crate::ink::SNAPSHOT, || {
+            let source = self.source(identity)?;
+            let epoch = self.refresh_snapshot_epoch()?;
+            {
+                let mut state = self.lock();
+                if let Some(at) = state.snapshots.iter().position(|(id, old, _, _, _)| id == identity && *old == source) {
+                    let entry = state.snapshots.remove(at);
+                    let hit = entry.2.clone();
+                    state.snapshots.push(entry);
+                    return Ok(hit);
+                }
+            }
+            let row = self.store.raw(identity).map_err(store_fail)?;
+            let text = row.get("base_document").and_then(Val::as_str);
+            let text = text.ok_or_else(|| Fail::type_("the JSON object must be str, bytes or bytearray, not NoneType"))?;
+            let value = Arc::new(notes_host::snapshot::loads(text)?);
+            if self.source(identity)? != source || self.snapshot_epoch()? != epoch {
+                return Err(Fail::store("preview_source_changed", "Not değişti.", 409));
+            }
+            // Include overhead for the parsed strings and structure; keep at
+            // most four snapshots and do not pin a single oversized document.
+            let size = text.len().saturating_mul(2);
+            const SNAPSHOT_BUDGET: usize = 128 * 1024 * 1024;
+            if size <= SNAPSHOT_BUDGET {
+                let mut state = self.lock();
+                if state.snapshot_epoch != Some(epoch) {
+                    return Err(Fail::store("preview_source_changed", "Not değişti.", 409));
+                }
+                state.snapshots.retain(|(id, _, _, _, _)| id != identity);
+                state.snapshots.push((identity.to_string(), source, value.clone(), size, None));
+                while state.snapshots.len() > 4 || state.snapshots.iter().map(|e| e.3).sum::<usize>() > SNAPSHOT_BUDGET {
+                    state.snapshots.remove(0);
+                }
+            }
+            Ok(value)
+        })
+    }
+
+    fn invalidate_snapshot(&self, identity: &str) {
+        self.lock().snapshots.retain(|(id, _, _, _, _)| id != identity);
+    }
+
+    /// Download links depend on the same immutable snapshot as the page
+    /// bodies. Parse them once, only when a page actually needs uncached media.
+    fn media_urls(&self, snapshot: &Arc<Val>) -> Arc<BTreeMap<String, String>> {
+        {
+            let state = self.lock();
+            if let Some(hit) = state.snapshots.iter().find(|e| Arc::ptr_eq(&e.2, snapshot)).and_then(|e| e.4.clone()) {
+                return hit;
+            }
+        }
+        let urls: BTreeMap<String, String> = crate::ink::measure(crate::ink::PAYLOAD, ||
+            crate::payload::payload_from_snapshot(snapshot).map(|p| {
+                p.result.download_urls.iter().map(|d| (d.id.to_lowercase(), d.url.clone())).collect()
+            }).unwrap_or_default());
+        let size: usize = urls.iter().map(|(key, value)| key.len().saturating_add(value.len()).saturating_add(128)).sum();
+        let urls = Arc::new(urls);
+        if size <= 8 * 1024 * 1024 {
+            let mut state = self.lock();
+            if let Some(entry) = state.snapshots.iter_mut().find(|e| Arc::ptr_eq(&e.2, snapshot)) {
+                entry.4 = Some(urls.clone());
+            }
+        }
+        urls
     }
 
     /// A local page (renderer-only ink or composite) with its pictures:
     /// verified media cache first, then (connected) a download through the
     /// account transport. Returns the PNG and whether it is complete.
-    fn render_local(&self, identity: &str, c: &InkGeometryPreview, snapshot: &Val, guard: &dyn Fn() -> Result<(), Fail>) -> Result<(Vec<u8>, bool), Fail> {
-        self.render_local_over(identity, c, snapshot, guard, None)
+    fn render_local(&self, identity: &str, c: &InkGeometryPreview, snapshot: &Arc<Val>, guard: &dyn Fn() -> Result<(), Fail>, download_media: bool, priority: i64) -> Result<(Vec<u8>, bool), Fail> {
+        self.render_local_over(identity, c, snapshot, guard, None, download_media, priority)
     }
 
     /// `render_local` with the PDF page image a PDF page's layer is drawn on.
-    fn render_local_over(&self, identity: &str, c: &InkGeometryPreview, snapshot: &Val, guard: &dyn Fn() -> Result<(), Fail>,
-                         underlay: Option<Vec<u8>>) -> Result<(Vec<u8>, bool), Fail> {
-        let wanted = if c.composite { self.ink.page_media(snapshot, c.page_index) } else { Vec::new() };
+    fn render_local_over(&self, identity: &str, c: &InkGeometryPreview, snapshot: &Arc<Val>, guard: &dyn Fn() -> Result<(), Fail>,
+                         underlay: Option<Vec<u8>>, download_media: bool, priority: i64) -> Result<(Vec<u8>, bool), Fail> {
+        let wanted = if c.composite { self.ink.page_media_priority(snapshot, c.page_index, priority) } else { Vec::new() };
+        let media_started = Instant::now();
         let mut found: BTreeMap<String, Vec<u8>> = BTreeMap::new();
         if let Some(png) = underlay {
             found.insert(crate::ink::prepare::PDF_UNDERLAY.to_string(), png);
         }
-        let mut urls: Option<BTreeMap<String, String>> = None;
+        let mut urls: Option<Arc<BTreeMap<String, String>>> = None;
         for sha in wanted {
             if found.contains_key(&sha) || sha.len() != 64 {
                 continue;
@@ -1154,13 +1351,11 @@ impl Inner {
                 found.insert(sha, bytes);
                 continue;
             }
-            if !self.connected() {
+            if !download_media || !self.connected() {
                 continue;
             }
             if urls.is_none() {
-                urls = Some(crate::payload::payload_from_snapshot(snapshot).map(|p| {
-                    p.result.download_urls.iter().map(|d| (d.id.to_lowercase(), d.url.clone())).collect()
-                }).unwrap_or_default());
+                urls = Some(self.media_urls(snapshot));
             }
             let Some(url) = urls.as_ref().and_then(|u| u.get(&sha)).cloned() else { continue };
             guard()?;
@@ -1169,8 +1364,9 @@ impl Inner {
                 found.insert(sha, bytes);
             }
         }
+        crate::ink::record_elapsed(crate::ink::MEDIA, media_started.elapsed());
         guard()?;
-        self.ink.render_page(snapshot, c.page_index, &|sha| found.get(sha).cloned())
+        self.ink.render_page_priority(snapshot, c.page_index, &|sha| found.get(sha).cloned(), priority)
     }
 
     fn media_path(&self, sha256: &str) -> Result<PathBuf, Fail> {
@@ -1235,7 +1431,14 @@ impl Inner {
             }
             done.push((identity.to_string(), Instant::now()));
         }
-        self.env.refresh_note(identity).is_ok()
+        if self.env.refresh_note(identity).is_ok() {
+            // A refresh can replace signed links without changing the note
+            // commit or visible revision used by Source.
+            self.invalidate_snapshot(identity);
+            true
+        } else {
+            false
+        }
     }
 
     /// The local page of a canvas-cache page, scaled to the canvas size and
@@ -1244,25 +1447,35 @@ impl Inner {
     fn canvas_fallback(&self, item: &QueueItem, c: &CanvasPreviewCandidate) -> Result<Option<PathBuf>, Fail> {
         let guard = || -> Result<(), Fail> {
             if self.stop.load(AtomicOrdering::SeqCst) || self.source(&item.identity)? != item.source {
-                return Err(preview("Not veya hesap değişti. Sayfayı yeniden açabilirsin."));
+                return Err(Fail::store("preview_source_changed", "Not veya hesap değişti.", 409));
             }
             Ok(())
         };
         let snapshot = self.snapshot(&item.identity)?;
         let Some(digest) = snapshot.get("raw_sha256").and_then(Val::as_str).map(str::to_string) else { return Ok(None) };
         let index = c.page_index as i64;
-        let Some(page) = self.ink_inventory(&snapshot, &digest)?.into_iter().find(|p| p.index == index && !p.over_pdf) else { return Ok(None) };
+        let Some(page) = crate::ink::measure(crate::ink::INVENTORY_STAGE, || self.ink_inventory(&snapshot, &digest))?.into_iter().find(|p| p.index == index && !p.over_pdf) else { return Ok(None) };
         let local = InkGeometryPreview {
             page_index: index, width: page.width, height: page.height, sha256: digest,
             is_dark_mode: page.dark_mode.unwrap_or(false), composite: page.composite, notice: page.notice.clone(),
         };
-        let (png, _) = self.render_local(&item.identity, &local, &snapshot, &guard)?;
+        let (png, complete) = self.render_local(&item.identity, &local, &snapshot, &guard, item.priority > 0, item.priority)?;
         let png = if (page.width, page.height) == (c.width, c.height) { png } else { rescale_png(&png, (page.width, page.height), (c.width, c.height))? };
         let path = local_path(&item.path);
         guard()?;
         Inner::cache_png(&path, &png, c.width, c.height, &guard)?;
+        let mut state = self.lock();
+        if complete { state.partial_canvas.remove(&item.key); } else { state.partial_canvas.insert(item.key.clone()); }
         Ok(Some(path))
     }
+}
+
+fn download_failure_key(key: &str, c: &CanvasPreviewCandidate) -> String {
+    format!("{key}:{}", util::sha256_hex(c.download_url.as_deref().unwrap_or("").as_bytes()))
+}
+
+fn decode_failure_key(key: &str, c: &CanvasPreviewCandidate) -> String {
+    format!("{key}:{}:{}", c.width, c.height)
 }
 
 /// How long a stand-in (local drawing of a canvas page, partial composite)
@@ -1369,6 +1582,44 @@ mod queue_tests {
     }
 
     #[test]
+    fn refreshing_links_invalidates_snapshot_even_when_source_is_unchanged() {
+        struct Refresh { store: Arc<StoreCore>, document: String }
+        impl PreviewEnv for Refresh {
+            fn session_path(&self) -> Option<PathBuf> { Some(PathBuf::from("synthetic-session")) }
+            fn offline(&self) -> bool { false }
+            fn headers(&self) -> Result<Vec<(String, String)>, Fail> { Ok(vec![]) }
+            fn refresh_note(&self, identity: &str) -> Result<Val, Fail> {
+                self.store.with_db(|db| {
+                    use rs_store::db::Sql;
+                    db.exec("UPDATE notes SET base_document=? WHERE id=?", &rs_store::p![self.document.as_str(), identity])?;
+                    Ok(())
+                }).map_err(store_fail)?;
+                Ok(Val::Null)
+            }
+        }
+        let dir = std::env::temp_dir().join(format!("preview-refresh-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let store = Arc::new(StoreCore::open(&dir).unwrap());
+        let note = store.create(&Val::s("Synthetic"), &Val::s("")).unwrap();
+        let id = note.get("id").unwrap().as_str().unwrap().to_string();
+        {
+            use rs_store::db::Sql;
+            store.with_db(|db| { db.exec("UPDATE notes SET base_document=? WHERE id=?", &rs_store::p![r#"{"url":"old"}"#, id.as_str()])?; Ok(()) }).unwrap();
+        }
+        let env = Arc::new(Refresh { store: store.clone(), document: r#"{"url":"new"}"#.to_string() });
+        let manager = PreviewManager::with_options(store, env, PreviewOptions {
+            source_hook: Some(Arc::new(|_| Ok(Source(vec![Val::s("same-commit")])))), ..Default::default()
+        }).unwrap();
+        assert_eq!(manager.inner.snapshot(&id).unwrap().get("url"), Some(&Val::s("old")));
+        assert!(manager.inner.renew_links(&id));
+        assert_eq!(manager.inner.snapshot(&id).unwrap().get("url"), Some(&Val::s("new")));
+        manager.close();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn a_full_queue_gives_the_page_on_screen_a_warm_up_slot() {
         // Before: a full queue answered 429 to the page on screen, the UI gave
         // up and showed "not ready" although the page could be drawn at once.
@@ -1392,7 +1643,10 @@ mod queue_tests {
 /// Diagnostics only, off unless NOTES_PREVIEW_TIMING names a file: one JSON
 /// line per job with the page kind, priority, queue wait, work time and
 /// outcome. No note ids, titles or content.
-fn timing(item: &QueueItem, started: Instant, result: &Result<Option<PathBuf>, Fail>) {
+#[derive(Default)]
+struct Stages { download: Duration, decode: Duration, local: Duration, renderer: Duration, png: Duration, detail: [Duration; 19] }
+
+fn timing(item: &QueueItem, started: Instant, result: &Result<Option<PathBuf>, Fail>, stages: &Stages) {
     let Some(file) = std::env::var_os("NOTES_PREVIEW_TIMING") else { return };
     let kind = match &item.candidate {
         Candidate::Canvas(_) => "canvas",
@@ -1402,10 +1656,17 @@ fn timing(item: &QueueItem, started: Instant, result: &Result<Option<PathBuf>, F
     let outcome = match result {
         Ok(None) => "ready".to_string(),
         Ok(Some(_)) => "stand-in".to_string(),
-        Err(e) => format!("error:{:?}:{}:{}", e.kind, e.code, e.message.replace(['"', '\\', '\n'], " ")),
+        Err(e) => format!("error:{:?}", e.kind),
     };
-    let line = format!("{{\"kind\":\"{kind}\",\"priority\":{},\"waitMs\":{},\"workMs\":{},\"outcome\":\"{outcome}\"}}\n",
-        item.priority, started.duration_since(item.queued).as_millis(), started.elapsed().as_millis());
+    let line = format!("{{\"kind\":\"{kind}\",\"priority\":{},\"waitMs\":{},\"workMs\":{},\"downloadMs\":{},\"decodeMs\":{},\"localMs\":{},\"rendererMs\":{},\"pngEncodeMs\":{},\"snapshotMs\":{},\"inventoryMs\":{},\"bodyMs\":{},\"mediaMs\":{},\"compositeMs\":{},\"payloadMs\":{},\"cacheWriteMs\":{},\"rasterMs\":{},\"identityMs\":{},\"childSpawnMs\":{},\"childReadyMs\":{},\"childReadMs\":{},\"childJsonMs\":{},\"childSnapshotMs\":{},\"childVerifyMs\":{},\"childStrokeDecodeMs\":{},\"childInventoryMs\":{},\"childPageBuildMs\":{},\"childWriteMs\":{},\"outcome\":\"{outcome}\"}}\n",
+        item.priority, started.duration_since(item.queued).as_millis(), started.elapsed().as_millis(),
+        stages.download.as_millis(), stages.decode.as_millis(), stages.local.as_millis(), stages.renderer.as_millis(), stages.png.as_millis(),
+        stages.detail[0].as_millis(), stages.detail[1].as_millis(), stages.detail[2].as_millis(),
+        stages.detail[3].as_millis(), stages.detail[4].as_millis(), stages.detail[5].as_millis(),
+        stages.detail[6].as_millis(), stages.detail[7].as_millis(), stages.detail[8].as_millis(),
+        stages.detail[9].as_millis(), stages.detail[10].as_millis(), stages.detail[11].as_millis(), stages.detail[12].as_millis(),
+        stages.detail[13].as_millis(), stages.detail[14].as_millis(), stages.detail[15].as_millis(), stages.detail[16].as_millis(),
+        stages.detail[17].as_millis(), stages.detail[18].as_millis());
     use std::io::Write;
     if let Ok(mut out) = std::fs::OpenOptions::new().create(true).append(true).open(file) {
         let _ = out.write_all(line.as_bytes());

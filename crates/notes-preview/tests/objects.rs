@@ -173,7 +173,10 @@ fn a_canvas_page_whose_cache_cannot_be_used_is_drawn_locally() {
     assert_eq!(list[1].get("previewKind"), None, "still Samsung's canvas page in the manifest");
     let png = wait_png(&m, &id, 1);
     assert!(notes_preview::png_valid(&png, 1080, 1527));
-    assert_eq!(pixel(&png, 300, 450), [30, 60, 230, 255], "the page's own picture, drawn locally");
+    assert_eq!(pixel(&png, 300, 450), [0xf1, 0xf1, 0xf1, 255], "initial stand-in does not wait for media");
+    assert!(m.wait_idle(Some(Duration::from_secs(30))));
+    let completed = wait_png(&m, &id, 1);
+    assert_eq!(pixel(&completed, 300, 450), [30, 60, 230, 255], "background fills the page's picture");
     m.close();
     m.join(Duration::from_secs(2));
 }
@@ -238,4 +241,108 @@ fn a_free_floating_picture_is_drawn_on_its_page() {
     assert_eq!(asked.lock().unwrap().as_slice(), [sha]);
     m.close();
     m.join(Duration::from_secs(2));
+}
+
+#[test]
+fn deterministic_canvas_decode_failure_is_not_retried_for_same_content() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let dir = TempDir::new();
+    let store = store(dir.path());
+    let (snapshot, images) = fixture();
+    let id = note_with_document(&store, &snapshot);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let count = calls.clone();
+    let manager = PreviewManager::with_options(store, TestEnv::new(Some(dir.path()), false), PreviewOptions {
+        fetcher: Some(Arc::new(move |_, _, _| { count.fetch_add(1, Ordering::SeqCst); Ok(b"undecodable".to_vec()) })),
+        decoder: Some(Arc::new(|_, _| Err(Fail::new(notes_preview::Kind::Preview, "invalid cache")))),
+        media_fetcher: Some(media(images, Arc::new(Mutex::new(Vec::new())))),
+        ..Default::default()
+    }).unwrap();
+    wait_png(&manager, &id, 1);
+    assert!(manager.wait_idle(Some(Duration::from_secs(30))));
+    let candidate = manager.entry(&id).unwrap().candidates[&1].clone();
+    let path = manager.path(&candidate).unwrap().with_extension("local.png");
+    std::fs::remove_file(path).unwrap();
+    wait_png(&manager, &id, 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    manager.close();
+}
+
+#[test]
+fn same_revision_snapshot_replacement_invalidates_note_inventory() {
+    use rs_store::db::Sql;
+    let dir = TempDir::new();
+    let store = store(dir.path());
+    let (old, _) = fixture();
+    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/floating_note.json")).unwrap();
+    let floating = rs_store::val::loads(&text).unwrap();
+    let new = floating.get("snapshot").unwrap();
+    let id = note_with_document(&store, &old);
+    let manager = PreviewManager::new(store.clone(), TestEnv::new(None, true)).unwrap();
+    let before = manager.entry(&id).unwrap();
+    assert_eq!(before.pages.len(), 3);
+    let source = manager.source(&id).unwrap();
+    let json = rs_store::val::dumps(new, true, true).unwrap();
+    store.with_db(|db| { db.exec("UPDATE notes SET base_document=? WHERE id=?", &rs_store::p![json, id.as_str()])?; Ok(()) }).unwrap();
+    assert_eq!(manager.source(&id).unwrap().0, source.0);
+    let after = manager.entry(&id).unwrap();
+    assert_ne!(after.candidates, before.candidates);
+    manager.close();
+}
+
+#[test]
+fn foreground_canvas_returns_local_before_blocked_download_and_upgrades() {
+    use std::sync::mpsc;
+    let dir = TempDir::new();
+    let store = store(dir.path());
+    let (snapshot, images) = fixture();
+    let id = note_with_document(&store, &snapshot);
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let release_rx = Mutex::new(release_rx);
+    let expected = png(1080, 1527, &vec![255; 1080 * 1527 * 4]);
+    let full = expected.clone();
+    let manager = PreviewManager::with_options(store, TestEnv::new(Some(dir.path()), false), PreviewOptions {
+        fetcher: Some(Arc::new(move |_, _, _| {
+            entered_tx.send(()).unwrap();
+            release_rx.lock().unwrap().recv_timeout(Duration::from_secs(15)).unwrap();
+            Ok(b"synthetic".to_vec())
+        })),
+        decoder: Some(Arc::new(move |_, _| Ok(full.clone()))),
+        media_fetcher: Some(media(images, Arc::new(Mutex::new(Vec::new())))),
+        ..Default::default()
+    }).unwrap();
+    let standin = manager.request(&id, 1, 0, 8.0).unwrap().expect("foreground must not wait for download");
+    assert_ne!(standin, expected);
+    entered_rx.recv_timeout(Duration::from_secs(5)).expect("full image should start in background");
+    assert_eq!(manager.request(&id, 1, 0, 0.0).unwrap(), Some(standin));
+    release_tx.send(()).unwrap();
+    assert!(manager.wait_idle(Some(Duration::from_secs(20))));
+    assert_eq!(manager.request(&id, 1, 0, 5.0).unwrap(), Some(expected));
+    manager.close();
+}
+
+#[test]
+fn forbidden_canvas_is_not_retried_after_a_new_standin() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let dir = TempDir::new();
+    let store = store(dir.path());
+    let (snapshot, images) = fixture();
+    let id = note_with_document(&store, &snapshot);
+    let env = TestEnv::new(Some(dir.path()), false);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let count = calls.clone();
+    *env.http.lock().unwrap() = Some(Box::new(move |_, _| { count.fetch_add(1, Ordering::SeqCst); Ok((403, vec![], None)) }));
+    let manager = PreviewManager::with_options(store, env, PreviewOptions {
+        media_fetcher: Some(media(images, Arc::new(Mutex::new(Vec::new())))), ..Default::default()
+    }).unwrap();
+    wait_png(&manager, &id, 1);
+    assert!(manager.wait_idle(Some(Duration::from_secs(30))));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let path = manager.path(&manager.entry(&id).unwrap().candidates[&1]).unwrap().with_extension("local.png");
+    std::fs::remove_file(path).unwrap();
+    wait_png(&manager, &id, 1);
+    assert!(manager.wait_idle(Some(Duration::from_secs(30))));
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "403 must not trigger another download for the same URL");
+    manager.close();
 }

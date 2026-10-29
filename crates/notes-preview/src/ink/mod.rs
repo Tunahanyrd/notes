@@ -4,9 +4,8 @@
 //! Where that work runs:
 //!
 //! * **In-process (default)**: a background thread per note prepares the
-//!   inventory, then the requested page, then every other admitted page,
-//!   filling the same per-note body cache (96 MiB, 4 notes) the Python/PyO3
-//!   versions fill from their streaming child. No interpreter is started.
+//!   inventory once and builds pages on demand into the bounded per-note body
+//!   cache. No interpreter is started.
 //! * **Self-exec** ([`crate::PreviewEnv::ink_child_executable`] returns a path):
 //!   the engine binary is re-executed with the hidden first argument
 //!   [`CHILD_FLAG`]; it must call [`run_child`] at the top of `main()`. The
@@ -25,11 +24,64 @@ use crate::util::{ink_render, sha256};
 use notes_host::{Fail, Val};
 use rs_render::pixels as px;
 use rs_render::sandbox;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
+
+thread_local! {
+    static STAGE_TIMES: std::cell::Cell<(Duration, Duration)> = const { std::cell::Cell::new((Duration::ZERO, Duration::ZERO)) };
+}
+
+pub(crate) fn take_stage_times() -> (Duration, Duration) {
+    STAGE_TIMES.with(|times| times.replace((Duration::ZERO, Duration::ZERO)))
+}
+
+pub(crate) fn measure_png<T>(f: impl FnOnce() -> T) -> T {
+    let start = Instant::now();
+    let result = f();
+    STAGE_TIMES.with(|times| { let (render, png) = times.get(); times.set((render, png + start.elapsed())); });
+    result
+}
+
+fn measure_renderer<T>(f: impl FnOnce() -> T) -> T {
+    let start = Instant::now();
+    let result = f();
+    STAGE_TIMES.with(|times| { let (render, png) = times.get(); times.set((render + start.elapsed(), png)); });
+    result
+}
+
+// Per-worker measurements; spans may overlap. Bounded timing frames from the
+// isolated preparation child are attributed to the first waiter of each page.
+thread_local! {
+    static DETAIL_TIMES: std::cell::Cell<[Duration; 19]> = const { std::cell::Cell::new([Duration::ZERO; 19]) };
+}
+pub(crate) const SNAPSHOT: usize = 0;
+pub(crate) const INVENTORY_STAGE: usize = 1;
+pub(crate) const BODY: usize = 2;
+pub(crate) const MEDIA: usize = 3;
+pub(crate) const COMPOSITE: usize = 4;
+pub(crate) const PAYLOAD: usize = 5;
+pub(crate) const CACHE_WRITE: usize = 6;
+pub(crate) const RASTER: usize = 7;
+pub(crate) const IDENTITY: usize = 8;
+const CHILD_SPAWN: usize = 9;
+const CHILD_PAGE: usize = 17;
+const CHILD_WRITE: usize = 18;
+
+pub(crate) fn take_detail_times() -> [Duration; 19] {
+    DETAIL_TIMES.with(|v| v.replace([Duration::ZERO; 19]))
+}
+pub(crate) fn record_elapsed(stage: usize, elapsed: Duration) {
+    DETAIL_TIMES.with(|v| { let mut times = v.get(); times[stage] += elapsed; v.set(times); });
+}
+pub(crate) fn measure<T>(stage: usize, f: impl FnOnce() -> T) -> T {
+    let start = Instant::now();
+    let result = f();
+    DETAIL_TIMES.with(|v| { let mut times = v.get(); times[stage] += start.elapsed(); v.set(times); });
+    result
+}
 
 /// Hidden argv[1] of the self-exec preparation child.
 pub const CHILD_FLAG: &str = "__notes-ink-render-job";
@@ -72,6 +124,23 @@ pub trait InkBackend: Send + Sync {
     fn page_media(&self, _snapshot: &Val, _page_index: i64) -> Vec<String> {
         Vec::new()
     }
+    /// Shared snapshots allow the native backend to reuse their serialized
+    /// identity. Other backends keep their existing interface.
+    fn page_media_shared(&self, snapshot: &Arc<Val>, page_index: i64) -> Vec<String> {
+        self.page_media(snapshot, page_index)
+    }
+    fn render_page_shared(&self, snapshot: &Arc<Val>, page_index: i64, media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<(Vec<u8>, bool), Fail> {
+        self.render_page(snapshot, page_index, media)
+    }
+    /// Priority separates foreground preparation from background preparation
+    /// for backends which share a long-lived per-note worker.
+    fn page_media_priority(&self, snapshot: &Arc<Val>, page_index: i64, _priority: i64) -> Vec<String> {
+        self.page_media_shared(snapshot, page_index)
+    }
+    fn render_page_priority(&self, snapshot: &Arc<Val>, page_index: i64, media: &dyn Fn(&str) -> Option<Vec<u8>>,
+                            _priority: i64) -> Result<(Vec<u8>, bool), Fail> {
+        self.render_page_shared(snapshot, page_index, media)
+    }
     /// The page PNG with images from `media` (SHA256 -> verified bytes) and
     /// whether every image could be drawn (false: placeholders were used).
     fn render_page(&self, snapshot: &Val, page_index: i64, _media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<(Vec<u8>, bool), Fail> {
@@ -83,11 +152,12 @@ pub trait InkBackend: Send + Sync {
 pub struct NativeInk {
     root: PathBuf,
     child: Option<PathBuf>,
+    identities: Mutex<VecDeque<(Arc<Val>, [u8; 32], Arc<Vec<u8>>)>>,
 }
 
 impl NativeInk {
     pub fn new(root: PathBuf, child: Option<PathBuf>) -> NativeInk {
-        NativeInk { root, child }
+        NativeInk { root, child, identities: Mutex::new(VecDeque::new()) }
     }
 
     /// `ink_render.RENDERER`: the optimized build when present.
@@ -116,16 +186,77 @@ impl InkBackend for NativeInk {
     }
 
     fn page_media(&self, snapshot: &Val, page_index: i64) -> Vec<String> {
-        match page_body(snapshot, page_index, self.child.as_deref()) {
+        match measure(BODY, || page_body(snapshot, page_index, self.child.as_deref())) {
             Ok((_, body)) if is_composite(&body) => composite_media(&body),
             _ => Vec::new(),
         }
     }
 
+    fn page_media_priority(&self, snapshot: &Arc<Val>, page_index: i64, priority: i64) -> Vec<String> {
+        let identity = self.identity(snapshot);
+        match measure(BODY, || page_body_with_identity(snapshot, page_index, self.child.as_deref(), identity, priority <= 0)) {
+            Ok((_, body)) if is_composite(&body) => composite_media(&body),
+            _ => Vec::new(),
+        }
+    }
+
+    fn render_page_priority(&self, snapshot: &Arc<Val>, page_index: i64, media: &dyn Fn(&str) -> Option<Vec<u8>>,
+                            priority: i64) -> Result<(Vec<u8>, bool), Fail> {
+        self.render_page_identity(snapshot, page_index, media, self.identity(snapshot), priority <= 0)
+    }
+    fn page_media_shared(&self, snapshot: &Arc<Val>, page_index: i64) -> Vec<String> {
+        self.page_media_priority(snapshot, page_index, 0)
+    }
+    fn render_page_shared(&self, snapshot: &Arc<Val>, page_index: i64, media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<(Vec<u8>, bool), Fail> {
+        self.render_page_priority(snapshot, page_index, media, 0)
+    }
+
     fn render_page(&self, snapshot: &Val, page_index: i64, media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<(Vec<u8>, bool), Fail> {
-        let (page, body) = page_body(snapshot, page_index, self.child.as_deref())?;
+        self.render_page_identity(snapshot, page_index, media, None, true)
+    }
+
+}
+
+impl NativeInk {
+    fn identity(&self, snapshot: &Arc<Val>) -> Option<([u8; 32], Arc<Vec<u8>>)> {
+        measure(IDENTITY, || self.identity_inner(snapshot))
+    }
+
+    fn identity_inner(&self, snapshot: &Arc<Val>) -> Option<([u8; 32], Arc<Vec<u8>>)> {
+        {
+            let mut cache = self.identities.lock().unwrap();
+            if let Some(at) = cache.iter().position(|(s, _, _)| Arc::ptr_eq(s, snapshot)) {
+                let entry = cache.remove(at).unwrap();
+                let result = (entry.1, entry.2.clone());
+                cache.push_back(entry);
+                return Some(result);
+            }
+        }
+        // Serialization can be expensive; never hold the shared LRU lock
+        // while doing it, so another note's foreground request can proceed.
+        let data = Arc::new(snapshot_bytes(snapshot)?);
+        let key = sha256(&data);
+        if data.len() <= 64 * 1024 * 1024 {
+            let mut cache = self.identities.lock().unwrap();
+            if let Some(at) = cache.iter().position(|(s, _, _)| Arc::ptr_eq(s, snapshot)) {
+                let entry = cache.remove(at).unwrap();
+                let result = (entry.1, entry.2.clone());
+                cache.push_back(entry);
+                return Some(result);
+            }
+            cache.push_back((snapshot.clone(), key, data.clone()));
+            while cache.len() > 4 || cache.iter().map(|e| e.2.len()).sum::<usize>() > 64 * 1024 * 1024 {
+                cache.pop_front();
+            }
+        }
+        Some((key, data))
+    }
+
+    fn render_page_identity(&self, snapshot: &Val, page_index: i64, media: &dyn Fn(&str) -> Option<Vec<u8>>,
+                            identity: Option<([u8; 32], Arc<Vec<u8>>)>, foreground: bool) -> Result<(Vec<u8>, bool), Fail> {
+        let (page, body) = measure(BODY, || page_body_with_identity(snapshot, page_index, self.child.as_deref(), identity, foreground))?;
         if is_composite(&body) {
-            return render_composite(&self.renderer(), &body, (page.width, page.height), media);
+            return measure(COMPOSITE, || render_composite(&self.renderer(), &body, (page.width, page.height), media));
         }
         let size = (page.width, page.height);
         match self.render_strokes(page, body) {
@@ -152,25 +283,25 @@ impl NativeInk {
                 return Err(ink_render(UNSAFE));
             }
             let pixels = rs_render::ink_render::background_pixels(width, height, argb);
-            return px::rgba_png(width, height, &pixels).map_err(|_| ink_render(px::FilteredError::Format.message()));
+            return measure_png(|| px::rgba_png(width, height, &pixels)).map_err(|_| ink_render(px::FilteredError::Format.message()));
         }
         if !self.provider_available() {
             return Err(ink_render("Çizim görüntüleyicisi bu cihazda hazır değil."));
         }
         let binary = self.renderer();
         let (width, height) = (page.width, page.height);
-        let svg = rs_render::ink_render::run_renderer(&binary, false, body, MAX_SVG).map_err(|_| ink_render(UNSAFE))?;
+        let svg = measure_renderer(|| rs_render::ink_render::run_renderer(&binary, false, body, MAX_SVG)).map_err(|_| ink_render(UNSAFE))?;
         let pixels = if std::env::var("SAMSUNG_NOTES_INK_RASTER").is_ok_and(|v| v == "rsvg") {
-            let png = rs_render::ink_render::run_renderer(&sandbox::rsvg_path(), true, svg, MAX_PNG).map_err(|_| ink_render(UNSAFE))?;
+            let png = measure_renderer(|| rs_render::ink_render::run_renderer(&sandbox::rsvg_path(), true, svg, MAX_PNG)).map_err(|_| ink_render(UNSAFE))?;
             px::unfilter_png(&png, width, height, MAX_PNG).map_err(|e| match e {
                 px::FilteredError::Invalid => ink_render(UNSAFE),
                 other => ink_render(other.message()),
             })?
         } else {
             // resvg in-process; the SVG is our own renderer's bounded output.
-            rs_render::raster::rasterize(&svg, width as u32, height as u32).map_err(|_| ink_render(UNSAFE))?
+            measure(RASTER, || rs_render::raster::rasterize(&svg, width as u32, height as u32)).map_err(|_| ink_render(UNSAFE))?
         };
-        px::rgba_png(width, height, &pixels).map_err(|_| ink_render(px::FilteredError::Format.message()))
+        measure_png(|| px::rgba_png(width, height, &pixels)).map_err(|_| ink_render(px::FilteredError::Format.message()))
     }
 }
 
@@ -241,7 +372,7 @@ pub fn render_composite(renderer: &Path, body: &[u8], size: (i64, i64), media: &
             if !available {
                 break;
             }
-            let Ok(svg) = rs_render::ink_render::run_renderer(renderer, false, input.as_bytes().to_vec(), MAX_SVG) else { continue };
+            let Ok(svg) = measure_renderer(|| rs_render::ink_render::run_renderer(renderer, false, input.as_bytes().to_vec(), MAX_SVG)) else { continue };
             let Ok(text) = String::from_utf8(svg) else { continue };
             if let Ok(found) = compose::renderer_layer(&text, width, height) {
                 if key != "renderer" {
@@ -284,7 +415,7 @@ pub fn render_composite(renderer: &Path, body: &[u8], size: (i64, i64), media: &
     }
     let inner = layer.as_ref().map(|(a, b)| (a.as_str(), b.as_str()));
     let (pixels, drawn) = compose::compose(width, height, color, &items, inner).map_err(|_| fail())?;
-    let png = px::rgba_png(width, height, &pixels).map_err(|_| ink_render(px::FilteredError::Format.message()))?;
+    let png = measure_png(|| px::rgba_png(width, height, &pixels)).map_err(|_| ink_render(px::FilteredError::Format.message()))?;
     Ok((png, complete && drawn))
 }
 
@@ -339,17 +470,6 @@ fn child_args(exe: &Path, mode: &str, page: Option<i64>) -> Vec<String> {
     args
 }
 
-/// `ink_render._job('inventory', data)` through the self-exec child.
-fn inventory_job(exe: &Path, data: Vec<u8>) -> Result<Vec<u8>, Fail> {
-    let args = child_args(exe, "inventory", None);
-    match sandbox::run_with_cwd(&args, Some(data), JOB_LIMITS, true, Duration::from_secs(180), None, false) {
-        Err(sandbox::RunError::Timeout) => Err(ink_render(TIMED_OUT)),
-        Err(sandbox::RunError::Spawn) => Err(Fail::os("ink preparation could not start")),
-        Ok(o) if o.code != Some(0) || o.stdout.is_empty() => Err(ink_render(NOT_PREPARED)),
-        Ok(o) => Ok(o.stdout),
-    }
-}
-
 /// One page's body prepared alone (`page`) or its forced composite (`forced`):
 /// in the isolated child when self-exec is configured, else in-process.
 fn single_body(snapshot: &Val, index: i64, mode: &str, child: Option<&Path>) -> Vec<u8> {
@@ -375,12 +495,16 @@ pub fn inspect_render_pages(snapshot: &Val, child: Option<&Path>) -> Vec<InkPage
     if let Some(hit) = inventory_get(&key) {
         return hit.to_vec();
     }
-    let raw = match child {
-        Some(exe) => match inventory_job(exe, data) {
-            Ok(raw) => raw,
-            Err(_) => return Vec::new(),
-        },
-        None => prepare::inventory_json(snapshot).into_bytes(),
+    // Inventory and bodies use the same note worker: the first page need not
+    // launch another child and decode the entire note a second time.
+    let slot_key = (key, true);
+    let (slot, fresh) = note_slot(slot_key);
+    if fresh && start(snapshot, data, -1, slot.clone(), slot_key, child).is_err() {
+        return Vec::new();
+    }
+    let raw = match wait_for(&slot, None, Duration::from_secs(185)) {
+        Some(Lookup::Inventory(Some(raw))) => raw,
+        _ => { forget_note(slot_key); return Vec::new(); }
     };
     match parse_inventory(&raw) {
         Some(pages) => {
@@ -400,12 +524,18 @@ struct NoteBodies {
     pages: HashMap<i64, Option<Vec<u8>>>,
     done: bool,
     bytes: usize,
+    requested: HashSet<i64>,
+    pending: VecDeque<i64>,
+    sender: Option<std::sync::mpsc::Sender<i64>>,
+    child_init: Option<[Duration; 8]>,
+    page_times: HashMap<i64, (Duration, Duration)>,
 }
 
 type Slot = Arc<(Mutex<NoteBodies>, Condvar)>;
-static BODIES: Mutex<VecDeque<([u8; 32], Slot)>> = Mutex::new(VecDeque::new());
+type SlotKey = ([u8; 32], bool);
+static BODIES: Mutex<VecDeque<(SlotKey, Slot)>> = Mutex::new(VecDeque::new());
 
-fn note_slot(key: [u8; 32]) -> (Slot, bool) {
+fn note_slot(key: SlotKey) -> (Slot, bool) {
     let mut guard = BODIES.lock().unwrap();
     if let Some(at) = guard.iter().position(|(k, _)| *k == key) {
         let entry = guard.remove(at).unwrap();
@@ -419,13 +549,37 @@ fn note_slot(key: [u8; 32]) -> (Slot, bool) {
         if guard.len() <= 1 {
             break;
         }
-        guard.pop_front();
+        // Background work must not evict a foreground preparation slot.
+        let at = guard.iter().position(|(key, _)| !key.1).unwrap_or(0);
+        if let Some((_, old)) = guard.remove(at) { cancel_note(&old); }
     }
     (slot, true)
 }
 
-fn forget_note(key: [u8; 32]) {
-    BODIES.lock().unwrap().retain(|(k, _)| *k != key);
+fn cancel_note(slot: &Slot) {
+    let mut state = slot.0.lock().unwrap();
+    state.done = true;
+    state.sender.take();
+    slot.1.notify_all();
+}
+
+fn forget_note(key: SlotKey) {
+    let mut cache = BODIES.lock().unwrap();
+    if let Some(at) = cache.iter().position(|(k, _)| *k == key) {
+        let (_, slot) = cache.remove(at).unwrap();
+        cancel_note(&slot);
+    }
+}
+
+fn request_body(slot: &Slot, index: i64) {
+    let mut state = slot.0.lock().unwrap();
+    if !state.requested.insert(index) { return; }
+    if let Some(sender) = &state.sender {
+        let _ = sender.send(index);
+    } else {
+        state.pending.push_back(index);
+        slot.1.notify_all();
+    }
 }
 
 fn read_exact(stream: &mut impl Read, n: usize) -> Option<Vec<u8>> {
@@ -454,6 +608,7 @@ fn finish(slot: &Slot) {
     let (lock, wake) = &**slot;
     let mut state = lock.lock().unwrap();
     state.done = true;
+    state.sender.take();
     wake.notify_all();
 }
 
@@ -477,37 +632,58 @@ fn order(inventory: &[u8], wanted: i64) -> Vec<i64> {
     }
 }
 
-/// In-process producer (no self-exec configured).
-fn start_note_thread(snapshot: Val, wanted: i64, slot: Slot) {
+/// In-process producer: retain the verified note and prepare only requested pages.
+fn start_note_thread(snapshot: Val, _wanted: i64, slot: Slot) {
     let fallback = slot.clone();
     let spawned = std::thread::Builder::new().name("notes-ink-prepare".into()).spawn(move || {
-        let inventory = prepare::inventory_json(&snapshot).into_bytes();
-        let pages = order(&inventory, wanted);
+        let session = prepare::PreparedSession::new(&snapshot).ok();
+        let inventory = session.as_ref().map_or_else(|| "[]".to_string(), |s| s.inventory()).into_bytes();
         set_inventory(&slot, Some(inventory));
-        for index in pages {
-            let body = prepare::page_body(&snapshot, index);
+        loop {
+            let index = {
+                let mut state = slot.0.lock().unwrap();
+                while state.pending.is_empty() && !state.done {
+                    let (next, timed) = slot.1.wait_timeout(state, Duration::from_secs(180)).unwrap();
+                    state = next;
+                    if timed.timed_out() { state.done = true; }
+                }
+                if state.done { break; }
+                state.pending.pop_front().unwrap()
+            };
+            let body = session.as_ref().map_or_else(Vec::new, |s| s.page_body(index));
             let body = if body.is_empty() { None } else { Some(body) };
-            if !store_body(&slot, index, body) {
-                break;
-            }
+            if !store_body(&slot, index, body) { break; }
         }
         finish(&slot);
     });
-    if spawned.is_err() {
-        finish(&fallback);
-    }
+    if spawned.is_err() { finish(&fallback); }
 }
 
-/// Self-exec producer: frame 0 = inventory JSON, then (index, body) frames.
-fn start_note_child(exe: &Path, data: Vec<u8>, wanted: i64, slot: Slot, key: [u8; 32]) -> Result<(), Fail> {
-    let args = child_args(exe, "render", Some(wanted));
-    let (mut child, mut stdout) = match sandbox::spawn_streaming(&args, data, JOB_LIMITS, true, None) {
+/// Self-exec producer: inventory first, then requested body and timing frames.
+fn start_note_child(exe: &Path, data: Vec<u8>, wanted: i64, slot: Slot, key: SlotKey) -> Result<(), Fail> {
+    let args = child_args(exe, "render-demand", Some(wanted));
+    let started = Instant::now();
+    let (mut child, mut stdin, mut stdout) = match sandbox::spawn_duplex(&args, JOB_LIMITS, true, None) {
         Ok(v) => v,
         Err(_) => {
             forget_note(key);
             return Err(Fail::os("ink preparation could not start"));
         }
     };
+    let spawn_time = started.elapsed();
+    let (tx, rx) = std::sync::mpsc::channel::<i64>();
+    {
+        let mut state = slot.0.lock().unwrap();
+        if state.done { drop(state); let _ = child.kill(); let _ = child.wait(); return Err(ink_render(NOT_PREPARED)); }
+        state.sender = Some(tx.clone());
+        while let Some(index) = state.pending.pop_front() { let _ = tx.send(index); }
+    }
+    std::thread::spawn(move || {
+        if stdin.write_all(&(data.len() as u64).to_le_bytes()).and_then(|_| stdin.write_all(&data)).is_err() { return; }
+        for index in rx {
+            if stdin.write_all(&(index as i32).to_le_bytes()).and_then(|_| stdin.flush()).is_err() { break; }
+        }
+    });
     std::thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(180);
         let killer_pid = child.id() as i32;
@@ -525,7 +701,9 @@ fn start_note_child(exe: &Path, data: Vec<u8>, wanted: i64, slot: Slot, key: [u8
             .map(|n| u32::from_le_bytes(n) as usize)
             .filter(|&size| size <= prepare::MAX_INPUT + 1)
             .and_then(|size| read_exact(&mut stdout, size));
+        let ready_time = started.elapsed();
         set_inventory(&slot, header);
+        let mut pending_body: Option<(i64, Option<Vec<u8>>)> = None;
         loop {
             let Some(head) = read_exact(&mut stdout, 8) else { break };
             let index = i32::from_le_bytes(head[..4].try_into().unwrap()) as i64;
@@ -534,12 +712,25 @@ fn start_note_child(exe: &Path, data: Vec<u8>, wanted: i64, slot: Slot, key: [u8
                 break;
             }
             let body = if size == 0 { None } else { read_exact(&mut stdout, size) };
-            if size != 0 && body.is_none() {
-                break;
-            }
-            if !store_body(&slot, index, body) {
-                break;
-            }
+            if size != 0 && body.is_none() { break; }
+            if index == -1 {
+                let Some(raw) = body.filter(|b| b.len() == 6 * 8) else { break };
+                let mut times = [Duration::ZERO; 8];
+                times[0] = spawn_time; times[1] = ready_time;
+                for i in 0..6 { times[i + 2] = Duration::from_micros(u64::from_le_bytes(raw[i*8..i*8+8].try_into().unwrap())); }
+                slot.0.lock().unwrap().child_init = Some(times);
+            } else if index == -2 {
+                let Some(raw) = body.filter(|b| b.len() == 20) else { break };
+                let page = i32::from_le_bytes(raw[..4].try_into().unwrap()) as i64;
+                let build = Duration::from_micros(u64::from_le_bytes(raw[4..12].try_into().unwrap()));
+                let write = Duration::from_micros(u64::from_le_bytes(raw[12..20].try_into().unwrap()));
+                let Some((body_page, body)) = pending_body.take() else { break };
+                if page != body_page { break; }
+                slot.0.lock().unwrap().page_times.insert(page, (build, write));
+                if !store_body(&slot, page, body) { break; }
+            } else if index >= 0 && pending_body.is_none() {
+                pending_body = Some((index, body));
+            } else { break; }
         }
         // Stop a child we no longer read from (body budget reached, bad
         // frame): it would otherwise block on its full pipe until the 180 s
@@ -555,7 +746,7 @@ fn start_note_child(exe: &Path, data: Vec<u8>, wanted: i64, slot: Slot, key: [u8
     Ok(())
 }
 
-fn start(snapshot: &Val, data: Vec<u8>, wanted: i64, slot: Slot, key: [u8; 32], child: Option<&Path>) -> Result<(), Fail> {
+fn start(snapshot: &Val, data: Vec<u8>, wanted: i64, slot: Slot, key: SlotKey, child: Option<&Path>) -> Result<(), Fail> {
     match child {
         Some(exe) => start_note_child(exe, data, wanted, slot, key),
         None => {
@@ -602,10 +793,18 @@ fn wait_for(slot: &Slot, page: Option<i64>, timeout: Duration) -> Option<Lookup>
 /// A page the shared producer left out (its 96 MiB body budget ran out on a
 /// note with many heavy pages) is prepared on its own.
 fn page_body(snapshot: &Val, index: i64, child: Option<&Path>) -> Result<(InkPage, Vec<u8>), Fail> {
-    match shared_page_body(snapshot, index, child) {
+    page_body_with_identity(snapshot, index, child, None, true)
+}
+
+fn page_body_with_identity(snapshot: &Val, index: i64, child: Option<&Path>,
+                           identity: Option<([u8; 32], Arc<Vec<u8>>)>, foreground: bool) -> Result<(InkPage, Vec<u8>), Fail> {
+    let (key, data) = match identity {
+        Some(identity) => identity,
+        None => { let data = Arc::new(snapshot_bytes(snapshot).ok_or_else(|| ink_render(NOT_FOUND))?); (sha256(&data), data) }
+    };
+    match shared_page_body(snapshot, index, child, (key, foreground), &data) {
         Err(e) if e.message == NOT_PREPARED => {
-            let Some(data) = snapshot_bytes(snapshot) else { return Err(e) };
-            let Some(page) = inventory_get(&sha256(&data)).and_then(|p| p.iter().find(|p| p.index == index).cloned()) else { return Err(e) };
+            let Some(page) = inventory_get(&key).and_then(|p| p.iter().find(|p| p.index == index).cloned()) else { return Err(e) };
             let body = single_body(snapshot, index, "page", child);
             if body.is_empty() { Err(e) } else { Ok((page, body)) }
         }
@@ -613,31 +812,30 @@ fn page_body(snapshot: &Val, index: i64, child: Option<&Path>) -> Result<(InkPag
     }
 }
 
-fn shared_page_body(snapshot: &Val, index: i64, child: Option<&Path>) -> Result<(InkPage, Vec<u8>), Fail> {
-    let Some(data) = snapshot_bytes(snapshot) else { return Err(ink_render(NOT_FOUND)) };
-    let key = sha256(&data);
+fn shared_page_body(snapshot: &Val, index: i64, child: Option<&Path>, key: SlotKey, data: &Arc<Vec<u8>>) -> Result<(InkPage, Vec<u8>), Fail> {
     let (slot, fresh) = note_slot(key);
+    request_body(&slot, index);
     if fresh {
-        start(snapshot, data, index, slot.clone(), key, child)?;
+        start(snapshot, (**data).clone(), index, slot.clone(), key, child)?;
     } else {
         let missing = {
             let known = slot.0.lock().unwrap();
             !known.pages.contains_key(&index) && known.done
         };
         if missing {
-            // Evicted or failed earlier: start over for this page.
             forget_note(key);
             let (again, _) = note_slot(key);
-            start(snapshot, data, index, again.clone(), key, child)?;
+            request_body(&again, index);
+            start(snapshot, (**data).clone(), index, again.clone(), key, child)?;
             return finish_page(key, again, index);
         }
     }
     finish_page(key, slot, index)
 }
 
-fn finish_page(key: [u8; 32], slot: Slot, index: i64) -> Result<(InkPage, Vec<u8>), Fail> {
+fn finish_page(key: SlotKey, slot: Slot, index: i64) -> Result<(InkPage, Vec<u8>), Fail> {
     let timeout = Duration::from_secs(185);
-    let inventory = match inventory_get(&key) {
+    let inventory = match inventory_get(&key.0) {
         Some(hit) => hit,
         None => {
             let raw = match wait_for(&slot, None, timeout) {
@@ -652,13 +850,23 @@ fn finish_page(key: [u8; 32], slot: Slot, index: i64) -> Result<(InkPage, Vec<u8
                 }
             };
             let pages = Arc::new(parse_inventory(&raw).unwrap_or_default());
-            inventory_put(key, pages.clone());
+            inventory_put(key.0, pages.clone());
             pages
         }
     };
     let Some(page) = inventory.iter().find(|p| p.index == index).cloned() else { return Err(ink_render(NOT_FOUND)) };
     match wait_for(&slot, Some(index), timeout) {
-        Some(Lookup::Body(Some(body))) => Ok((page, body)),
+        Some(Lookup::Body(Some(body))) => {
+            let mut state = slot.0.lock().unwrap();
+            if let Some(times) = state.child_init.take() {
+                for (offset, time) in times.into_iter().enumerate() { record_elapsed(CHILD_SPAWN + offset, time); }
+            }
+            if let Some((build, write)) = state.page_times.remove(&index) {
+                record_elapsed(CHILD_PAGE, build);
+                record_elapsed(CHILD_WRITE, write);
+            }
+            Ok((page, body))
+        },
         None => {
             forget_note(key);
             Err(ink_render(TIMED_OUT))
@@ -704,19 +912,31 @@ fn child_main(args: &[String]) -> i32 {
         return 71;
     }
     let mode = args[0].as_str();
-    let paged = matches!(mode, "render" | "page" | "forced");
+    let paged = matches!(mode, "render" | "render-demand" | "page" | "forced");
     if !(mode == "inventory" || paged) || paged != (args.len() == 3) {
         return 65;
     }
     if sandbox::apply_limits(&JOB_LIMITS, true).is_err() {
         return 70;
     }
+    let read_start = Instant::now();
     let mut raw = Vec::new();
-    if std::io::stdin().lock().take(256 * 1024 * 1024).read_to_end(&mut raw).is_err() {
+    let stdin = std::io::stdin();
+    let mut input = stdin.lock();
+    if mode == "render-demand" {
+        let Some(head) = read_exact(&mut input, 8) else { return 70 };
+        let size = u64::from_le_bytes(head.try_into().unwrap());
+        if size > 256 * 1024 * 1024 { return 70; }
+        let Some(bytes) = read_exact(&mut input, size as usize) else { return 70 };
+        raw = bytes;
+    } else if (&mut input).take(256 * 1024 * 1024).read_to_end(&mut raw).is_err() {
         return 70;
     }
+    let read_time = read_start.elapsed();
+    let parse_start = Instant::now();
     let Ok(text) = String::from_utf8(raw) else { return 70 };
     let Ok(snapshot) = rs_store::val::loads(&text) else { return 70 };
+    let json_time = parse_start.elapsed();
     let mut out = std::io::stdout().lock();
     if mode == "page" || mode == "forced" {
         // One page body only (the streaming producer ran out of budget, or the
@@ -725,7 +945,12 @@ fn child_main(args: &[String]) -> i32 {
         let body = if mode == "page" { prepare::page_body(&snapshot, index) } else { prepare::forced_composite(&snapshot, index) };
         return if out.write_all(&body).and_then(|_| out.flush()).is_ok() { 0 } else { 70 };
     }
-    let inventory = prepare::inventory_json(&snapshot);
+    prepare::take_prep_times();
+    let session = prepare::PreparedSession::new(&snapshot).ok();
+    let prep_times = prepare::take_prep_times();
+    let inventory_start = Instant::now();
+    let inventory = session.as_ref().map_or_else(|| "[]".to_string(), |s| s.inventory());
+    let inventory_time = inventory_start.elapsed();
     if mode == "inventory" {
         return if out.write_all(inventory.as_bytes()).and_then(|_| out.flush()).is_ok() { 0 } else { 70 };
     }
@@ -735,11 +960,61 @@ fn child_main(args: &[String]) -> i32 {
     {
         return 70;
     }
+    if mode == "render-demand" {
+        let mut metadata = Vec::with_capacity(48);
+        for time in [read_time, json_time, prep_times[0], prep_times[1], prep_times[2], inventory_time] {
+            metadata.extend_from_slice(&(time.as_micros().min(u64::MAX as u128) as u64).to_le_bytes());
+        }
+        if frame(&mut out, -1, &metadata).is_err() { return 70; }
+        while let Some(bytes) = read_exact(&mut input, 4) {
+            let index = i32::from_le_bytes(bytes.try_into().unwrap()) as i64;
+            let start = Instant::now();
+            let body = session.as_ref().map_or_else(Vec::new, |s| s.page_body(index));
+            let build = start.elapsed();
+            let start = Instant::now();
+            if frame(&mut out, index, &body).is_err() { break; }
+            let write = start.elapsed();
+            let mut meta = Vec::with_capacity(20);
+            meta.extend_from_slice(&(index as i32).to_le_bytes());
+            meta.extend_from_slice(&(build.as_micros().min(u64::MAX as u128) as u64).to_le_bytes());
+            meta.extend_from_slice(&(write.as_micros().min(u64::MAX as u128) as u64).to_le_bytes());
+            if frame(&mut out, -2, &meta).is_err() { break; }
+        }
+        return 0;
+    }
     for index in order(inventory.as_bytes(), wanted) {
-        let body = prepare::page_body(&snapshot, index);
+        let body = session.as_ref().map_or_else(Vec::new, |s| s.page_body(index));
         if frame(&mut out, index, &body).is_err() {
             break;
         }
     }
     0
+}
+
+#[cfg(test)]
+mod demand_tests {
+    use super::*;
+    #[test]
+    fn foreground_has_a_distinct_slot_from_background() {
+        let key = [173; 32];
+        let (background, _) = note_slot((key, false));
+        let (foreground, _) = note_slot((key, true));
+        assert!(!Arc::ptr_eq(&background, &foreground));
+        forget_note((key, false));
+        forget_note((key, true));
+    }
+    #[test]
+    fn producer_only_prepares_requested_pages() {
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/objects_note.json")).unwrap();
+        let fixture = rs_store::val::loads(&text).unwrap();
+        let snapshot = fixture.get("snapshot").unwrap().clone();
+        let slot: Slot = Arc::new((Mutex::new(NoteBodies::default()), Condvar::new()));
+        request_body(&slot, 0);
+        start_note_thread(snapshot, 0, slot.clone());
+        assert!(matches!(wait_for(&slot, Some(0), Duration::from_secs(5)), Some(Lookup::Body(Some(_)))));
+        assert!(wait_for(&slot, Some(2), Duration::from_millis(250)).is_none(), "unrequested page was prepared eagerly");
+        request_body(&slot, 2);
+        assert!(matches!(wait_for(&slot, Some(2), Duration::from_secs(5)), Some(Lookup::Body(Some(_)))));
+        cancel_note(&slot);
+    }
 }

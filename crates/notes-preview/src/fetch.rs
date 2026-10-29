@@ -49,6 +49,11 @@ pub fn fetch_preview_with(candidate: &CanvasPreviewCandidate, headers: &dyn Fn()
         raw = r;
     }
     guard()?;
+    if matches!(status, 403 | 404) {
+        let mut failure = preview("Sayfa görüntüsü alınamadı. Eşitleyip yeniden deneyebilirsin.");
+        failure.code = "preview_cache_permanent".into();
+        return Err(failure);
+    }
     if status != 200 || raw.is_empty() || raw.len() > MAX_DOWNLOAD {
         return Err(preview("Sayfa görüntüsü alınamadı. Eşitleyip yeniden deneyebilirsin."));
     }

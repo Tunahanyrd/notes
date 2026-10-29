@@ -27,7 +27,7 @@ pub trait PreviewEnv: Send + Sync {
     ///
     /// Contract of the Python transport the implementation must keep: only
     /// global addresses (getaddrinfo answers checked), TLS with the default
-    /// context, no redirects followed, 20 s timeout, body read only for 200
+    /// context, no redirects followed, bounded timeout, body read only for 200
     /// and bounded to `MAX_DOWNLOAD` (larger -> `PreviewError('Bu sayfa
     /// önizleme boyutu sınırını aşıyor.')`), network failures ->
     /// `PreviewError(DOWNLOAD_FAILED)`.

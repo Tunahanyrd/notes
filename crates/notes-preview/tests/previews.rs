@@ -2,7 +2,7 @@
 //! test_preview_scheduling.py (synthetic data only).
 mod common;
 use common::*;
-use notes_preview::manager::{Entry, JobState, PreviewOptions, Source};
+use notes_preview::manager::{Entry, PreviewOptions, Source};
 use notes_preview::{fetch, Candidate, Fail, Kind, PreviewManager, Val};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -173,11 +173,11 @@ fn source_changed_during_decode_is_not_published() {
     let image = png(1, 1, b"\x12\x34\x56\xff");
     let entry = entry_of(src(&["synthetic-id", "before-commit"]), Candidate::Canvas(candidate(b"synthetic-spi")));
     let current = Arc::new(Mutex::new(entry.source.clone()));
-    let (en, re, p, e1, cur) = (entered.clone(), released.clone(), image.clone(), entry.clone(), current.clone());
+    let (en, re, p, e1, cur, entry_source) = (entered.clone(), released.clone(), image.clone(), entry.clone(), current.clone(), current.clone());
     let m = manager(dir.path(), env, PreviewOptions {
         decoder: Some(Arc::new(move |_: &[u8], _| { en.set(); assert!(re.wait(Duration::from_secs(2))); Ok(p.clone()) })),
         fetcher: Some(Arc::new(|_, _, _| Ok(b"synthetic-spi".to_vec()))),
-        entry_hook: Some(Arc::new(move |_| Ok(e1.clone()))),
+        entry_hook: Some(Arc::new(move |_| { let mut e = e1.clone(); e.source = entry_source.lock().unwrap().clone(); Ok(e) })),
         source_hook: Some(Arc::new(move |_| Ok(cur.lock().unwrap().clone()))),
         ..Default::default()
     });
@@ -187,15 +187,8 @@ fn source_changed_during_decode_is_not_published() {
     *current.lock().unwrap() = src(&["synthetic-id", "after-commit"]);
     released.set();
     assert!(m.wait_idle(Some(Duration::from_secs(5))));
-    assert!(!path.exists(), "old source must not be published after decode");
-    let partial = std::fs::read_dir(m.directory()).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().contains(".partial-")).count();
-    assert_eq!(partial, 0);
-    let job = m.job(&path.file_name().unwrap().to_string_lossy()).unwrap();
-    assert_eq!(job.state, JobState::Error);
-    assert_eq!(job.error.as_deref(), Some("Not veya hesap değişti. Sayfayı yeniden açabilirsin."));
-    // Errors are reported (422) until retry_after.
-    let error = m.request("synthetic-id", 0, 0, 0.0).unwrap_err();
-    assert_eq!((error.code.as_str(), error.status), ("preview_unavailable", 422));
+    assert!(path.exists(), "new source should be rendered after the old attempt is discarded");
+    assert_eq!(m.request("synthetic-id", 0, 0, 1.0).unwrap(), Some(image));
     m.close();
     m.join(Duration::from_secs(2));
 }
@@ -276,11 +269,34 @@ fn opened_page_is_decoded_before_queued_thumbnails() {
     m.request("thumb-c", 0, 1, 0.0).unwrap();
     m.request("opened", 0, 0, 0.0).unwrap();
     m.request("warm", 0, 0, 0.0).unwrap(); // the user opened the warm-up note too
+    assert!(m.request("opened", 0, 0, 2.0).unwrap().is_some());
+    assert_eq!(&order.lock().unwrap()[..2], ["thumb-a", "opened"]);
     release.set();
     assert!(m.wait_idle(Some(Duration::from_secs(5))));
-    assert_eq!(*order.lock().unwrap(), ["thumb-a", "opened", "warm", "thumb-b", "thumb-c"]);
+    let order = order.lock().unwrap();
+    assert_eq!(order[0], "thumb-a");
+    assert_eq!(order.len(), 5);
     m.close();
     m.join(Duration::from_secs(2));
+}
+
+#[test]
+fn foreground_does_not_wait_for_running_background() {
+    let dir = TempDir::new();
+    let (release, entered) = (Event::new(), Event::new());
+    let (r, e) = (release.clone(), entered.clone());
+    let image = png(1, 1, b"\x12\x34\x56\xff");
+    let expected = image.clone();
+    let m = scheduling(dir.path(), &["background", "foreground"], 1, Arc::new(move |raw, _| {
+        if raw == b"background" { e.set(); assert!(r.wait(Duration::from_secs(5))); }
+        Ok(image.clone())
+    }));
+    m.request("background", 0, 5, 0.0).unwrap();
+    assert!(entered.wait(Duration::from_secs(2)));
+    assert_eq!(m.request("foreground", 0, 0, 2.0).unwrap(), Some(expected));
+    release.set();
+    assert!(m.wait_idle(Some(Duration::from_secs(5))));
+    m.close();
 }
 
 #[test]
@@ -350,4 +366,53 @@ fn unknown_note_source_is_not_found() {
     let note = s.create(&Val::s("Synthetic"), &Val::s("Text")).unwrap();
     let manifest = m.manifest(note.get("id").unwrap().as_str().unwrap()).unwrap();
     assert_eq!(manifest.get("pages"), Some(&Val::List(vec![])));
+}
+
+#[test]
+fn snapshots_are_shared_between_pages_and_replaced_when_source_changes() {
+    use notes_preview::ink::{InkBackend, InkPage};
+    use notes_preview::manager::InkGeometryPreview;
+    struct Capture(Mutex<Vec<Arc<Val>>>);
+    impl InkBackend for Capture {
+        fn provider_available(&self) -> bool { true }
+        fn inspect_render_pages(&self, _: &Val) -> Vec<InkPage> { vec![] }
+        fn render_ink_page(&self, _: &Val, _: i64) -> Result<Vec<u8>, Fail> { panic!("shared method expected") }
+        fn render_page_shared(&self, snapshot: &Arc<Val>, _: i64, _: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<(Vec<u8>, bool), Fail> {
+            self.0.lock().unwrap().push(snapshot.clone());
+            Ok((png(1, 1, b"\x12\x34\x56\xff"), true))
+        }
+    }
+    let dir = TempDir::new();
+    let store = store(dir.path());
+    let old = snapshot(b"old synthetic document", "application/xml");
+    let new = snapshot(b"new synthetic document", "application/xml");
+    let id = note_with_document(&store, &old);
+    let state = Arc::new(Mutex::new((src(&["old"]), old.get("raw_sha256").unwrap().as_str().unwrap().to_string())));
+    let e = state.clone(); let current = state.clone();
+    let capture = Arc::new(Capture(Mutex::new(Vec::new())));
+    let manager = PreviewManager::with_options(store.clone(), TestEnv::new(None, true), PreviewOptions {
+        ink: Some(capture.clone()),
+        entry_hook: Some(Arc::new(move |_| {
+            let (source, hash) = &*e.lock().unwrap();
+            let candidates = (0..3).map(|page_index| (page_index, Candidate::Ink(InkGeometryPreview {
+                page_index, width: 1, height: 1, sha256: hash.clone(), is_dark_mode: false, composite: false, notice: None,
+            }))).collect();
+            Ok(Entry { source: source.clone(), pages: vec![], candidates })
+        })),
+        source_hook: Some(Arc::new(move |_| Ok(current.lock().unwrap().0.clone()))),
+        ..Default::default()
+    }).unwrap();
+    assert!(manager.request(&id, 0, 0, 5.0).unwrap().is_some());
+    assert!(manager.request(&id, 1, 0, 5.0).unwrap().is_some());
+    let json = rs_store::val::dumps(&new, true, true).unwrap();
+    store.with_db(|db| { use rs_store::db::Sql; db.exec("UPDATE notes SET base_document=? WHERE id=?", &rs_store::p![json, id.as_str()])?; Ok(()) }).unwrap();
+    // Sync can replace the stored snapshot without changing visible revision.
+    state.lock().unwrap().1 = new.get("raw_sha256").unwrap().as_str().unwrap().to_string();
+    assert!(manager.request(&id, 2, 0, 5.0).unwrap().is_some());
+    let seen = capture.0.lock().unwrap();
+    assert_eq!(seen.len(), 3);
+    assert!(Arc::ptr_eq(&seen[0], &seen[1]), "unchanged source must reuse snapshot");
+    assert!(!Arc::ptr_eq(&seen[1], &seen[2]), "changed source must load a new snapshot");
+    assert_eq!(seen[2].get("raw_sha256"), new.get("raw_sha256"));
+    manager.close();
 }

@@ -25,6 +25,11 @@ result was also checked in the official app on a phone or tablet.
 - Page images no longer stay at "not ready": a full preview queue gives the
   page on screen the slot of background work, and the UI keeps asking for a
   page on screen instead of giving up after a few minutes.
+- Page images arrive in about a second: a canvas page whose Samsung cache cannot
+  be fetched is drawn locally at once (the full image replaces it later)
+  instead of waiting for the network timeout; the note is parsed once and only
+  the requested page is prepared; the page on screen has its own worker; hard
+  download/decode failures are not retried.
 - Ctrl + mouse wheel zooms pages around the page on screen (also past the
   window width); the page number follows.
 - The pen button in a handwriting note's text view leads back to the pages.
