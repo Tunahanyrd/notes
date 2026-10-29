@@ -42,7 +42,7 @@ test('busy, offline and failed-job answers are retried until the page image arri
   // 503 offline → 429 busy → 202 pending → 422 failed job (retry window) → image.
   const sequence:Answer[]=[503,429,202,422,'png'];
   const attempts=await setup(page,[{index:0,width:800,height:1000,available:true}],(_,attempt)=>sequence[Math.min(attempt,sequence.length-1)]);
-  await expect(sheet(page,0).locator('.page-placeholder')).toHaveText('Bu sayfanın görüntüsü henüz hazır değil.');
+  await expect(sheet(page,0).locator('.page-placeholder')).toBeEmpty();
   await expect(sheet(page,0).locator('img.page-image')).toBeVisible({timeout:20000});
   expect(attempts.get(0)).toBe(5);
   await expect(page.getByText(/açılamadı/)).toHaveCount(0);
@@ -55,11 +55,63 @@ test('a page with no image source gets a calm final placeholder sized by its geo
     {index:1,width:1000,height:500,available:false,previewNotice:'Bu sayfadaki resim henüz indirilmedi.'},
     {index:2,width:null,height:null,available:false},
   ],index=>index===0?404:'png');
-  await expect(sheet(page,0).locator('.page-placeholder')).toHaveText('Bu sayfanın görüntüsü bu cihazda oluşturulamıyor.');
-  await expect(sheet(page,1).locator('.page-placeholder')).toHaveText('Bu sayfadaki resim henüz indirilmedi.');
-  await expect(sheet(page,2).locator('.page-placeholder')).toHaveText('Bu sayfanın görüntüsü bu cihazda oluşturulamıyor.');
+  await expect(sheet(page,0).locator('.page-placeholder')).toBeEmpty();
+  await expect(sheet(page,1).locator('.page-placeholder')).toBeEmpty();
+  await expect(sheet(page,2).locator('.page-placeholder')).toBeEmpty();
   // 404 is final: one request, no retry loop. Unavailable pages are never requested.
   await page.waitForTimeout(1500);expect(attempts.get(0)).toBe(1);expect(attempts.has(1)).toBe(false);
   const box=(await sheet(page,1).boundingBox())!;expect(box.width/box.height).toBeCloseTo(2,1);
   await expect(page.getByText(/açılamadı|görüntüsü yok/)).toHaveCount(0);
+});
+
+test('pages leaving the viewport stop polling and release their image',async({page})=>{
+  const pages=Array.from({length:30},(_,index)=>({index,width:800,height:1000,available:true}));
+  const attempts=await setup(page,pages,index=>index===0?202:'png');
+  await expect.poll(()=>attempts.get(0)??0).toBeGreaterThan(0);
+  await sheet(page,20).scrollIntoViewIfNeeded();
+  await expect(sheet(page,20).locator('img.page-image')).toBeVisible();
+  await page.waitForTimeout(500);
+  const stopped=attempts.get(0);
+  await page.waitForTimeout(1200);
+  expect(attempts.get(0)).toBe(stopped);
+  await expect(sheet(page,0).locator('img.page-image')).toHaveCount(0);
+});
+
+test('idle refresh reuses an unchanged editor projection',async({page})=>{
+  let editors=0;
+  page.on('request',request=>{if(new URL(request.url()).pathname.endsWith('/editor'))editors++;});
+  await setup(page,[{index:0,width:800,height:1000,available:true}],()=> 'png');
+  await expect(sheet(page,0).locator('img.page-image')).toBeVisible();
+  await page.waitForTimeout(9000);
+  expect(editors).toBe(1);
+});
+
+test('zoom keeps the same page image and does not request another preview',async({page})=>{
+  const attempts=await setup(page,[{index:0,width:800,height:1000,available:true}],()=> 'png');
+  const img=sheet(page,0).locator('img.page-image');await expect(img).toBeVisible();
+  await img.evaluate(element=>{(window as any).__originalPageImage=element;});const src=await img.getAttribute('src');
+  await page.getByRole('button',{name:'Yakınlaştır'}).click();
+  await page.locator('.canvas-scroll').hover();await page.keyboard.down('Control');await page.mouse.wheel(0,-120);await page.keyboard.up('Control');
+  await expect(img).toBeVisible();expect(await img.evaluate(element=>element===(window as any).__originalPageImage)).toBe(true);
+  expect(await img.getAttribute('src')).toBe(src);expect(attempts.get(0)).toBe(1);
+});
+
+test('transient visibility changes during zoom keep the decoded bitmap and avoid another preview request',async({page})=>{
+  await page.addInitScript(()=>{
+    const Native=window.IntersectionObserver;
+    window.IntersectionObserver=class extends Native {
+      private callback:IntersectionObserverCallback;
+      constructor(callback:IntersectionObserverCallback,options?:IntersectionObserverInit){super(callback,options);this.callback=callback;}
+      observe(element:Element){if(element.matches('.page-sheet[data-page-index="0"]'))(window as any).__pageVisibility=(visible:boolean)=>this.callback([{isIntersecting:visible} as IntersectionObserverEntry],this);super.observe(element);}
+    };
+  });
+  const attempts=await setup(page,[{index:0,width:800,height:1000,available:true}],()=> 'png');
+  const img=sheet(page,0).locator('img.page-image');await expect(img).toBeVisible();
+  await img.evaluate(element=>{(window as any).__zoomBitmap=element;});
+  await page.evaluate(()=>(window as any).__pageVisibility(false));
+  await page.waitForTimeout(100);
+  await page.getByRole('button',{name:'Yakınlaştır'}).click();
+  await page.evaluate(()=>(window as any).__pageVisibility(true));
+  await expect(img).toBeVisible();expect(await img.evaluate(element=>element===(window as any).__zoomBitmap)).toBe(true);
+  await page.waitForTimeout(1000);expect(attempts.get(0)).toBe(1);
 });

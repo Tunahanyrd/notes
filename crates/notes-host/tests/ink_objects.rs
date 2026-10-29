@@ -824,3 +824,65 @@ fn floating_parts_of(root: &Element) -> Vec<Vec<u8>> {
     vec![xml::xml_bytes(root.find("floatingObjectList").unwrap()), xml::xml_bytes(tree.find("floatingObjectList").unwrap()),
         xml::xml_bytes(root.find("contentFileList").unwrap())]
 }
+
+#[test]
+fn draft_batch_transfers_only_selected_stroke_and_survives_restart() {
+    use notes_host::host::PureHost;
+    use rs_store::storage::StoreCore;
+    let path = std::env::temp_dir().join(format!("notes-ink-draft-test-{}", rs_store::db::uuid4()));
+    let host = PureHost::new();
+    let store = StoreCore::open(&path).unwrap();
+    let doc = base();
+    let id = store.apply_document(&host, &Val::s("synthetic-draft-server"), &doc, None).unwrap();
+    let revision = store.get(&id).unwrap().get("revision").unwrap().clone();
+    let mut projection = areas::project_ink(&doc, false).unwrap();
+    projection.set("pendingStrokes", Val::List(vec![]));
+    store.cache_ink(&id, &revision, &projection).unwrap();
+    let Val::List(pages) = projection.get("pages").unwrap() else { panic!() };
+    let page = &pages[0];
+    let Val::List(sources) = page.get("strokes").unwrap() else { panic!() };
+    let source = &sources[0];
+    let point = |x| Val::dict(vec![("x", Val::Int(x)), ("y", Val::Int(40)), ("pressure", Val::Float(0.5)), ("timeMs", Val::Int(0))]);
+    let draft = |id: &str, x| Val::dict(vec![
+        ("id", Val::s(id)), ("pageId", page.get("id").unwrap().clone()), ("sourceStrokeId", source.get("id").unwrap().clone()),
+        ("kind", source.get("kind").unwrap().clone()), ("colorARGB", source.get("colorARGB").unwrap().clone()),
+        ("size", source.get("size").unwrap().clone()), ("points", Val::List(vec![point(x)])),
+    ]);
+    let first = draft("first", 40); let second = draft("second", 60);
+    store.save_ink_draft(&id, &revision, &Val::List(vec![first.clone(), second.clone()])).unwrap();
+    let request = Val::dict(vec![("pageId", first.get("pageId").unwrap().clone()), ("sourceStrokeId", first.get("sourceStrokeId").unwrap().clone()), ("points", first.get("points").unwrap().clone())]);
+    // A mismatched id/content pair never removes a draft or queues a batch.
+    assert!(store.save_ink_from_draft(&host, &id, &Val::List(vec![request.clone()]), &revision, &Val::List(vec![Val::s("second")])).is_err());
+    assert_eq!(store.ink_draft(&id).unwrap().get("strokes"), Some(&Val::List(vec![first, second.clone()])));
+    assert_eq!(store.get(&id).unwrap().get("syncState"), Some(&Val::s("synced")));
+    store.save_ink_from_draft(&host, &id, &Val::List(vec![request]), &revision, &Val::List(vec![Val::s("first")])).unwrap();
+    drop(store);
+    let store = StoreCore::open(&path).unwrap();
+    assert_eq!(store.ink_draft(&id).unwrap().get("strokes"), Some(&Val::List(vec![second])));
+    assert_eq!(store.get(&id).unwrap().get("syncState"), Some(&Val::s("pending")));
+    drop(store);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
+fn later_lines_on_stroke_free_page_bind_to_queued_first_stroke() {
+    use notes_host::host::PureHost;
+    use rs_store::storage::StoreCore;
+    let path=std::env::temp_dir().join(format!("notes-first-draft-{}",rs_store::db::uuid4()));
+    let host=PureHost::new();let store=StoreCore::open(&path).unwrap();let doc=with_objects();
+    let id=store.apply_document(&host,&Val::s("synthetic-first"),&doc,None).unwrap();
+    let revision=store.get(&id).unwrap().get("revision").unwrap().clone();
+    let mut projection=areas::project_ink(&doc,false).unwrap();projection.set("pendingStrokes",Val::List(vec![]));store.cache_ink(&id,&revision,&projection).unwrap();
+    let point=|x|Val::dict(vec![("x",Val::Int(x)),("y",Val::Int(250)),("pressure",Val::Float(0.5)),("timeMs",Val::Int(0))]);
+    let draft=|id:&str,x|Val::dict(vec![("id",Val::s(id)),("pageId",Val::s(PAGE2)),("sourceStrokeId",Val::s("")),("kind",Val::s("fountain")),("colorARGB",Val::Int(0xff000000)),("size",Val::Float(4.0)),("points",Val::List(vec![point(x)]))]);
+    let first=draft("first",150);let second=draft("second",160);let third=draft("third",170);
+    store.save_ink_draft(&id,&revision,&Val::List(vec![first.clone(),second])).unwrap();
+    let request=Val::dict(vec![("pageId",Val::s(PAGE2)),("colorARGB",Val::Int(0xff000000)),("size",Val::Float(4.0)),("points",first.get("points").unwrap().clone())]);
+    store.save_ink_from_draft(&host,&id,&Val::List(vec![request]),&revision,&Val::List(vec![Val::s("first")])).unwrap();
+    store.append_ink_draft(&id,&revision,&Val::List(vec![third])).unwrap();
+    drop(store);let store=StoreCore::open(&path).unwrap();let draft=store.ink_draft(&id).unwrap();
+    let Val::List(strokes)=draft.get("strokes").unwrap() else {panic!()};assert_eq!(strokes.len(),2);
+    let source=strokes[0].get("sourceStrokeId").unwrap().as_str().unwrap();
+    assert!(!source.is_empty());assert_eq!(strokes[1].get("sourceStrokeId").unwrap().as_str(),Some(source));
+    drop(store);std::fs::remove_dir_all(path).unwrap();
+}

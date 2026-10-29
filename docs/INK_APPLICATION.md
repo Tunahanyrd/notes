@@ -4,7 +4,9 @@
 `project_ink` result, which is bound to the note's local revision. Raw binary,
 media URLs and account information are not exposed to the UI.
 `pages[].strokes` are the source pen styles. For unsupported notes or notes
-waiting for sync, `capabilities.appendInk=false`.
+waiting for sync, `capabilities.appendInk=false`. A pending batch created by
+this application does not prevent capturing additional local draft strokes;
+those strokes wait for the current batch to be verified before being queued.
 
 `PUT /api/notes/:id/ink` body:
 
@@ -21,6 +23,20 @@ waiting for sync, `capabilities.appendInk=false`.
   }]
 }
 ```
+
+The desktop client also supplies `draftStrokeIds`, in the same order as
+`strokes`. The store checks each id and its content against the device draft,
+then inserts the immutable job and removes exactly those ids from the draft in
+the same SQLite transaction. A stale or mismatched draft fails without a job.
+The legacy request without `draftStrokeIds` retains its earlier behavior.
+`POST /api/notes/:id/ink-draft` with `{revision, strokes}` atomically adds new
+stroke ids to the device draft without replacing existing strokes. The client
+serializes full draft writes and batch handoff per note; lines drawn while that
+handoff is in flight can be added independently. When a first stroke on an
+empty page enters a job, later draft lines on that page are bound to its durable
+stroke id and wait for verification before they can be sent. An ambiguous local
+handoff response blocks draft replacement until restart so it cannot put a
+possibly queued stroke back into a new batch.
 
 X/Y are in document units; time is integer milliseconds from the first sample.
 The pen style comes from the source stroke. A request contains at most 64

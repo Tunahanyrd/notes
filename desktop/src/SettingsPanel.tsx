@@ -1,6 +1,6 @@
 import {Select} from './Select';
 import {useRef, useState, type ReactNode, type Ref} from 'react';
-import {ArrowLeft, Check, CloudOff, Grid2X2, List, RefreshCw} from 'lucide-react';
+import {ArrowLeft, Check,  Grid2X2, List, RefreshCw} from 'lucide-react';
 import type {Status} from './types';
 import {version as APP_VERSION} from '../package.json';
 import './settings-panel.css';
@@ -57,15 +57,12 @@ export interface SettingsPanelProps {
   preferences:SettingsPreferences;
   onPreferencesChange:(preferences:SettingsPreferences,patch?:Partial<SettingsPreferences>)=>void;
 }
-function lastSync(value:number|null|undefined) {
-  return value&&Number.isFinite(value)?new Intl.DateTimeFormat('tr-TR',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}).format(value):'Henüz yapılmadı';
-}
-export function SettingsPanel({status,foldersInitialized,offlineView,busy,error,preferenceError,onClose,onSync,sectionRef,accountSlot,shortcutSlot,preferences,onPreferencesChange}:SettingsPanelProps) {
+
+export function SettingsPanel({status,busy,error,preferenceError,onClose,onSync,sectionRef,accountSlot,shortcutSlot,preferences,onPreferencesChange}:SettingsPanelProps) {
   const [syncBusy,setSyncBusy]=useState(false);
   const [syncError,setSyncError]=useState('');
   const requestInFlight=useRef(false);
   const syncing=syncBusy||status?.sync.state==='syncing';
-  const syncState=!status?'Durum yükleniyor':!status.connected?'Hesap bağlantısı gerekli':syncing?'Eşitleniyor…':offlineView?'Çevrimdışı görünüm':status.sync.state==='error'?'Eşitleme tamamlanamadı':status.sync.pending?'Bekleyen işlemler var':status.sync.conflicts?'Çakışmalar çözülmeli':!foldersInitialized||!status.sync.lastSyncedAt?'İlk eşitleme bekleniyor':'Son eşitleme tamamlandı';
   const change=(patch:Partial<SettingsPreferences>)=>onPreferencesChange({...preferences,...patch},patch);
   const sync=async()=>{
     if(!status?.connected||busy||syncing||requestInFlight.current)return;
@@ -79,11 +76,9 @@ export function SettingsPanel({status,foldersInitialized,offlineView,busy,error,
       <div className="settings-page-scroll">
         <section className="settings-group" aria-labelledby="settings-account-heading"><h3 id="settings-account-heading">Bulut eşitlemesi</h3>{accountSlot}
           <div className="settings-card settings-sync-card">
-            <div className="settings-option"><div><span className="settings-option-title">Şimdi eşitle</span><span className="settings-option-description" role="status">{syncState}</span><span className="settings-option-description">Son eşitleme: {lastSync(status?.sync.lastSyncedAt)}</span>{!!status?.sync.pending&&<span className="settings-option-description">Bekleyen işlem: {status.sync.pending}</span>}{!!status?.sync.conflicts&&<span className="settings-option-description">Çakışan not: {status.sync.conflicts}</span>}</div><button className="settings-sync-button" disabled={!status?.connected||busy||syncing} onClick={()=>void sync()}><RefreshCw size={16} className={syncing?'spin':''}/>{syncing?'Eşitleniyor…':'Şimdi eşitle'}</button></div>
-            {syncing&&!!status?.sync.progress.total&&<p className="settings-progress">{status.sync.progress.processed} / {status.sync.progress.total} not işlendi</p>}
+            <div className="settings-option"><div><span className="settings-option-title">Şimdi eşitle</span></div><button className="settings-sync-button" disabled={!status?.connected||busy||syncing} onClick={()=>void sync()}><RefreshCw size={16} className={syncing?'spin':''}/>Şimdi eşitle</button></div>
             {(syncError||error||status?.sync.error)&&<p className="settings-inline-error" role="alert">{syncError||error||status?.sync.error}</p>}
           </div>
-          <p className="settings-group-help"><CloudOff size={15}/><span>Önceden yüklenmiş notları çevrimdışıyken de görüntüleyebilirsiniz. Değişiklikleriniz, bağlantı kurulduğunda eşitlenir.</span></p>
         </section>
         <section className="settings-group" aria-labelledby="settings-general-heading"><h3 id="settings-general-heading">Genel</h3>{preferenceError&&<p className="settings-inline-error" role="alert">{preferenceError}</p>}<div className="settings-card">
           <div className="settings-option"><span><span className="settings-option-title">Tema</span><span className="settings-option-description">Uygulamanın görünümünü seçin.</span></span><Select label="Tema" value={preferences.theme} onChange={value=>change({theme:value as SettingsPreferences['theme']})} options={[{value:'system',label:'Sistem'},{value:'light',label:'Açık'},{value:'dark',label:'Koyu'}]}/></div>
@@ -102,7 +97,7 @@ export function SettingsPanel({status,foldersInitialized,offlineView,busy,error,
           <h3 id="settings-about-heading">Linux için Notes</h3>
           <p>Sürüm {APP_VERSION}</p>
           <p>Samsung Notes ile çalışan bağımsız Linux istemcisi. Samsung’un resmî uygulaması değildir.</p>
-          <p>Eşitlenmemiş notlar ve taslaklar yalnız bu cihazda durur; uygulama verisini silerseniz bunlar da silinir.</p>
+          
           <details className="settings-licenses"><summary>Açık kaynak lisansları</summary><ul>{OPEN_SOURCE.map(item=><li key={item.name}><strong>{item.name}</strong> · {item.license}{item.note?<span>{item.note}</span>:null}</li>)}</ul></details>
         </section>
       </div>

@@ -1115,6 +1115,19 @@ impl Engine {
     }
 
     #[cfg(feature = "python")]
+    fn append_ink_draft<'py>(slf: &Bound<'py, Self>, identity: B<'py>, revision: B<'py>, strokes: B<'py>) -> PyResult<B<'py>> {
+        g!(slf, "store").call_method1("append_ink_draft", (identity, revision, strokes))
+    }
+
+    #[cfg(feature = "python")]
+    fn save_ink_from_draft<'py>(slf: &Bound<'py, Self>, identity: B<'py>, strokes: B<'py>, revision: B<'py>, draft_ids: B<'py>) -> PyResult<B<'py>> {
+        slf.call_method1("ink", (&identity,))?;
+        let result = g!(slf, "store").call_method1("save_ink_from_draft", (identity, strokes, revision, draft_ids))?;
+        slf.call_method0("request_sync")?;
+        Ok(result)
+    }
+
+    #[cfg(feature = "python")]
     fn _push_ink_erase<'py>(slf: &Bound<'py, Self>, api: B<'py>, row: B<'py>, job: B<'py>) -> PyResult<B<'py>> {
         let py = slf.py();
         let s = slf.as_any();

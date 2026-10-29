@@ -342,6 +342,58 @@ fn hashable(v: &Val) -> Result<String> {
     }
 }
 
+fn validate_draft(revision: &Val, strokes: &Val) -> Result<String> {
+        let invalid = || fail("invalid_ink", "Çizim taslağı geçersiz.", 400);
+        let list = match strokes {
+            Val::List(items) if revision.is_exact_int() && items.len() <= MAX_BATCH_STROKES => items,
+            _ => return invalid(),
+        };
+        let allowed: HashSet<&str> = ["id", "pageId", "sourceStrokeId", "kind", "colorARGB", "size", "points", "pageSize"].into_iter().collect();
+        let required = ["id", "pageId", "sourceStrokeId", "points"];
+        let mut points = 0usize;
+        let mut ids = HashSet::new();
+        for stroke in list {
+            let keys: HashSet<&str> = stroke.keys().into_iter().collect();
+            let ok = matches!(stroke, Val::Dict(_))
+                && required.iter().all(|k| keys.contains(k))
+                && keys.is_subset(&allowed)
+                && stroke.get("id").and_then(Val::as_str).is_some_and(|id| !id.is_empty() && ids.insert(id.to_string()))
+                && matches!(stroke.get("points"), Some(Val::List(_)));
+            if !ok {
+                return invalid();
+            }
+            if let Some(Val::List(p)) = stroke.get("points") {
+                points += p.len();
+            }
+        }
+        let encoded = crate::val::dumps(strokes, false, false)?;
+        if points > MAX_BATCH_POINTS || (encoded.len() > 8 * 1024 * 1024 && encoded.chars().count() > 8 * 1024 * 1024) {
+            return fail("ink_too_large", "Çizim taslağı çok büyük.", 400);
+        }
+        Ok(encoded)
+}
+
+// A queued first stroke becomes the template for subsequent lines on the
+// same formerly empty page. Its generated id belongs to the immutable job.
+fn bind_first_draft(db: &DbHandle, identity: &str, revision: &Val, strokes: &Val) -> Result<Val> {
+    let Val::Int(rev) = revision else { return Ok(strokes.clone()) };
+    let Some(next) = rev.checked_add(1) else { return Ok(strokes.clone()) };
+    let Some(row) = db.one("SELECT ink_jobs.model FROM ink_jobs JOIN jobs ON jobs.id=ink_jobs.job_id WHERE jobs.note_id=? AND jobs.kind='append_ink' AND jobs.local_revision=? AND jobs.state<>'cancelled' ORDER BY jobs.created_ms DESC LIMIT 1", &p![identity, next])? else { return Ok(strokes.clone()) };
+    let model=loads_sql(&row[0])?;
+    if model.get("recipeVersion") != Some(&Val::Int(4)) { return Ok(strokes.clone()); }
+    let Some(Val::List(queued))=model.get("strokes") else { return Ok(strokes.clone()) };
+    let Some(first)=queued.first() else { return Ok(strokes.clone()) };
+    let (Some(page), Some(id))=(first.get("pageId"),first.get("id")) else { return Ok(strokes.clone()) };
+    let Val::List(items)=strokes else { return Ok(strokes.clone()) };
+    let mut output=items.clone();
+    for item in &mut output {
+        if item.get("sourceStrokeId").and_then(Val::as_str)==Some("") && item.get("kind").and_then(Val::as_str)!=Some("highlighter") && item.get("pageId").is_some_and(|p| py_eq(p,page)) {
+            item.set("sourceStrokeId",id.clone());
+        }
+    }
+    Ok(Val::List(output))
+}
+
 impl StoreCore {
     /// Bind a still-running job to an already observed stop condition.
     pub fn suspend_ink_job(&self, job: &Val) -> Result<()> {
@@ -648,34 +700,14 @@ impl StoreCore {
 
     pub fn save_ink_draft(&self, identity: &str, revision: &Val, strokes: &Val) -> Result<Val> {
         self.raw(identity)?;
-        let invalid = || fail("invalid_ink", "Çizim taslağı geçersiz.", 400);
-        let list = match strokes {
-            Val::List(items) if revision.is_exact_int() && items.len() <= MAX_BATCH_STROKES => items,
-            _ => return invalid(),
-        };
-        let allowed: HashSet<&str> = ["id", "pageId", "sourceStrokeId", "kind", "colorARGB", "size", "points", "pageSize"].into_iter().collect();
-        let required = ["id", "pageId", "sourceStrokeId", "points"];
-        let mut points = 0usize;
-        for stroke in list {
-            let keys: HashSet<&str> = stroke.keys().into_iter().collect();
-            let ok = matches!(stroke, Val::Dict(_))
-                && required.iter().all(|k| keys.contains(k))
-                && keys.is_subset(&allowed)
-                && matches!(stroke.get("points"), Some(Val::List(_)));
-            if !ok {
-                return invalid();
-            }
-            if let Some(Val::List(p)) = stroke.get("points") {
-                points += p.len();
-            }
-        }
-        let encoded = crate::val::dumps(strokes, false, false)?;
-        if points > MAX_BATCH_POINTS || (encoded.len() > 8 * 1024 * 1024 && encoded.chars().count() > 8 * 1024 * 1024) {
-            return fail("ink_too_large", "Çizim taslağı çok büyük.", 400);
-        }
+        validate_draft(revision, strokes)?;
         let rev = b(revision)?;
         self.with_db(|db| {
-            if list.is_empty() {
+            db.exec("BEGIN IMMEDIATE", &[])?;
+            let bound=bind_first_draft(db,identity,revision,strokes)?;
+            let encoded=validate_draft(revision,&bound)?;
+            let empty = matches!(&bound, Val::List(items) if items.is_empty());
+            if empty {
                 db.exec("DELETE FROM ink_drafts WHERE note_id=?", &p![identity])?;
             } else {
                 db.exec(
@@ -689,7 +721,47 @@ impl StoreCore {
         self.ink_draft(identity)
     }
 
+    /// Add new strokes without replacing a concurrent outbox transfer or draft.
+    pub fn append_ink_draft(&self, identity: &str, revision: &Val, strokes: &Val) -> Result<Val> {
+        self.raw(identity)?;
+        validate_draft(revision, strokes)?;
+        if matches!(strokes, Val::List(items) if items.is_empty()) { return fail("invalid_ink", "Çizim taslağı geçersiz.", 400); }
+        self.with_db(|db| {
+            db.exec("BEGIN IMMEDIATE", &[])?;
+            let bound=bind_first_draft(db,identity,revision,strokes)?;
+            let Val::List(added) = &bound else { unreachable!() };
+            let existing = db.one("SELECT revision,strokes FROM ink_drafts WHERE note_id=?", &p![identity])?;
+            let (mut list, saved_revision) = if let Some(row) = existing {
+                let Val::List(list) = loads_sql(&row[1])? else { return fail("invalid_ink", "Çizim taslağı geçersiz.", 400); };
+                (list, sql_to_val(&row[0]))
+            } else { (vec![], revision.clone()) };
+            for stroke in added {
+                let id = key(stroke, "id")?;
+                if let Some(previous) = list.iter().find(|item| item.get("id").is_some_and(|v| py_eq(v,id))) {
+                    if !py_eq(previous,stroke) { return fail("revision_conflict", "Çizim taslağı değişti.", 409); }
+                } else { list.push(stroke.clone()); }
+            }
+            let merged_revision = match (revision, &saved_revision) {
+                (Val::Int(a), Val::Int(b)) => Val::Int((*a).min(*b)),
+                _ => return fail("invalid_ink", "Çizim taslağı geçersiz.", 400),
+            };
+            let encoded = validate_draft(&merged_revision, &Val::List(list))?;
+            db.exec("INSERT INTO ink_drafts (note_id,revision,strokes,updated_ms) VALUES (?,?,?,?) ON CONFLICT(note_id) DO UPDATE SET revision=excluded.revision,strokes=excluded.strokes,updated_ms=excluded.updated_ms", &vec![text(identity), b(&merged_revision)?, text(&encoded), int(now_ms())])?;
+            Ok(())
+        })?;
+        self.ink_draft(identity)
+    }
+
     pub fn save_ink<H: Host>(&self, h: &H, identity: &str, strokes: &Val, expected_revision: &Val) -> Result<Val> {
+        self.save_ink_impl(h, identity, strokes, expected_revision, None)
+    }
+
+    /// Atomically transfer exactly the named device-draft strokes to the immutable batch.
+    pub fn save_ink_from_draft<H: Host>(&self, h: &H, identity: &str, strokes: &Val, expected_revision: &Val, draft_ids: &Val) -> Result<Val> {
+        self.save_ink_impl(h, identity, strokes, expected_revision, Some(draft_ids))
+    }
+
+    fn save_ink_impl<H: Host>(&self, h: &H, identity: &str, strokes: &Val, expected_revision: &Val, draft_ids: Option<&Val>) -> Result<Val> {
         if !expected_revision.is_exact_int() {
             return fail("revision_required", "Not sürümü eksik.", 400);
         }
@@ -765,8 +837,49 @@ impl StoreCore {
                 "UPDATE notes SET revision=?,modified_ms=?,sync_state='pending',error=NULL WHERE id=?",
                 &p![revision, stamp, identity],
             )?;
-            // The queued batch now owns these strokes; the device draft is done.
-            db.exec("DELETE FROM ink_drafts WHERE note_id=?", &p![identity])?;
+            // Verify the exact draft snapshot under the same write transaction.
+            // A newer stroke is retained; a changed/missing selected stroke is
+            // refused rather than publishing different content under its id.
+            if let Some(ids) = draft_ids {
+                let (Val::List(ids), Val::List(submitted)) = (ids, strokes) else {
+                    return fail("invalid_ink", "Çizim taslağı geçersiz.", 400);
+                };
+                let mut selected = HashSet::new();
+                if ids.len() != submitted.len() || ids.is_empty() || ids.iter().any(|id| id.as_str().filter(|s| !s.is_empty()).is_none_or(|id| !selected.insert(id.to_string()))) {
+                    return fail("invalid_ink", "Çizim taslağı geçersiz.", 400);
+                }
+                let Some(stored) = db.one("SELECT revision,strokes FROM ink_drafts WHERE note_id=?", &p![identity])? else {
+                    return fail("revision_conflict", "Çizim taslağı değişti.", 409);
+                };
+                if !sql_eq(&stored[0], expected_revision) {
+                    return fail("revision_conflict", "Çizim taslağı değişti.", 409);
+                }
+                let Val::List(existing) = loads_sql(&stored[1])? else {
+                    return fail("invalid_ink", "Çizim taslağı geçersiz.", 400);
+                };
+                let Val::List(validated) = key(&model,"strokes")? else { return fail("invalid_ink", "Çizim taslağı geçersiz.", 400) };
+                if validated.len()!=ids.len() { return fail("invalid_ink", "Çizim taslağı geçersiz.", 400); }
+                for ((id, request), saved) in ids.iter().zip(submitted).zip(validated) {
+                    let Some(draft) = existing.iter().find(|item| item.get("id").is_some_and(|v| py_eq(v, id))) else {
+                        return fail("revision_conflict", "Çizim taslağı değişti.", 409);
+                    };
+                    let matches = ["pageId", "points"].iter().all(|k| draft.get(k).zip(request.get(k)).is_some_and(|(a,b)| py_eq(a,b)))
+                        && request.get("sourceStrokeId").map_or_else(|| draft.get("sourceStrokeId").and_then(Val::as_str)==Some(""), |v| draft.get("sourceStrokeId").is_some_and(|d| py_eq(d,v)))
+                        && ["kind", "colorARGB", "size"].iter().all(|k| draft.get(k).zip(saved.get(k)).is_some_and(|(a,b)| py_eq(a,b)))
+                        && (request.get("tool").and_then(Val::as_str)==Some("highlighter")) == (draft.get("kind").and_then(Val::as_str)==Some("highlighter"));
+                    if !matches { return fail("revision_conflict", "Çizim taslağı değişti.", 409); }
+                }
+                let rest: Vec<Val> = existing.into_iter().filter(|item| item.get("id").and_then(Val::as_str).is_none_or(|id| !selected.contains(id))).collect();
+                let Val::List(rest)=bind_first_draft(db,identity,expected_revision,&Val::List(rest))? else { unreachable!() };
+                if rest.is_empty() {
+                    db.exec("DELETE FROM ink_drafts WHERE note_id=?", &p![identity])?;
+                } else {
+                    db.exec("UPDATE ink_drafts SET strokes=?,updated_ms=? WHERE note_id=?", &p![dumps_utf8(&Val::List(rest))?, stamp, identity])?;
+                }
+            } else {
+                // Legacy API clients do not supply draft ids.
+                db.exec("DELETE FROM ink_drafts WHERE note_id=?", &p![identity])?;
+            }
             let mut desired = projection.clone();
             desired.set("pendingStrokes", key(&model, "strokes")?.clone());
             desired.set("capabilities", Val::dict(vec![("appendInk", Val::Bool(false))]));

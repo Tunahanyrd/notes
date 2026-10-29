@@ -30,11 +30,18 @@ result was also checked in the official app on a phone or tablet.
   instead of waiting for the network timeout; the note is parsed once and only
   the requested page is prepared; the page on screen has its own worker; hard
   download/decode failures are not retried.
+- Handwriting no longer locks after each stroke: strokes drawn while the
+  previous batch syncs are kept and saved as the next batch; the pen, page
+  style menu and other note state refresh when a sync finishes.
+- Zooming keeps the page bitmap instead of dropping and refetching it.
+- Long note titles stay within their card.
 - Ctrl + mouse wheel zooms pages around the page on screen (also past the
   window width); the page number follows.
 - The pen button in a handwriting note's text view leads back to the pages.
 
 ### Changed
+
+- The UI no longer narrates saving/syncing; the cloud indicator shows sync state.
 
 - Native dropdowns replaced with a themed Windows 11 style dropdown.
 - Folders show their subfolders as cards above the notes; trashed folders can
@@ -42,6 +49,7 @@ result was also checked in the official app on a phone or tablet.
 
 ### Security
 
+- libz-sys 1.1.31 (RUSTSEC-2026-0418).
 - The local engine serves static UI files only on exact-case paths.
 
 ### Documentation

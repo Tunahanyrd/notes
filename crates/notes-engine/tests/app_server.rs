@@ -6,10 +6,13 @@ use std::net::TcpStream;
 
 use common::*;
 use notes_engine::server::AppServer;
+use notes_engine::engine::Engine;
+use std::sync::Arc;
 
 struct Fixture {
     _t: TempDir,
     server: AppServer,
+    engine: Arc<Engine>,
     _accept: std::thread::JoinHandle<()>,
 }
 
@@ -17,9 +20,9 @@ impl Fixture {
     fn new() -> Fixture {
         let t = TempDir::new("app");
         let engine = offline_engine(t.path());
-        let server = AppServer::bind(0, engine, "synthetic-local-secret", t.path(), Some(t.path().join("fonts"))).unwrap();
+        let server = AppServer::bind(0, engine.clone(), "synthetic-local-secret", t.path(), Some(t.path().join("fonts"))).unwrap();
         let accept = server.spawn();
-        Fixture { _t: t, server, _accept: accept }
+        Fixture { _t: t, server, engine, _accept: accept }
     }
 
     /// Returns (status, content-type, body).
@@ -128,4 +131,60 @@ fn offline_login_and_sync_requests_match_python_contract() {
     let (status, value) = f.json("POST", "/api/auth/disconnect", Some("{}"));
     assert_eq!(status, 200);
     assert_eq!(value.get("connected"), Some(&notes_host::Val::Bool(false)));
+}
+
+#[test]
+fn ink_draft_remaining_after_batch_survives_engine_restart() {
+    let t = TempDir::new("ink-draft-restart");
+    let engine = offline_engine(t.path());
+    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../notes-host/tests/fixtures/ink_objects_base.json")).unwrap();
+    let doc = rs_store::val::loads(&text).unwrap();
+    let id = engine.store.apply_document(&engine.host, &notes_host::Val::s("synthetic-restart"), &doc, None).unwrap();
+    let projection = engine.ink(&id).unwrap();
+    let revision = projection.get("revision").unwrap().clone();
+    let notes_host::Val::List(pages) = projection.get("pages").unwrap() else { panic!() };
+    let page = &pages[0];
+    let notes_host::Val::List(sources) = page.get("strokes").unwrap() else { panic!() };
+    let source = &sources[0];
+    let point = |x| notes_host::Val::dict(vec![("x", notes_host::Val::Int(x)), ("y", notes_host::Val::Int(40)), ("pressure", notes_host::Val::Float(0.5)), ("timeMs", notes_host::Val::Int(0))]);
+    let draft = |id: &str, x| notes_host::Val::dict(vec![
+        ("id", notes_host::Val::s(id)), ("pageId", page.get("id").unwrap().clone()), ("sourceStrokeId", source.get("id").unwrap().clone()),
+        ("kind", source.get("kind").unwrap().clone()), ("colorARGB", source.get("colorARGB").unwrap().clone()),
+        ("size", source.get("size").unwrap().clone()), ("points", notes_host::Val::List(vec![point(x)])),
+    ]);
+    let first = draft("first", 40); let second = draft("second", 60); let third = draft("third", 80);
+    engine.save_ink_draft(&id, &revision, &notes_host::Val::List(vec![first.clone()])).unwrap();
+    engine.append_ink_draft(&id, &revision, &notes_host::Val::List(vec![second.clone()])).unwrap();
+    let line = notes_host::Val::dict(vec![("pageId", first.get("pageId").unwrap().clone()), ("sourceStrokeId", first.get("sourceStrokeId").unwrap().clone()), ("points", first.get("points").unwrap().clone())]);
+    engine.save_ink_from_draft(&id, &notes_host::Val::List(vec![line]), &revision, &notes_host::Val::List(vec![notes_host::Val::s("first")])).unwrap();
+    // A later line is persisted while the immutable batch is still pending.
+    engine.append_ink_draft(&id, &revision, &notes_host::Val::List(vec![third.clone()])).unwrap();
+    engine.close();drop(engine);
+    let restarted = offline_engine(t.path());
+    assert_eq!(restarted.ink_draft(&id).unwrap().get("strokes"), Some(&notes_host::Val::List(vec![second, third])));
+    assert_eq!(restarted.get(&id).unwrap().get("syncState"), Some(&notes_host::Val::s("pending")));
+    restarted.close();
+}
+
+
+#[test]
+fn ink_draft_append_and_batch_transfer_use_the_http_contract() {
+    use notes_host::Val;
+    let f=Fixture::new();
+    let text=std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../notes-host/tests/fixtures/ink_objects_base.json")).unwrap();
+    let doc=rs_store::val::loads(&text).unwrap();
+    let id=f.engine.store.apply_document(&f.engine.host,&Val::s("synthetic-http-ink"),&doc,None).unwrap();
+    let projection=f.engine.ink(&id).unwrap();let revision=projection.get("revision").unwrap().clone();
+    let Val::List(pages)=projection.get("pages").unwrap() else {panic!()};let page=&pages[0];
+    let Val::List(sources)=page.get("strokes").unwrap() else {panic!()};let source=&sources[0];
+    let point=|x|Val::dict(vec![("x",Val::Int(x)),("y",Val::Int(40)),("pressure",Val::Float(0.5)),("timeMs",Val::Int(0))]);
+    let draft=|id:&str,x|Val::dict(vec![("id",Val::s(id)),("pageId",page.get("id").unwrap().clone()),("sourceStrokeId",source.get("id").unwrap().clone()),("kind",source.get("kind").unwrap().clone()),("colorARGB",source.get("colorARGB").unwrap().clone()),("size",source.get("size").unwrap().clone()),("points",Val::List(vec![point(x)]))]);
+    let first=draft("first",40);let second=draft("second",60);let path=format!("/api/notes/{id}/ink-draft");
+    let body=|strokes:Vec<Val>|rs_store::val::dumps(&Val::dict(vec![("revision",revision.clone()),("strokes",Val::List(strokes))]),false,false).unwrap();
+    assert_eq!(f.json("PUT",&path,Some(&body(vec![first.clone()]))).0,200);
+    assert_eq!(f.json("POST",&path,Some(&body(vec![second.clone()]))).0,200);
+    let stroke=Val::dict(vec![("pageId",first.get("pageId").unwrap().clone()),("sourceStrokeId",first.get("sourceStrokeId").unwrap().clone()),("points",first.get("points").unwrap().clone())]);
+    let batch=rs_store::val::dumps(&Val::dict(vec![("expectedRevision",revision),("strokes",Val::List(vec![stroke])),("draftStrokeIds",Val::List(vec![Val::s("first")]))]),false,false).unwrap();
+    assert_eq!(f.json("PUT",&format!("/api/notes/{id}/ink"),Some(&batch)).0,200);
+    let (status,remaining)=f.json("GET",&path,None);assert_eq!(status,200);assert_eq!(remaining.get("strokes"),Some(&Val::List(vec![second])));
 }

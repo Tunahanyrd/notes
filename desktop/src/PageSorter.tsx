@@ -23,7 +23,7 @@ function useSorterImage(noteId:string,revision:number,index:number,wanted:boolea
   const [url,setUrl]=useState<string|null>(null);const [failed,setFailed]=useState(false);const shown=useRef<string|null>(null);
   useEffect(()=>()=>{if(shown.current)URL.revokeObjectURL(shown.current);},[]);
   useEffect(()=>{
-    if(!wanted)return;
+    if(!wanted){if(shown.current){URL.revokeObjectURL(shown.current);shown.current=null;}setUrl(null);return;}
     const controller=new AbortController();setFailed(false);
     const run=async()=>{
       for(let attempt=0;attempt<240;attempt++){
@@ -44,7 +44,7 @@ function useSorterImage(noteId:string,revision:number,index:number,wanted:boolea
 function Thumb({note,page,position,selected,dragging,dropBefore,onPointer,onDragStart,onDragOver,onDrop,onDragEnd}:{note:Note;page:SorterPage;position:number;selected:boolean;dragging:boolean;dropBefore:boolean;
   onPointer:(event:MouseEvent)=>void;onDragStart:()=>void;onDragOver:(event:DragEvent)=>void;onDrop:(event:DragEvent)=>void;onDragEnd:()=>void}){
   const box=useRef<HTMLDivElement>(null);const [near,setNear]=useState(false);
-  useEffect(()=>{const element=box.current;if(!element)return;const seen=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting))setNear(true);},{rootMargin:'200px'});seen.observe(element);return()=>seen.disconnect();},[]);
+  useEffect(()=>{const element=box.current;if(!element)return;const seen=new IntersectionObserver(entries=>setNear(entries.some(e=>e.isIntersecting)),{rootMargin:'200px'});seen.observe(element);return()=>seen.disconnect();},[]);
   const {url,failed}=useSorterImage(note.id,note.revision,page.index,near);
   const ratio=page.width>0&&page.height>0?`${page.width} / ${page.height}`:'1 / 1.414';
   return <div ref={box} role="option" aria-selected={selected} tabIndex={-1} draggable
@@ -121,7 +121,7 @@ export function PageSorter({note,pages,busy=false,blockedReason=null,canAdd=true
           <button type="button" className="sorter-close" aria-label="Kapat" onClick={close}>✕</button>
         </div>
       </header>
-      {(blockedReason||deleteReason&&selected.length)&&<p className="sorter-status" role="status">{blockedReason||deleteReason}</p>}
+      {deleteReason&&selected.length>0&&!blockedReason&&<p className="sorter-status" role="status">{deleteReason}</p>}
       <div ref={grid} className="sorter-grid" role="listbox" aria-multiselectable="true" aria-label="Sayfalar" tabIndex={0}
         onDragOver={event=>{if(drag)event.preventDefault();}} onDrop={drop(order.length)}>
         {ordered.map((page,position)=><Thumb key={page.id} note={note} page={page} position={position}

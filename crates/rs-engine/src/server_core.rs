@@ -544,6 +544,14 @@ pub fn handle_request<B: Backend + ?Sized, R: BufRead, W: Write>(cfg: &Config, b
                 let body = backend.json(call(Engine, "ink_draft", vec![id()]))?;
                 return conn.json_raw(200, &body);
             }
+            ("POST", Some("ink-draft")) => {
+                let data = conn.body()?;
+                if !data.keys_equal(&["revision", "strokes"]) {
+                    return Err(Failure::store("invalid_ink", "Çizim taslağı geçersiz.", 400));
+                }
+                let body = backend.json(call(Engine, "append_ink_draft", vec![id(), j(&data, "revision"), j(&data, "strokes")]))?;
+                return conn.json_raw(200, &body);
+            }
             ("PUT", Some("ink-draft")) => {
                 let data = conn.body()?;
                 if !data.keys_equal(&["revision", "strokes"]) {
@@ -554,10 +562,15 @@ pub fn handle_request<B: Backend + ?Sized, R: BufRead, W: Write>(cfg: &Config, b
             }
             ("PUT", Some("ink")) => {
                 let data = conn.body()?;
-                if !data.keys_equal(&["expectedRevision", "strokes"]) {
+                let draft = data.keys_equal(&["expectedRevision", "strokes", "draftStrokeIds"]);
+                if !draft && !data.keys_equal(&["expectedRevision", "strokes"]) {
                     return Err(Failure::store("invalid_ink", "Çizim ve not sürümü gerekli.", 400));
                 }
-                let body = backend.json(call(Engine, "save_ink", vec![id(), j(&data, "strokes"), j(&data, "expectedRevision")]))?;
+                let body = if draft {
+                    backend.json(call(Engine, "save_ink_from_draft", vec![id(), j(&data, "strokes"), j(&data, "expectedRevision"), j(&data, "draftStrokeIds")]))?
+                } else {
+                    backend.json(call(Engine, "save_ink", vec![id(), j(&data, "strokes"), j(&data, "expectedRevision")]))?
+                };
                 return conn.json_raw(200, &wrap("note", body));
             }
             ("GET", Some("thumbnail")) => {

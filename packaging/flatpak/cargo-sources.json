@@ -678,14 +678,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/libz-sys/libz-sys-1.1.30.crate",
-        "sha256": "f710a23e6dbf193214fd46ca56a9d6864e550abe86202184532ae7275e46de19",
-        "dest": "cargo/vendor/libz-sys-1.1.30"
+        "url": "https://static.crates.io/crates/libz-sys/libz-sys-1.1.31.crate",
+        "sha256": "ff20308ecabd635a2dc1dd5834a86c462cca20efba1d5d3ddab1f8aea3455cb2",
+        "dest": "cargo/vendor/libz-sys-1.1.31"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"f710a23e6dbf193214fd46ca56a9d6864e550abe86202184532ae7275e46de19\", \"files\": {}}",
-        "dest": "cargo/vendor/libz-sys-1.1.30",
+        "contents": "{\"package\": \"ff20308ecabd635a2dc1dd5834a86c462cca20efba1d5d3ddab1f8aea3455cb2\", \"files\": {}}",
+        "dest": "cargo/vendor/libz-sys-1.1.31",
         "dest-filename": ".cargo-checksum.json"
     },
     {

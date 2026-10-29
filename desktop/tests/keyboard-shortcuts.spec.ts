@@ -69,7 +69,7 @@ test('remapped create and search persist after reload and original shortcut no l
   await remap(page,'Notlarda ara','ControlOrMeta+Shift+G');
   expect(fixture.counts().creates).toBe(0);
   await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();
-  await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Kısayolları kaydet',exact:true})).toBeDisabled();await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toHaveCount(0);
   expect(fixture.bindings().newNote).toBe('Ctrl+Shift+F');
   await page.reload();await fixture.settings();
   await expect(page.getByLabel('Yeni not oluştur kısayolu')).toHaveValue(shown('Ctrl+Shift+F'));
@@ -88,7 +88,7 @@ test('remapped save writes the actual current note and displays its shortcut',as
   const fixture=await setup(page);await fixture.settings();
   await remap(page,'Notu bu cihaza kaydet','ControlOrMeta+Shift+S');
   await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();
-  await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Kısayolları kaydet',exact:true})).toBeDisabled();await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toHaveCount(0);
   await page.getByRole('button',{name:'Ayarları kapat'}).click();
   await page.keyboard.press('ControlOrMeta+N');
   await expect(page.getByRole('textbox',{name:'Not başlığı'})).toBeEditable();
@@ -108,11 +108,11 @@ test('shortcut editor rejects duplicate, single letter and system keys without s
 test('restore defaults is explicit, saved and persists through a reload',async({page})=>{
   const fixture=await setup(page);await fixture.settings();
   await remap(page,'Yeni not oluştur','ControlOrMeta+Shift+F');await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();
-  await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Kısayolları kaydet',exact:true})).toBeDisabled();await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toHaveCount(0);
   await page.getByRole('button',{name:'Varsayılanları kullan',exact:true}).click();
   expect(fixture.bindings().newNote).toBe('Ctrl+Shift+F');
   await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();
-  await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Kısayolları kaydet',exact:true})).toBeDisabled();await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toHaveCount(0);
   await page.reload();await fixture.settings();
   await expect(page.getByLabel('Yeni not oluştur kısayolu')).toHaveValue(shown('Ctrl+N'));
   expect(fixture.counts().writes).toBe(2);
@@ -133,7 +133,7 @@ test('settings list every Windows shortcut group and unassigning a binding is sa
   await expect(page.getByLabel('Kalın kısayolu')).toHaveValue(shown('Ctrl+B'));await expect(page.getByLabel('Yakınlaştır kısayolu')).toHaveValue(shown('Ctrl+Plus'));
   await page.getByRole('button',{name:'Kısayolu kaldır: Notu yazdır'}).click();await expect(page.getByLabel('Notu yazdır kısayolu')).toHaveValue('Atanmadı');
   await remap(page,'Okuma modunu aç/kapat','Alt+Shift+R');
-  await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toBeVisible();
+  await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();await expect(page.getByRole('button',{name:'Kısayolları kaydet',exact:true})).toBeDisabled();await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toHaveCount(0);
   expect(fixture.bindings()).toMatchObject({printNote:'',readingMode:'Alt+Shift+R'});
 });
 test('Windows view shortcuts toggle reading mode, zoom, tools and print in the open note',async({page})=>{
@@ -159,7 +159,7 @@ test('macOS uses Command as the primary modifier and shows ⌘ (emulated platfor
   await expect(page.getByLabel('Yeni not oluştur kısayolu')).toHaveValue('⌘N');await expect(page.getByLabel('Notu yazdır kısayolu')).toHaveValue('⌘⇧P');
   await expect(page.locator('#shortcut-key-help')).toContainText('⌘ veya ⌥ ile');
   await remap(page,'Yeni not oluştur','Meta+Shift+F');await expect(page.getByLabel('Yeni not oluştur kısayolu')).toHaveValue('⌘⇧F');
-  await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toBeVisible();
+  await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();await expect(page.getByRole('button',{name:'Kısayolları kaydet',exact:true})).toBeDisabled();await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toHaveCount(0);
   expect(fixture.bindings().newNote).toBe('Ctrl+Shift+F');
   await page.getByRole('button',{name:'Ayarları kapat'}).click();
   await page.keyboard.press('Control+Shift+F');expect(fixture.counts().creates).toBe(0);
@@ -182,7 +182,7 @@ test('formatting shortcuts edit the rich model and follow remapping',async({page
   await page.keyboard.press('ControlOrMeta+M');await expect(editor.locator('p').first()).toHaveAttribute('style',/margin-inline-start: ?1.5em/);
   await page.keyboard.press('ControlOrMeta+S');await expect.poll(()=>fixture.counts().saves).toBe(1);
   await page.getByRole('button',{name:'Not listesine dön'}).click();await fixture.settings();
-  await remap(page,'İtalik','ControlOrMeta+Shift+Y');await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toBeVisible();
+  await remap(page,'İtalik','ControlOrMeta+Shift+Y');await page.getByRole('button',{name:'Kısayolları kaydet',exact:true}).click();await expect(page.getByRole('button',{name:'Kısayolları kaydet',exact:true})).toBeDisabled();await expect(page.getByText('Kısayollar bu cihaza kaydedildi.')).toHaveCount(0);
   await page.getByRole('button',{name:'Ayarları kapat'}).click();await page.getByRole('button',{name:/Kalın satır|Metin notu/}).first().click();
   // Focus without a pointer click: Chrome reports a click's caret asynchronously
   // (selectionchange), and when that lands after Ctrl+A it collapses the selection.

@@ -44,16 +44,17 @@ const sleep=(ms:number,signal:AbortSignal)=>new Promise<void>((resolve,reject)=>
   const timer=setTimeout(()=>{signal.removeEventListener('abort',onAbort);resolve();},ms);
   signal.addEventListener('abort',onAbort,{once:true});
 });
-function usePageImage(noteId:string,revision:number|undefined,index:number,wanted:boolean,visible:boolean){
+function usePageImage(noteId:string,revision:number|undefined,index:number,wanted:boolean,visible:boolean,retain:boolean){
   // The previous image stays visible until the next revision's image is ready.
-  const [state,setState]=useState<ImageState>({url:null,phase:'loading'});const shown=useRef<string|null>(null);
+  const [state,setState]=useState<ImageState>({url:null,phase:'loading'});const shown=useRef<string|null>(null);const retired=useRef<string[]>([]);const fetched=useRef<string|null>(null);
   // Bumped to try again after the retries ran out: the page came back into
   // view, the window regained focus or the connection returned.
   const [epoch,setEpoch]=useState(0);const exhausted=useRef(false);
   // A page on screen never gives up: after the backoff it keeps asking every
   // 30 s (the engine answers from its cache once the image exists).
   const onScreen=useRef(visible);onScreen.current=visible;
-  useEffect(()=>()=>{if(shown.current)URL.revokeObjectURL(shown.current);},[]);
+  useEffect(()=>{for(const url of retired.current.splice(0))URL.revokeObjectURL(url);},[state.url]);
+  useEffect(()=>()=>{if(shown.current)URL.revokeObjectURL(shown.current);for(const url of retired.current.splice(0))URL.revokeObjectURL(url);},[]);
   useEffect(()=>{
     const again=()=>{if(exhausted.current){exhausted.current=false;setEpoch(value=>value+1);}};
     window.addEventListener('online',again);window.addEventListener('focus',again);
@@ -61,7 +62,11 @@ function usePageImage(noteId:string,revision:number|undefined,index:number,wante
   },[]);
   useEffect(()=>{if(visible&&exhausted.current){exhausted.current=false;setEpoch(value=>value+1);}},[visible]);
   useEffect(()=>{
-    if(!wanted)return;
+    if(!wanted){
+      if(!retain){if(shown.current){URL.revokeObjectURL(shown.current);shown.current=null;}fetched.current=null;setState({url:null,phase:'loading'});}
+      return;
+    }
+    const key=`${noteId}:${revision}:${index}`;if(shown.current&&fetched.current===key)return;
     const controller=new AbortController();exhausted.current=false;
     setState(previous=>({url:previous.url,phase:previous.url?'ready':'loading'}));
     const run=async()=>{
@@ -78,7 +83,11 @@ function usePageImage(noteId:string,revision:number|undefined,index:number,wante
         if(response&&response.status===200&&response.headers.get('content-type')?.split(';')[0].trim()==='image/png'){
           const blob=await response.blob();if(controller.signal.aborted)return;
           if(blob.size){
-            const previous=shown.current;shown.current=URL.createObjectURL(blob);setState({url:shown.current,phase:'ready'});if(previous)URL.revokeObjectURL(previous);return;
+            const next=URL.createObjectURL(blob);const image=new Image();image.src=next;
+            try{await image.decode();}catch{/* Preserve the existing fallback for undecodable fixtures. */}
+            if(controller.signal.aborted){URL.revokeObjectURL(next);return;}
+            const previous=shown.current;shown.current=next;fetched.current=key;if(previous)retired.current.push(previous);
+            setState({url:next,phase:'ready'});return;
           }
         }
         if(final){setState(previous=>previous.url?previous:{url:null,phase:'final'});return;}
@@ -89,7 +98,7 @@ function usePageImage(noteId:string,revision:number|undefined,index:number,wante
     };
     void run().catch(()=>{});
     return()=>controller.abort();
-  },[noteId,revision,index,wanted,epoch]);
+  },[noteId,revision,index,wanted,retain,epoch]);
   return state;
 }
 
@@ -98,17 +107,21 @@ function PageItem({noteId,revision,page,isCurrent,register,render,renderUnavaila
   const box=useRef<HTMLDivElement>(null);const [near,setNear]=useState(false);const [visible,setVisible]=useState(false);
   useEffect(()=>{
     const element=box.current;if(!element)return;register(page.index,element);
-    const nearby=new IntersectionObserver(entries=>{const inside=entries.some(entry=>entry.isIntersecting);if(inside)setNear(true);setVisible(inside);},{rootMargin:'150% 0px'});
+    let evict:ReturnType<typeof setTimeout>|undefined;
+    const nearby=new IntersectionObserver(entries=>{const inside=entries.some(entry=>entry.isIntersecting);clearTimeout(evict);setVisible(inside);
+      // Resizing and zoom anchoring can briefly move a visible page outside
+      // the observer margin. Keep its bitmap during that transient movement.
+      if(inside)setNear(true);else evict=setTimeout(()=>setNear(false),800);
+    },{rootMargin:'150% 0px'});
     nearby.observe(element);
-    return()=>{nearby.disconnect();register(page.index,null);};
+    return()=>{clearTimeout(evict);nearby.disconnect();register(page.index,null);};
   },[page.index]);
-  const {url,phase}=usePageImage(noteId,revision,page.index,near&&page.available,visible);
+  const {url,phase}=usePageImage(noteId,revision,page.index,visible&&page.available,visible,near);
   // Page geometry from the manifest, else from the caller (ink projection).
   const width=page.width&&page.height?page.width:size?.width,height=page.width&&page.height?page.height:size?.height;
   const ratio=width&&height?`${width} / ${height}`:'1 / 1.414';
-  const text=page.previewNotice||(!page.available||phase==='final'?PAGE_UNRENDERABLE:PAGE_PENDING);
   return <div ref={box} className={`page-sheet ${isCurrent?'current':''}`} style={{aspectRatio:ratio,backgroundColor:page.darkMode?'#000':'#fff'}} data-page-dark={String(page.darkMode===true)} data-page-index={page.index} data-preview-phase={url?'ready':page.available?phase:'unavailable'}>
-    {!url&&<div className="page-placeholder" role="status">{text}</div>}
+    {!url&&<div className="page-placeholder" aria-hidden="true"/>}
     {!url&&!page.available&&renderUnavailable?.(page,isCurrent)}
     {(url||near)&&render(page,url,isCurrent)}
   </div>;

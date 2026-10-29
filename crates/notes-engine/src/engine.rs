@@ -818,9 +818,20 @@ impl Engine {
         Ok(self.store.save_ink_draft(identity, revision, strokes)?)
     }
 
+    pub fn append_ink_draft(&self, identity: &str, revision: &Val, strokes: &Val) -> R<Val> {
+        Ok(self.store.append_ink_draft(identity, revision, strokes)?)
+    }
+
     pub fn save_ink(&self, identity: &str, strokes: &Val, revision: &Val) -> R<Val> {
         self.ink(identity)?;
         let result = self.store.save_ink(&self.host, identity, strokes, revision)?;
+        self.request_sync();
+        Ok(result)
+    }
+
+    pub fn save_ink_from_draft(&self, identity: &str, strokes: &Val, revision: &Val, draft_ids: &Val) -> R<Val> {
+        self.ink(identity)?;
+        let result = self.store.save_ink_from_draft(&self.host, identity, strokes, revision, draft_ids)?;
         self.request_sync();
         Ok(result)
     }

@@ -87,7 +87,7 @@ Lock file: `Cargo.lock` (122 packages)
 | kurbo | 0.13.1 | Apache-2.0 OR MIT | crates.io |
 | libc | 0.2.191 | MIT OR Apache-2.0 | crates.io |
 | libsqlite3-sys | 0.39.1 | MIT | crates.io |
-| libz-sys | 1.1.30 | MIT OR Apache-2.0 | crates.io |
+| libz-sys | 1.1.31 | MIT OR Apache-2.0 | crates.io |
 | lock_api | 0.5.0 | MIT OR Apache-2.0 | crates.io |
 | log | 0.4.34 | MIT OR Apache-2.0 | crates.io |
 | memchr | 2.8.3 | Unlicense OR MIT | crates.io |
@@ -384,7 +384,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (463 packages)
 | libloading | 0.7.4 | ISC | crates.io |
 | libredox | 0.1.25 | MIT | crates.io |
 | libsqlite3-sys | 0.39.1 | MIT | crates.io |
-| libz-sys | 1.1.30 | MIT OR Apache-2.0 | crates.io |
+| libz-sys | 1.1.31 | MIT OR Apache-2.0 | crates.io |
 | linux-raw-sys | 0.12.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | crates.io |
 | litemap | 0.8.3 | Unicode-3.0 | crates.io |
 | lock_api | 0.4.14 | MIT OR Apache-2.0 | crates.io |

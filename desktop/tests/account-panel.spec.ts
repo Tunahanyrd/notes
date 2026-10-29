@@ -36,7 +36,7 @@ test('account login waits for real status, avoids duplicate start and reflects c
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.name));
   const {state,calls}=await accountFixture(page);
   await expect(page).toHaveTitle(/Not/);
-  await expect(page).toHaveURL('http://127.0.0.1:4178/');
+  await expect(page).toHaveURL(new URL('/',page.url()).href);
   await expect(page.locator('vite-error-overlay')).toHaveCount(0);
   await expect(page.getByRole('heading',{name:'Samsung hesabınızla bağlanın'})).toBeVisible();
   expect(await page.locator('input[type=password]').count()).toBe(0);
@@ -65,7 +65,7 @@ test('failed browser login has inline error and retry, not a false connected sta
 test('disconnect is explicit and preserves local/offline explanation',async({page})=>{
   await page.setViewportSize({width:390,height:844});
   const {calls}=await accountFixture(page,true);
-  await expect(page.locator('.account-description')).toContainText('bu cihazda kalır');
+  await expect(page.locator('.account-description')).toHaveCount(0);
   const disconnect=page.getByRole('button',{name:'Bağlantıyı kes',exact:true});
   await expect(disconnect).toHaveAttribute('title',/notları silmez/);
   await disconnect.click();

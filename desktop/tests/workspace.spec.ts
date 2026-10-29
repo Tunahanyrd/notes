@@ -93,20 +93,20 @@ test('Windows surfaces use restrained corners and reduced-motion respects naviga
 test('cloud trash stays pending until confirmation, then restores through a separate revisioned request',async({page})=>{
   const {notes,requests,state}=await setup(page);state.autoConfirm=false;
   await openNote(page,/Aklımda kalanlar/);await noteAction(page,'Çöp kutusuna taşı');
-  await expect(page.getByText('Çöp kutusu işleminin bulut sonucu bekleniyor.')).toBeVisible();
+  await expect(page.getByText('Çöp kutusu işleminin bulut sonucu bekleniyor.')).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Geri yükle',exact:true})).toBeDisabled();
-  await expect(page.getByText('Bu not Samsung Cloud çöp kutusunda.')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Geri yükle',exact:true})).toBeDisabled();
   expect(requests.find(r=>r.method==='PATCH')?.data).toEqual({trashed:true,expectedRevision:1});
   const note=notes.find(n=>n.id==='one');note.metadataSync={state:'synced',error:null};note.syncState='synced';
-  await expect(page.getByText('Bu not Samsung Cloud çöp kutusunda.')).toBeVisible({timeout:7000});
+  await expect(page.getByRole('button',{name:'Geri yükle',exact:true})).toBeEnabled({timeout:7000});
   await page.getByRole('button',{name:'Geri yükle',exact:true}).click();
-  await expect(page.getByText('Düzenleme işlemi buluta gönderilmeyi bekliyor.',{exact:false})).toBeVisible();
+  await expect(page.getByText('Düzenleme işlemi buluta gönderilmeyi bekliyor.',{exact:false})).toHaveCount(0);
   expect(requests.filter(r=>r.method==='PATCH').map(r=>r.data)).toEqual([{trashed:true,expectedRevision:1},{trashed:false,expectedRevision:2}]);
 });
 test('offline cloud favorites queue safely and folder move uses actual folder identifiers',async({page})=>{
   const {notes,requests,state}=await setup(page);state.autoConfirm=false;state.connected=false;state.syncState='offline';
   await page.reload();await openNote(page,/Aklımda kalanlar/);await noteAction(page,'Favorilere ekle');
-  await expect(page.getByText(/Bağlantı kurulduğunda devam edecek/)).toBeVisible();
+  await expect(page.getByText(/Bağlantı kurulduğunda devam edecek/)).toHaveCount(0);
   await page.getByRole('button',{name:'Not seçenekleri'}).click();
   await expect(page.getByRole('button',{name:'Favorilerden çıkar',exact:true})).toBeDisabled();
   await expect(page.getByRole('button',{name:'Klasöre taşı',exact:true})).toBeDisabled();
@@ -128,7 +128,7 @@ test('cloud capabilities gate metadata and settings never describe it as local-o
   for(const name of ['Favorilere ekle','Çöp kutusuna taşı','Klasöre taşı'])await expect(page.getByRole('button',{name,exact:true})).toBeDisabled();
   expect(requests.filter(r=>r.method==='PATCH')).toHaveLength(0);
   await page.getByRole('button',{name:'Not listesine dön'}).click();await page.getByRole('button',{name:'Ayarlar',exact:true}).click();
-  await expect(page.getByText(/yüklenmiş notları çevrimdışıyken/)).toBeVisible();
+  await expect(page.getByText(/yüklenmiş notları çevrimdışıyken/)).toHaveCount(0);
   await expect(page.getByText(/yalnızca bu kütüphanede saklanır/)).toHaveCount(0);
 });
 test('polling refreshes clean content but preserves dirty drafts when remote revision changes',async({page})=>{
@@ -176,7 +176,7 @@ test('typing during serialized save stays dirty and uses updated revision',async
   await expect(page.getByRole('button',{name:'Favorilere ekle',exact:true})).toBeDisabled();
   await page.getByRole('button',{name:'Not seçenekleri'}).click();
   await page.getByLabel('Not içeriği').fill('İkinci');await expect(page.getByRole('button',{name:'Kaydet',exact:true})).toBeEnabled();
-  await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.editor-footer').getByText('Kaydedildi',{exact:true})).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.editor-footer')).toHaveAttribute('data-dirty','false');
   expect(requests.filter(r=>r.method==='PUT').map(r=>r.data.expectedRevision)).toEqual([1,2]);
 });
 test('readonly copy leaves original untouched, favorite and recoverable trash work',async({page})=>{
@@ -194,9 +194,10 @@ test('readonly copy leaves original untouched, favorite and recoverable trash wo
   await page.getByRole('button',{name:'Not seçenekleri'}).click();await expect(page.getByRole('button',{name:'Favorilere ekle',exact:true})).toBeDisabled();await page.getByRole('button',{name:'Not seçenekleri'}).click();
   await page.getByRole('button',{name:'Not listesine dön'}).click();await page.locator('.note-row').filter({has:page.getByText('Tablet çizimleri',{exact:true})}).click();await noteAction(page,'Favorilere ekle');await page.getByRole('button',{name:'Not seçenekleri'}).click();await expect(page.getByRole('button',{name:'Favorilerden çıkar'})).toBeEnabled();await page.getByRole('button',{name:'Not seçenekleri'}).click();
   await noteAction(page,'Çöp kutusuna taşı');
-  await expect(page.getByText('Bu not Samsung Cloud çöp kutusunda.')).toBeVisible();
+  await expect(page.getByText('Bu not çöp kutusunda.')).toBeVisible();
   await page.getByRole('button',{name:'Geri yükle',exact:true}).first().click();
-  await expect(page.getByText('Bu not Samsung Cloud çöp kutusunda.')).toHaveCount(0);
+  await expect.poll(()=>requests.some(r=>r.method==='PATCH'&&r.data.trashed===false)).toBe(true);
+  await expect(page.getByText('Bu not çöp kutusunda.')).toHaveCount(0);
 });
 test('conflict actions and mobile workspace have real functional states',async({page})=>{
   await setup(page);await openNote(page,/İki farklı sürüm/);
@@ -221,8 +222,8 @@ test('search, favorites and authorized text export use contract endpoints',async
   await openNote(page,/Hafta sonu için/);
   await page.getByRole('button',{name:'Dışa aktar',exact:true}).click();
   // The desktop engine writes the file itself; the UI names where it went.
-  await expect(page.getByText('İndirilenler klasörüne kaydedildi: Hafta sonu için.txt')).toBeVisible();
-  expect(requests.some(r=>r.path==='/api/notes/two/export-file')).toBe(true);
+  await expect.poll(()=>requests.some(r=>r.path==='/api/notes/two/export-file')).toBe(true);
+  await expect(page.getByText('Dosya hazır: Hafta sonu için.txt')).toHaveCount(0);
   await page.getByRole('button',{name:'Not listesine dön'}).click();await page.getByRole('button',{name:'Aramayı temizle'}).click();
   await page.getByRole('button',{name:'Görünüm',exact:true}).click();await page.getByRole('button',{name:'Favoriler',exact:true}).click();
   await expect(page.getByRole('button',{name:/Hafta sonu için/})).toBeVisible();
@@ -232,7 +233,7 @@ test('disconnected library remains usable and login opens only through API',asyn
   await setup(page);let pending=false;
   await page.route('**/api/status',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({connected:false,accountLabel:null,loginPending:pending,sync:{state:'offline',lastSyncedAt:null,pending:0,conflicts:0,progress:{processed:0,total:0},error:null},capabilities:{textEditing:true,cloudDelete:false,attachments:false}})}));
   await page.route('**/api/auth/login',route=>{pending=true;return route.fulfill({status:202,contentType:'application/json',body:'{"started":true}'});});
-  await page.reload();await expect(page.getByText('Çevrimdışı',{exact:true})).toBeVisible();
+  await page.reload();await expect(page.getByText('Çevrimdışı',{exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:'Yeni not',exact:false}).first().click();
   await expect(page.getByLabel('Not içeriği')).toBeEditable();
   await page.getByRole('button',{name:'Not listesine dön'}).click();await page.getByRole('button',{name:'Ayarlar',exact:true}).click();await page.getByRole('button',{name:'Samsung hesabıyla bağlan',exact:true}).click();
@@ -247,8 +248,8 @@ test('drawing-only notes never invite typing or pretend to render an empty page'
   await expect(page.getByLabel('Not içeriği')).toHaveAttribute('placeholder','Bu notta metin yok.');
   await expect(page.getByText('Bu notun sayfaları burada gösterilemiyor.',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Not seçenekleri'}).click();await expect(page.getByRole('button',{name:'Metni yeni nota kopyala'})).toBeDisabled();await expect(page.getByRole('button',{name:'Metni yeni nota kopyala'})).toHaveAttribute('title','Bu notta kopyalanacak metin yok.');await page.getByRole('button',{name:'Not seçenekleri'}).click();
-  await expect(page.locator('.editor-footer').getByText('Salt okunur',{exact:true})).toBeVisible();
-  await expect(page.getByRole('button',{name:'Sayfalar',exact:true})).toBeDisabled();await expect(page.getByRole('button',{name:'Sayfalar',exact:true})).toHaveAttribute('title','Bu notta sayfa yok');
+  await expect(page.locator('.editor-footer').getByText('Salt okunur',{exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Sayfalar',exact:true})).toBeDisabled();await expect(page.getByRole('button',{name:'Sayfalar',exact:true})).toHaveAttribute('title','Sayfa yok');
 });
 test('Windows reference layout captures use synthetic content and local font faces',async({page})=>{
   await page.setViewportSize({width:1920,height:1014});
@@ -262,7 +263,7 @@ test('Windows reference layout captures use synthetic content and local font fac
   await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:'tests/artifacts/windows-clone-editor.png',fullPage:true});
   const paper=await page.locator('.document').boundingBox();expect(paper?.width).toBeCloseTo(718,2); // macOS reports 718.00006 (float layout rounding)
   await expect(page.getByRole('button',{name:'Kalem',exact:true})).toBeDisabled();
-  await expect(page.getByLabel('Yazı boyutu')).toHaveCount(0);await expect(page.getByText('Bu notta yazı biçimlendirme şimdilik kullanılamıyor.',{exact:true})).toBeVisible();
+  await expect(page.getByLabel('Yazı boyutu')).toHaveCount(0);await expect(page.getByText('Bu notta yazı biçimlendirme şimdilik kullanılamıyor.',{exact:true})).toHaveCount(0);
 });
 test('all pages stack like Samsung Notes: pending images poll, missing pages say so, dark pages stay dark, URLs are revoked',async({page})=>{
   await setup(page);let attempts=0;
@@ -277,13 +278,13 @@ test('all pages stack like Samsung Notes: pending images poll, missing pages say
   await openNote(page,/Tablet çizimleri/);
   await expect(page.locator('.page-sheet')).toHaveCount(4);
   await expect(page.locator('.page-sheet[data-page-index="0"] .page-image')).toBeVisible();expect(attempts).toBeGreaterThanOrEqual(2);
-  await expect(page.locator('.page-sheet[data-page-index="1"]')).toContainText('Bu sayfanın görüntüsü bu cihazda oluşturulamıyor.');
-  await expect(page.locator('.editor-footer').getByText('Salt okunur',{exact:true})).toBeVisible();await expect(page.getByRole('complementary',{name:'Kalem araçları'})).toBeVisible();await expect(page.getByText('Bilinmeyen biçimlendirme sözdizimi.',{exact:true})).toHaveCount(0);await expect(page.getByText(/düzenlenemiyor|biçimlendirme/)).toHaveCount(0);
-  await page.getByRole('button',{name:'Sayfalar',exact:true}).click();await expect(page.getByLabel('Gösterilen sayfa')).toBeFocused();
+  await expect(page.locator('.page-sheet[data-page-index="1"] .page-placeholder')).toBeEmpty();
+  await expect(page.locator('.editor-footer').getByText('Salt okunur',{exact:true})).toHaveCount(0);await expect(page.getByRole('complementary',{name:'Kalem araçları'})).toBeVisible();await expect(page.getByText('Bilinmeyen biçimlendirme sözdizimi.',{exact:true})).toHaveCount(0);await expect(page.getByText(/düzenlenemiyor|biçimlendirme/)).toHaveCount(0);
+  await page.getByRole('button',{name:'Sayfalar',exact:true}).click();await expect(page.getByRole('combobox',{name:'Gösterilen sayfa'})).toBeFocused();await expect(page.getByRole('listbox',{name:'Gösterilen sayfa'})).toBeVisible();await page.getByRole('combobox',{name:'Gösterilen sayfa'}).press('Escape');
   await page.emulateMedia({media:'print'});await expect(page.locator('.page-navigation')).toBeHidden();await expect(page.locator('.page-sheet[data-page-index="0"] .page-image')).toBeVisible();await page.emulateMedia({media:'screen'});
   // A page note has no 'show text' mode: pages are the note.
   await expect(page.getByRole('button',{name:'Metni göster',exact:true})).toHaveCount(0);await chooseOption(page,'Gösterilen sayfa','3');
-  await expect(page.getByAltText('Notun 4. sayfası')).toBeVisible();await expect(page.getByText('Bu sayfadaki çizimler henüz gösterilemiyor; yalnızca PDF görünüyor.',{exact:true})).toBeVisible();
+  await expect(page.getByAltText('Notun 4. sayfası')).toBeVisible();await expect(page.getByText('Bu sayfadaki çizimler henüz gösterilemiyor; yalnızca PDF görünüyor.',{exact:true})).toHaveCount(0);
   await page.getByLabel('Gösterilen sayfa').click();const pageOptions=page.getByRole('listbox',{name:'Gösterilen sayfa'});await expect(pageOptions.getByRole('option')).toHaveCount(4);await expect(pageOptions.locator('[role="option"][data-value="1"]')).toHaveAttribute('aria-disabled','true');await page.getByRole('combobox',{name:'Gösterilen sayfa'}).press('Escape');await expect(pageOptions).toHaveCount(0);
   await expect(page.locator('.page-sheet[data-page-index="3"]')).toHaveCSS('background-color','rgb(0, 0, 0)');await expect(page.locator('.page-sheet[data-page-index="0"]')).toHaveCSS('background-color','rgb(255, 255, 255)');
   const url=await page.getByAltText('Notun 4. sayfası').getAttribute('src');expect(url).toMatch(/^blob:/);
@@ -310,7 +311,7 @@ test('bulk favorites advance existing draft revision without losing unsaved text
   await page.getByRole('button',{name:'Favorilere ekle',exact:true}).click();
   await expect(page.getByRole('button',{name:'Düzenle',exact:true})).toBeVisible();
   await openNote(page,/Aklımda kalanlar/);await expect(page.getByLabel('Not içeriği')).toHaveValue('Toplu seçimden önce korunacak taslak');
-  await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.editor-footer').getByText('Kaydedildi',{exact:true})).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.editor-footer')).toHaveAttribute('data-dirty','false');
   expect(requests.find(r=>r.method==='PUT')?.data.expectedRevision).toBe(2);
 });
 
@@ -347,7 +348,7 @@ test('uncertain folder recovers server state without retrying its mutation',asyn
   const {folders,requests}=await setup(page);folders[0].syncState='uncertain';folders[0].error='Sentetik sonuç belirsiz';await page.reload();
   await page.locator('.folder-item').filter({hasText:'Çalışma'}).click({button:'right'});await expect(page.getByRole('menuitem',{name:'Yeniden adlandır'})).toBeDisabled();
   await page.getByRole('menuitem',{name:'Buluttaki durumu kullan'}).click();
-  await expect(page.getByText('Buluttaki klasör durumu yeniden alındı.')).toBeVisible();
+  await expect.poll(()=>requests.some(r=>r.path==='/api/folders/work/resolve')).toBe(true);await expect(page.getByText('Buluttaki klasör durumu yeniden alındı.')).toHaveCount(0);
   expect(requests.filter(r=>r.method==='PATCH')).toHaveLength(0);expect(requests.find(r=>r.path==='/api/folders/work/resolve')?.data).toEqual({strategy:'use_remote'});
 });
 
@@ -380,16 +381,16 @@ test('real rich editor selection, formatting, lists, history and revisioned API 
   await chooseOption(page,'Yazı boyutu','17');await chooseOption(page,'Yazı boyutu','');await expect(editor.locator('[data-samsung-kind="fontSize"]')).toHaveCount(0);await chooseOption(page,'Yazı boyutu','17');await page.getByRole('button',{name:'Ortala',exact:true}).click();await page.getByRole('button',{name:'Onay kutusu',exact:true}).click();await page.getByRole('button',{name:'Girintiyi artır',exact:true}).click();
   await expect(editor.locator('p').first()).toHaveAttribute('data-native-bullet','check');await expect(editor.locator('p').first()).toHaveCSS('text-align','center');
   await page.getByRole('button',{name:'Geri al',exact:true}).click();await page.getByRole('button',{name:'Yinele',exact:true}).click();
-  await page.keyboard.press('ControlOrMeta+s');await expect(page.getByText('Kaydedilmedi',{exact:true})).toHaveCount(0);expect(writes).toHaveLength(1);expect(writes[0]).not.toHaveProperty('body');expect(writes[0].expectedRevision).toBe(1);
+  await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.editor-footer')).toHaveAttribute('data-dirty','false');expect(writes).toHaveLength(1);expect(writes[0]).not.toHaveProperty('body');expect(writes[0].expectedRevision).toBe(1);
   expect(model.text).toBe('Merhaba 🌱\nİkinci satır');expect(model.spans).toContainEqual({start:0,end:7,kind:'bold',value:true,interval:3});expect(model.spans).toContainEqual({start:0,end:7,kind:'foregroundColor',value:'#FFFF343B',interval:3});expect(model.spans).toContainEqual({start:0,end:7,kind:'fontSize',value:17,interval:3});expect(model.paragraphs[0]).toMatchObject({index:0,alignment:'center',bullet:{kind:'check',checked:false},indentLevel:{level:1,direction:'ltr'}});
   await editor.press('ControlOrMeta+End');await page.screenshot({path:'/tmp/notes-rich-editor.png'});await page.reload();await openNote(page,/Aklımda kalanlar/);await expect(page.locator('.rich-document-body span[data-samsung-kind="bold"]')).toHaveText('Merhaba');await expect(page.locator('.rich-document-body p').first()).toHaveAttribute('data-native-bullet','check');
   const beforeZoom=await editor.locator('[data-samsung-kind="fontSize"]').first().boundingBox();await page.getByRole('button',{name:'Yakınlaştır',exact:true}).click();await expect.poll(async()=>{const box=await editor.locator('[data-samsung-kind="fontSize"]').first().boundingBox();return box!.width/beforeZoom!.width;}).toBeGreaterThan(1.09);await page.getByRole('button',{name:'Uzaklaştır',exact:true}).click();
   await page.getByRole('checkbox',{name:'Yapılacak öğesini tamamla'}).click();await expect(page.getByRole('checkbox')).toHaveAttribute('aria-checked','true');
   await editor.click();await page.keyboard.press('ControlOrMeta+End');await page.keyboard.press('Enter');await page.keyboard.type('Yeni satır');await expect(editor).toHaveAttribute('contenteditable','true');
-  await page.keyboard.press('ControlOrMeta+s');await expect(page.getByText('Kaydedilmedi',{exact:true})).toHaveCount(0);expect(model.paragraphs[0].bullet.checked).toBe(true);expect(model.text).toBe('Merhaba 🌱\nİkinci satır\nYeni satır');
+  await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.editor-footer')).toHaveAttribute('data-dirty','false');expect(model.paragraphs[0].bullet.checked).toBe(true);expect(model.text).toBe('Merhaba 🌱\nİkinci satır\nYeni satır');
   await editor.click();await page.keyboard.press('ControlOrMeta+End');await page.keyboard.type(' taslak');unavailable=true;
   await page.waitForResponse(response=>response.url().endsWith('/api/notes/one/editor')&&response.status()===503);await expect(editor).toHaveAttribute('contenteditable','true');await expect(editor).toContainText('Yeni satır taslak');
-  unavailable=false;await page.keyboard.press('ControlOrMeta+s');await expect(page.getByText('Kaydedilmedi',{exact:true})).toHaveCount(0);expect(model.text).toContain('Yeni satır taslak');expect(writes).toHaveLength(3);
+  unavailable=false;await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.editor-footer')).toHaveAttribute('data-dirty','false');expect(model.text).toContain('Yeni satır taslak');expect(writes).toHaveLength(3);
 });
 test('a picture anchored in the text (objectSpan) stays in place while text around it is typed and formatted',async({page})=>{
   const {notes}=await setup(page);const note=notes.find(n=>n.id==='one');note.body='Önce\n\uFFFC\nSonra';
@@ -409,7 +410,7 @@ test('a picture anchored in the text (objectSpan) stays in place while text arou
   await page.keyboard.press('ControlOrMeta+End');await page.keyboard.type(' son');
   await editor.locator('p').first().evaluate(element=>{const node=element.firstChild!;const range=document.createRange();range.setStart(node,0);range.setEnd(node,4);const selection=window.getSelection()!;selection.removeAllRanges();selection.addRange(range);});
   await page.getByRole('button',{name:'Kalın',exact:true}).click();
-  await page.keyboard.press('ControlOrMeta+s');await expect(page.getByText('Kaydedilmedi',{exact:true})).toHaveCount(0);expect(writes).toHaveLength(1);
+  await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.editor-footer')).toHaveAttribute('data-dirty','false');expect(writes).toHaveLength(1);
   expect(model.text).toBe('Önce yeni\n\uFFFC\nSonra son');expect(model.objects).toEqual([{start:10,objectId:picture,type:'image'}]);expect(model.spans).toContainEqual({start:0,end:4,kind:'bold',value:true,interval:3});
   // Pasted text never creates an anchor.
   await editor.click();await page.keyboard.press('ControlOrMeta+End');
@@ -419,7 +420,7 @@ test('a picture anchored in the text (objectSpan) stays in place while text arou
 test('unsupported native typing anchors keep original rich content read-only instead of flattening it',async({page})=>{
   const {notes,requests}=await setup(page);const note=notes.find(n=>n.id==='rich');note.titleEditable=true;
   await page.route('**/api/notes/rich/editor',route=>route.fulfill({json:{schemaVersion:1,capabilities:{titleEdit:true,textEdit:true,richStyle:true,inkEdit:false},model:{schemaVersion:1,text:note.body,spans:[{start:0,end:0,kind:'bold',value:false,interval:3}],paragraphs:[]},reason:null,revision:note.revision}}));
-  await openNote(page,/Tablet çizimleri/);await expect(page.getByText('Bu notun sayfaları burada gösterilemiyor; yalnızca metni görünüyor.',{exact:true})).toBeVisible();await expect(page.getByLabel('Not içeriği')).toHaveAttribute('readonly','');await expect(page.getByLabel('Not başlığı')).toBeEditable();await expect(page.getByRole('button',{name:'Kalın',exact:true})).toHaveCount(0);await expect(page.getByText('Bu notta yazı biçimlendirme şimdilik kullanılamıyor.',{exact:true})).toBeVisible();expect(requests.filter(r=>r.method==='PUT')).toHaveLength(0);
+  await openNote(page,/Tablet çizimleri/);await expect(page.getByText('Bu notun sayfaları burada gösterilemiyor; yalnızca metni görünüyor.',{exact:true})).toBeVisible();await expect(page.getByLabel('Not içeriği')).toHaveAttribute('readonly','');await expect(page.getByLabel('Not başlığı')).toBeEditable();await expect(page.getByRole('button',{name:'Kalın',exact:true})).toHaveCount(0);await expect(page.getByText('Bu notta yazı biçimlendirme şimdilik kullanılamıyor.',{exact:true})).toHaveCount(0);expect(requests.filter(r=>r.method==='PUT')).toHaveLength(0);
 });
 
 test('numbered selections continue on Enter and completed checklists create unchecked items',async({page})=>{
@@ -455,7 +456,7 @@ test('thumbnail pending, terminal failures and revision changes preserve honest 
     await page.route('**/api/notes/*/thumbnail?*',route=>{const url=new URL(route.request().url()),id=url.pathname.split('/')[3];counts[id]=(counts[id]||0)+1;if(id==='one'){revisions.push(url.searchParams.get('revision')!);if(counts[id]===1)return route.fulfill({status:202,json:{state:'pending'},headers:{'Retry-After':'1'}});return route.fulfill({contentType:'image/png',body:png,headers:{'X-Notes-Preview-Complete':'false'}});}return route.fulfill({status:id==='rich'?503:404,json:{error:{code:'thumbnail_unavailable',message:'Sentetik önizleme yok'}}});});
     await page.route('**/api/sync',route=>route.fulfill({json:{state:'queued'}}));
   });
-  const first=page.getByRole('button',{name:/Aklımda kalanlar/});await expect(first.locator('.thumbnail-image')).toBeVisible();await expect(first.getByText('Kısmi önizleme')).toBeVisible();
+  const first=page.getByRole('button',{name:/Aklımda kalanlar/});await expect(first.locator('.thumbnail-image')).toBeVisible();await expect(first.getByText('Kısmi önizleme')).toHaveCount(0);
   const second=page.getByRole('button',{name:/Hafta sonu için/});await expect(second.locator('.thumbnail-text')).toHaveText('Kitapçıya uğra. Yeni bir yürüyüş rotası bul.');expect(counts.two).toBe(1);
   await page.waitForResponse(response=>response.url().endsWith('/api/status'));expect(counts.two).toBe(1);
   notes.find(note=>note.id==='one').revision=2;await expect.poll(()=>revisions.includes('2'),{timeout:7000}).toBe(true);await expect(first.locator('.thumbnail-image')).toBeVisible();expect(counts.two).toBe(1);
@@ -568,7 +569,7 @@ test('page settings paints every page with a page background colour through one 
   await expect.poll(()=>writes.length).toBe(1);expect(writes[0]).toEqual({backgroundArgb:0xFFC9E0F9,expectedRevision:revision});
   await expect(page.getByRole('dialog',{name:'Sayfa ayarları'})).toHaveCount(0);
   await page.getByRole('button',{name:'Sayfa ayarları'}).click();
-  await expect(page.getByText('Renk değişikliği eşitleniyor.')).toBeVisible();
+  await expect(page.getByText('Renk değişikliği eşitleniyor.')).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Pudra pembe'})).toBeDisabled();
   await page.keyboard.press('Escape');await expect(page.getByRole('dialog',{name:'Sayfa ayarları'})).toHaveCount(0);
   expect(writes.length).toBe(1);
@@ -804,4 +805,17 @@ test('trashed folders open nested contents, preserve read-only notes and restore
   await expect.poll(()=>patches(requests).some(r=>r.path==='/api/notes/two'&&r.data.trashed===false)).toBe(true);
   await page.getByRole('button',{name:'Çöp kutusuna dön'}).click();await expect(page.getByRole('heading',{name:'Eski çalışma',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Klasörü geri yükle',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Geri yükle',exact:true}).click();await expect.poll(()=>patches(requests).some(r=>r.path==='/api/folders/trash-parent'&&r.data.trashed===false)).toBe(true);
+});
+
+test('page settings refresh while open when a pending job finishes at the same revision',async({page})=>{
+  const {notes,state}=await setup(page);state.autoConfirm=false;
+  const note=notes.find(n=>n.id==='one');note.syncState='pending';
+  const palette=[[{argb:0xfffcfcfc,name:'Renk yok'},{argb:0xfff5dddd,name:'Pudra pembe'}]];
+  let gets=0;
+  await page.route('**/api/notes/one/page-style',route=>{gets++;return route.fulfill({json:{revision:note.revision,backgroundArgb:0xfffcfcfc,editable:note.syncState==='synced',pending:note.syncState==='pending',reason:null,palette}});});
+  await openNote(page,/Aklımda kalanlar/);await page.getByRole('button',{name:'Sayfa ayarları'}).click();
+  await expect(page.getByRole('button',{name:'Pudra pembe'})).toBeDisabled();
+  note.syncState='synced';
+  await expect(page.getByRole('button',{name:'Pudra pembe'})).toBeEnabled({timeout:10000});
+  expect(gets).toBe(2);
 });

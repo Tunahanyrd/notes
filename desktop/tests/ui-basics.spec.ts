@@ -68,7 +68,7 @@ test('a fresh duplicate is clean, opens and goes back with one click',async({pag
   await page.getByRole('button',{name:'Kopyasını oluştur',exact:true}).click();
   await expect.poll(()=>notes.some(n=>n.id==='copy-1')).toBe(true);
   await expect(page.getByRole('textbox',{name:'Not içeriği'})).toContainText('Kısa bir metin.');
-  await expect(page.locator('.editor-footer')).not.toContainText('Kaydedilmedi');
+  await expect(page.locator('.editor-footer')).toHaveAttribute('data-dirty','false');
   await expect(page.getByRole('button',{name:'Kaydet'})).toBeDisabled();
   await back(page).click();
   await expect(back(page)).toBeHidden();
@@ -103,11 +103,11 @@ test('an edit that is undone by hand does not leave the note marked as changed',
   const editor=page.getByRole('textbox',{name:'Not içeriği'});await expect(editor).toHaveAttribute('contenteditable','true');
   // A no-op transaction (what WebKit DOM normalisation or an IME commit produce) is not an edit.
   await editor.locator('p').last().click();await page.evaluate(()=>{const view=(document.querySelector('.ProseMirror') as any).editor.view;view.dispatch(view.state.tr.replaceWith(0,view.state.doc.content.size,view.state.doc.content));});
-  await expect(page.locator('.editor-footer')).not.toContainText('Kaydedilmedi');
+  await expect(page.locator('.editor-footer')).toHaveAttribute('data-dirty','false');
   // Typing and deleting the same character: once the note is read again it is clean, in the editor and on its card.
-  await page.keyboard.press('End');await page.keyboard.type('!');await expect(page.locator('.editor-footer')).toContainText('Kaydedilmedi');
+  await page.keyboard.press('End');await page.keyboard.type('!');await expect(page.locator('.editor-footer')).toHaveAttribute('data-dirty','true');
   await page.keyboard.press('Backspace');
-  await expect(page.locator('.editor-footer')).not.toContainText('Kaydedilmedi',{timeout:9000});
+  await expect(page.locator('.editor-footer')).toHaveAttribute('data-dirty','false',{timeout:9000});
   await expect(page.getByRole('button',{name:'Kaydet'})).toBeDisabled();
   await back(page).click();await expect(card).not.toContainText('Kaydedilmedi');await expect(page.locator('.library-status')).not.toContainText('kaydedilmemiş');
 });

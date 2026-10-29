@@ -1,9 +1,8 @@
 import {useEffect,useLayoutEffect,useRef,useState,type PointerEvent as ReactPointerEvent} from 'react';
-import {api,notePath} from './api';
+import {api,ApiError,notePath} from './api';
 import {useInkLive,type InkPenTemplate,type LivePenSpec,type LiveRaster} from './inkLive';
 import type {Note} from './types';
 import './ink-editor.css';
-import {plainReason} from './plainText';
 
 export interface InkPoint {x:number;y:number;pressure:number;timeMs:number}
 // template:false marks a stroke the writer cannot copy (other pen/effects).
@@ -15,7 +14,7 @@ export interface InkPage {id:string;index:number;width:number;height:number;stro
 export interface InkStroke {id:string;pageId:string;sourceStrokeId:string;kind:number|string;colorARGB:number;size:number;points:InkPoint[];pageSize?:[number,number]}
 // A queued (saved, not yet Cloud-verified) lasso move of saved strokes.
 export interface InkMoveGroup {pageId:string;strokeIds:string[];dx:number;dy:number}
-export interface InkProjection {schemaVersion:1;revision:number;pages:InkPage[];capabilities:{appendInk:boolean;eraseInk?:boolean;firstStroke?:boolean;highlighter?:boolean};reason:string|null;rendering:{nativeEquivalent:boolean;mode:string};pendingStrokes:InkStroke[];pendingErase?:{pageId:string;strokeIds:string[]}[];pendingMove?:InkMoveGroup[]}
+export interface InkProjection {schemaVersion:1;revision:number;pages:InkPage[];capabilities:{appendInk:boolean;eraseInk?:boolean;firstStroke?:boolean;highlighter?:boolean};reason:string|null;rendering:{nativeEquivalent:boolean;mode:string};pendingStrokes:InkStroke[];pendingErase?:{pageId:string;strokeIds:string[]}[];pendingMove?:InkMoveGroup[];optimistic?:boolean}
 export interface InkDraft {revision:number;strokes:InkStroke[]}
 export interface PenStyle {colorARGB?:number;size?:number}
 // Simplified saved-stroke paths of one page (GET …/ink-geometry?page=…).
@@ -85,7 +84,8 @@ export function useInkDrafts(note:Note|null,enabled:boolean,onSaved:(note:Note)=
   const [drafts,setDrafts]=useState<Record<string,InkDraft>>({});
   const [drawing,setDrawing]=useState(false);
   const [tool,setToolState]=useState<InkTool>('pen');
-  const [capturing,updateCapturing]=useState(false);const captureLock=useRef(false);const setCapturing=(value:boolean)=>{captureLock.current=value;updateCapturing(value);};
+  const [capturing,updateCapturing]=useState(false);const captureLock=useRef(false);const pendingAccept=useRef<(()=>void)|null>(null);
+  const setCapturing=(value:boolean)=>{captureLock.current=value;updateCapturing(value);if(!value&&pendingAccept.current){const accept=pendingAccept.current;pendingAccept.current=null;accept();}};
   const [loaded,setLoaded]=useState<{noteId:string;projection:InkProjection}|null>(null);
   const [phase,setPhase]=useState<'idle'|'loading'|'ready'|'unavailable'>('idle');
   const [error,setError]=useState('');const [saving,setSaving]=useState<string|null>(null);
@@ -98,6 +98,9 @@ export function useInkDrafts(note:Note|null,enabled:boolean,onSaved:(note:Note)=
   const [pens,setPens]=useState<{noteId:string;pens:Record<string,InkPenTemplate>}|null>(null);
   const active=useRef({note,drafts,loaded,onSaved,erasures,moves,options});active.current={note,drafts,loaded,onSaved,erasures,moves,options};
   const saveLock=useRef(false);
+  const uncertainTransfer=useRef(new Set<string>());const [,setUncertainVersion]=useState(0);
+  const batchReady=useRef<{id:string;ready:Promise<void>}|null>(null);
+  const pendingAppends=useRef(new Map<string,Set<Promise<void>>>());
   // Per-note pen source and undo/redo history. History lives for the app
   // session; every entry is re-checked against the current note before use.
   const [sources,setSources]=useState<Record<string,string>>({});
@@ -105,18 +108,24 @@ export function useInkDrafts(note:Note|null,enabled:boolean,onSaved:(note:Note)=
   const [futures,setFutures]=useState<Record<string,InkAction[]>>({});
   // Client draft ids of the last saved batch, matched to the queued Cloud ids
   // (same order) once the next projection arrives.
-  const [savedBatches,setSavedBatches]=useState<Record<string,{revision:number;clientIds:string[]}>>({});
+  const [savedBatches,setSavedBatches]=useState<Record<string,{revision:number;clientIds:string[];strokes:InkStroke[];firstPageId?:string}>>({});
   // Optional colour/size override of the chosen template (recipe 3 on save).
   const [penStyles,setPenStyles]=useState<Record<string,PenStyle>>({});
   const [highlighterStyle,setHighlighterStyleState]=useState<{colorARGB:number;size:number}>({colorARGB:HIGHLIGHTER_COLOR,size:HIGHLIGHTER_SIZE});
   useEffect(()=>{setDrawing(false);},[note?.id]);
+  useEffect(()=>{setError(note&&uncertainTransfer.current.has(note.id)?'Çizimin durumunu doğrulamak için uygulamayı yeniden açın.':'');},[enabled,note?.id,note?.revision]);
   useEffect(()=>{
-    setError('');if(!enabled||!note){setDrawing(false);setPhase('idle');setLoaded(null);return;}
-    const controller=new AbortController();const id=note.id,revision=note.revision;setPhase('loading');setLoaded(null);
+    if(!enabled||!note){setDrawing(false);setPhase('idle');setLoaded(null);return;}
+    const controller=new AbortController();const id=note.id,revision=note.revision;
+    const previous=active.current.loaded,batch=savedBatches[id];
+    const ours=previous?.noteId===id&&(previous.projection.revision===revision||(batch?.revision===revision&&previous.projection.revision===revision-1));
+    if(!ours){setPhase('loading');setLoaded(null);}
     void api<InkProjection>(notePath(id)+'/ink','GET',undefined,controller.signal).then(value=>{const projection=checkedProjection(value,revision);if(!controller.signal.aborted){setLoaded({noteId:id,projection});setPhase('ready');}}).catch(()=>{if(!controller.signal.aborted)setPhase('unavailable');});
     return()=>controller.abort();
-  },[enabled,note?.id,note?.revision]);
-  const projection=loaded&&loaded.noteId===note?.id&&loaded.projection.revision===note?.revision?loaded.projection:null;
+  },[enabled,note?.id,note?.revision,note?.syncState]);
+  const localBatch=note?savedBatches[note.id]:undefined;
+  const projection:InkProjection|null=loaded&&loaded.noteId===note?.id?(loaded.projection.revision===note?.revision?loaded.projection:
+    localBatch&&localBatch.revision===note?.revision&&loaded.projection.revision===localBatch.revision-1?{...loaded.projection,revision:localBatch.revision,pendingStrokes:localBatch.strokes,optimistic:true}:null):null;
   useEffect(()=>{
     if(!enabled||!note||!projection)return;
     const controller=new AbortController(),id=note.id,revision=projection.revision;
@@ -132,22 +141,52 @@ export function useInkDrafts(note:Note|null,enabled:boolean,onSaved:(note:Note)=
   // leaving the note or closing the app cannot lose lines drawn before the
   // autosave. A note opened without an in-memory draft restores it from disk.
   const persisted=useRef(new Map<string,InkDraft|undefined>());
+  // Serialize device draft writes and batch handoff per note.
+  const draftQueue=useRef(new Map<string,Promise<void>>());
+  const transferred=useRef(new Map<string,Set<string>>());
+  const restoring=useRef(new Map<string,InkDraft>());const loadingDraft=useRef(new Set<string>());const [,setRestoreVersion]=useState(0);
+  const serializeDraft=<T,>(id:string,work:()=>Promise<T>):Promise<T>=>{
+    const previous=draftQueue.current.get(id)??Promise.resolve();
+    const result=previous.catch(()=>{}).then(work);
+    const tail=result.then(()=>{},()=>{});draftQueue.current.set(id,tail);
+    void tail.then(()=>{if(draftQueue.current.get(id)===tail)draftQueue.current.delete(id);});
+    return result;
+  };
+  const persistDraft=async(id:string,value:InkDraft|undefined)=>{
+    const owned=transferred.current.get(id),current=value?.strokes??[],stored=restoring.current.get(id),restored=stored?.strokes??[];
+    const ids=new Set(current.map(stroke=>stroke.id));
+    const strokes=[...restored.filter(stroke=>!ids.has(stroke.id)),...current].filter(stroke=>!owned?.has(stroke.id));
+    const revision=stored?Math.min(value?.revision??stored.revision,stored.revision):value?.revision??0;
+    await api(notePath(id)+'/ink-draft','PUT',{revision,strokes});
+    if(stored&&restored.every(stroke=>ids.has(stroke.id)||owned?.has(stroke.id))){restoring.current.delete(id);setRestoreVersion(v=>v+1);}
+  };
   useEffect(()=>{
     for(const id of new Set([...Object.keys(drafts),...persisted.current.keys()])){
-      const value=drafts[id];if(persisted.current.get(id)===value)continue;
+      const value=drafts[id];
+      if(persisted.current.get(id)===value){
+        const stored=restoring.current.get(id);
+        if(stored&&value&&stored.strokes.every(stroke=>value.strokes.some(item=>item.id===stroke.id))){restoring.current.delete(id);setRestoreVersion(v=>v+1);}
+        continue;
+      }
       persisted.current.set(id,value);
-      void api(notePath(id)+'/ink-draft','PUT',{revision:value?.revision??0,strokes:value?.strokes??[]}).catch(()=>{if(active.current.note?.id===id)setError('Çizim taslağı bu cihaza yazılamadı. Uygulamayı kapatmadan önce çizimleri kaydedin.');});
+      void serializeDraft(id,async()=>{await Promise.all([...(pendingAppends.current.get(id)??[])]);if(!uncertainTransfer.current.has(id))await persistDraft(id,value);}).catch(()=>{if(active.current.note?.id===id)setError('Çizim taslağı bu cihaza yazılamadı. Uygulamayı kapatmadan önce çizimleri kaydedin.');});
     }
   },[drafts]);
   useEffect(()=>{
     if(!note||!projection||drafts[note.id]||persisted.current.has(note.id))return;
-    const id=note.id;persisted.current.set(id,undefined);
-    void api<InkDraft|{revision:null;strokes:InkStroke[]}>(notePath(id)+'/ink-draft','GET').then(value=>{
+    const id=note.id;persisted.current.set(id,undefined);loadingDraft.current.add(id);setRestoreVersion(v=>v+1);
+    void serializeDraft(id,async()=>{
+      try{
+        const value=await api<InkDraft|{revision:null;strokes:InkStroke[]}>(notePath(id)+'/ink-draft','GET');
+        if(value.revision!==null&&value.strokes.length)restoring.current.set(id,{revision:value.revision,strokes:value.strokes});
+        return value;
+      }catch(error){uncertainTransfer.current.add(id);setUncertainVersion(v=>v+1);if(active.current.note?.id===id)setError('Çizimin durumunu doğrulamak için uygulamayı yeniden açın.');throw error;}
+    }).then(value=>{
       if(value.revision===null||!value.strokes.length)return;
       const restored={revision:value.revision,strokes:value.strokes} as InkDraft;
       persisted.current.set(id,restored);
-      setDrafts(previous=>{const current=previous[id];if(!current)return {...previous,[id]:restored};const ids=new Set(current.strokes.map(stroke=>stroke.id));return {...previous,[id]:{...current,strokes:[...restored.strokes.filter(stroke=>!ids.has(stroke.id)),...current.strokes]}};});
-    }).catch(()=>{});
+      setDrafts(previous=>{const current=previous[id];if(!current)return {...previous,[id]:restored};const ids=new Set(current.strokes.map(stroke=>stroke.id));return {...previous,[id]:{...current,revision:Math.min(current.revision,restored.revision),strokes:[...restored.strokes.filter(stroke=>!ids.has(stroke.id)),...current.strokes]}};});
+    }).catch(()=>{}).finally(()=>{loadingDraft.current.delete(id);setRestoreVersion(v=>v+1);});
   },[note?.id,projection?.revision]);
   // Our own pending batch finishing bumps the note revision. A draft drawn
   // meanwhile moves to the new revision when its pages and template strokes
@@ -157,9 +196,19 @@ export function useInkDrafts(note:Note|null,enabled:boolean,onSaved:(note:Note)=
     if(!note||!projection)return;
     const pages=new Map(projection.pages.map(page=>[page.id,page]));
     const current=drafts[note.id];
-    if(current&&current.revision<projection.revision){
-      const intact=(stroke:InkStroke)=>{const page=pages.get(stroke.pageId);return !!page&&(isHighlighter(stroke)||page.strokes.some(source=>source.id===stroke.sourceStrokeId))&&(!stroke.pageSize||(stroke.pageSize[0]===page.width&&stroke.pageSize[1]===page.height));};
-      if(current.strokes.every(intact)){setDrafts(previous=>previous[note.id]===current?{...previous,[note.id]:{...current,revision:projection.revision}}:previous);setError('');}
+    if(!projection.optimistic&&current&&current.revision<=projection.revision){
+      const batch=savedBatches[note.id];
+      const rebased=current.strokes.map(stroke=>{
+        if(!isFirstStroke(stroke))return stroke;
+        const page=pages.get(stroke.pageId);
+        const queued=projection.optimistic?undefined:projection.pendingStrokes.find(item=>item.pageId===stroke.pageId&&!item.sourceStrokeId&&!isHighlighter(item));
+        // If sync already finished before the projection arrived, the only
+        // new source on our own first-stroke page is its verified template.
+        const verified=batch?.firstPageId===stroke.pageId&&batch.revision===projection.revision&&!projection.pendingStrokes.length&&page?.strokes.length===1?page.strokes[0]:undefined;
+        const source=queued??verified;return source?{...stroke,sourceStrokeId:source.id}:stroke;
+      });
+      const intact=(stroke:InkStroke)=>{const page=pages.get(stroke.pageId);const queued=projection.pendingStrokes.some(item=>item.pageId===stroke.pageId&&item.id===stroke.sourceStrokeId&&!item.sourceStrokeId);return !!page&&(isHighlighter(stroke)||page.strokes.some(source=>source.id===stroke.sourceStrokeId)||queued||(isFirstStroke(stroke)&&!page.strokes.length&&page.ink?.firstStroke===true))&&(!stroke.pageSize||(stroke.pageSize[0]===page.width&&stroke.pageSize[1]===page.height));};
+      if(rebased.every(intact)&&(current.revision<projection.revision||rebased.some((stroke,i)=>stroke!==current.strokes[i]))){setDrafts(previous=>previous[note.id]===current?{...previous,[note.id]:{...current,revision:projection.revision,strokes:rebased}}:previous);setError('');}
     }
     const erasable=new Set(projection.pages.flatMap(page=>page.strokes.filter(stroke=>stroke.erasable===true).map(stroke=>stroke.id)));
     const marked=erasures[note.id];
@@ -168,7 +217,7 @@ export function useInkDrafts(note:Note|null,enabled:boolean,onSaved:(note:Note)=
     if(moved&&moved.revision<projection.revision&&moved.ids.every(id=>erasable.has(id)))setMoves(previous=>previous[note.id]===moved?{...previous,[note.id]:{...moved,revision:projection.revision}}:previous);
     // Drafts just saved become queued Cloud strokes: undo then erases them.
     const batch=savedBatches[note.id];
-    if(batch&&batch.revision<=projection.revision){
+    if(batch&&!projection.optimistic&&batch.revision<=projection.revision){
       const server=projection.pendingStrokes.map(stroke=>stroke.id);
       const map=batch.revision===projection.revision&&server.length===batch.clientIds.length?new Map(batch.clientIds.map((id,index)=>[id,server[index]])):null;
       const convert=(items:InkAction[]|undefined)=>(items??[]).flatMap((item):InkAction[]=>{
@@ -179,7 +228,7 @@ export function useInkDrafts(note:Note|null,enabled:boolean,onSaved:(note:Note)=
       setHistories(previous=>({...previous,[note.id]:convert(previous[note.id])}));
       setSavedBatches(previous=>{const next={...previous};delete next[note.id];return next;});
     }
-  },[note?.id,projection?.revision]);
+  },[note?.id,projection?.revision,projection?.optimistic,note?drafts[note.id]:undefined]);
   const draft=note?drafts[note.id]:undefined;
   const erasure=note?erasures[note.id]:undefined;
   const moveMark=note?moves[note.id]:undefined;
@@ -255,13 +304,21 @@ export function useInkDrafts(note:Note|null,enabled:boolean,onSaved:(note:Note)=
     else if(action.kind==='move'){if(action.drafts.length)write(target,shifted(strokesNow,new Set(action.drafts),sign*action.dx,sign*action.dy));if(action.saved.length)markMove(target,action.pageId,action.saved,sign*action.dx,sign*action.dy);}
     else if(action.kind==='savedDraw'){if(direction==='undo')writeErasure(target,[...erasedNow,...action.ids.filter(id=>!erasedNow.includes(id))]);else writeErasure(target,erasedNow.filter(id=>!action.ids.includes(id)));}
   };
-  const busyReason=saveLock.current||saving?'Çizimler kaydediliyor; biraz bekleyin.':captureLock.current||capturing?'Çizim sürüyor.':'';
+  const busyReason=note&&uncertainTransfer.current.has(note.id)?'Notu yeniden açın.':saveLock.current||saving?'Çizimler kaydediliyor; biraz bekleyin.':captureLock.current||capturing?'Çizim sürüyor.':'';
   const lastAction=historyNow[historyNow.length-1],nextAction=futureNow[futureNow.length-1];
   const undoReason=!note?'Geri alınacak işlem yok.':busyReason||(lastAction?actionProblem(lastAction,'undo'):strokesNow.length?'':'Geri alınacak çizim işlemi yok.');
   const redoReason=!note?'Yinelenecek işlem yok.':busyReason||(nextAction?actionProblem(nextAction,'redo'):'Yinelenecek çizim işlemi yok.');
   // Kept for callers that replace the whole draft; history then restarts.
   const change=(strokes:InkStroke[])=>{if(!note||saveLock.current)return;write(note,strokes);record(note.id,[],[]);setError('');};
-  const draw=(stroke:InkStroke)=>{if(!note||saveLock.current)return;write(note,[...strokesNow,stroke]);record(note.id,[...historyNow,{kind:'draw',stroke}],[]);setError('');};
+  const draw=(stroke:InkStroke)=>{if(!note)return;
+    const barrier=batchReady.current;
+    if((saveLock.current&&barrier?.id===note.id)||uncertainTransfer.current.has(note.id)||loadingDraft.current.has(note.id)){
+      const id=note.id,revision=drafts[id]?.revision??(projection?.optimistic?projection.revision-1:note.revision);
+      const pending=(barrier?.id===id?barrier.ready:Promise.resolve()).then(()=>api(notePath(id)+'/ink-draft','POST',{revision,strokes:[stroke]})).then(()=>{},()=>{if(active.current.note?.id===id)setError('Çizim taslağı bu cihaza yazılamadı.');});
+      const set=pendingAppends.current.get(id)??new Set<Promise<void>>();set.add(pending);pendingAppends.current.set(id,set);
+      void pending.then(()=>{set.delete(pending);if(!set.size)pendingAppends.current.delete(id);});
+    }
+    setDrafts(previous=>({...previous,[note.id]:{revision:previous[note.id]?.revision??(projection?.optimistic?projection.revision-1:note.revision),strokes:[...(previous[note.id]?.strokes??[]),stroke]}}));setHistories(previous=>({...previous,[note.id]:[...(previous[note.id]??[]),{kind:'draw',stroke}]}));setFutures(previous=>({...previous,[note.id]:[]}));if(!uncertainTransfer.current.has(note.id))setError('');};
   // Stroke eraser: saved strokes are only marked here (saved by saveErase);
   // unsaved draft strokes are removed from the draft at once.
   const erase=(savedIds:string[],draftIds:string[])=>{
@@ -313,32 +370,42 @@ export function useInkDrafts(note:Note|null,enabled:boolean,onSaved:(note:Note)=
   };
   const save=async()=>{
     const {note:current,drafts:all,loaded:latest,onSaved:accept}=active.current;
-    if(!current||saveLock.current||captureLock.current)return;
+    if(!current||saveLock.current||captureLock.current||uncertainTransfer.current.has(current.id)||loadingDraft.current.has(current.id)||restoring.current.has(current.id))return;
     const all_=all[current.id];
     // Pen strokes go first as one batch; every highlighter stroke is its own
     // queued write (recipe 5) once the note is synced again.
-    const pens=all_?.strokes.filter(stroke=>!isHighlighter(stroke))??[];
-    const marker=pens.length?undefined:all_?.strokes.find(isHighlighter);
-    const frozen=all_&&{...all_,strokes:marker?[marker]:pens};
+    const firstItem=all_?.strokes[0];
+    const marker=firstItem&&isHighlighter(firstItem)?firstItem:undefined;
+    const batch=firstItem&&(marker||isFirstStroke(firstItem))?[firstItem]:all_?.strokes.slice(0,all_.strokes.findIndex(stroke=>isHighlighter(stroke)||isFirstStroke(stroke))<0?undefined:all_.strokes.findIndex(stroke=>isHighlighter(stroke)||isFirstStroke(stroke)))??[];
+    const frozen=all_&&{...all_,strokes:batch};
     const first=frozen?.strokes.length===1&&isFirstStroke(frozen.strokes[0]);
     const markerPage=marker&&latest?.projection.pages.find(page=>page.id===marker.pageId);
     if(!frozen?.strokes.length||latest?.noteId!==current.id||!(marker?latest.projection.capabilities.highlighter===true&&markerPage?.ink?.highlighter===true:first?latest.projection.capabilities.firstStroke===true:latest.projection.capabilities.appendInk)||current.syncState==='pending')return;
     if(!first&&frozen.strokes.some(isFirstStroke)){setError('Boş sayfadaki ilk çizgi diğer çizgilerle birlikte kaydedilemiyor. Fazla çizgileri geri alın.');return;}
     if(frozen.revision!==current.revision){setError('Bu not çizim sırasında değişti. Çizimleriniz bu pencerede korunuyor; eski sürümün üzerine kaydedilmedi.');return;}
+    let releaseDraft!:()=>void;const ready=new Promise<void>(resolve=>{releaseDraft=resolve;});batchReady.current={id:current.id,ready};
     saveLock.current=true;setSaving(current.id);setError('');
     try{
       const templates=new Map(latest.projection.pages.flatMap(page=>page.strokes.map(stroke=>[stroke.id,stroke] as const)));
-      const {note:updated}=await api<{note:Note}>(notePath(current.id)+'/ink','PUT',{expectedRevision:frozen.revision,strokes:frozen.strokes.map(({pageId,sourceStrokeId,points,colorARGB,size,kind})=>{if(kind==='highlighter')return {tool:'highlighter',pageId,points,colorARGB:colorARGB>>>0,size};if(!sourceStrokeId)return {pageId,points,colorARGB:colorARGB>>>0,size};const template=templates.get(sourceStrokeId);return template&&(template.colorARGB>>>0)===(colorARGB>>>0)&&template.size===size?{pageId,sourceStrokeId,points}:{pageId,sourceStrokeId,points,colorARGB:colorARGB>>>0,size};})});
+      const {note:updated}=await serializeDraft(current.id,async()=>{
+        await persistDraft(current.id,all_);releaseDraft();
+        let result:{note:Note};
+        try{result=await api<{note:Note}>(notePath(current.id)+'/ink','PUT',{expectedRevision:frozen.revision,draftStrokeIds:frozen.strokes.map(stroke=>stroke.id),strokes:frozen.strokes.map(({pageId,sourceStrokeId,points,colorARGB,size,kind})=>{if(kind==='highlighter')return {tool:'highlighter',pageId,points,colorARGB:colorARGB>>>0,size};if(!sourceStrokeId)return {pageId,points,colorARGB:colorARGB>>>0,size};const template=templates.get(sourceStrokeId);return template&&(template.colorARGB>>>0)===(colorARGB>>>0)&&template.size===size?{pageId,sourceStrokeId,points}:{pageId,sourceStrokeId,points,colorARGB:colorARGB>>>0,size};})});}
+        catch(error){if(!(error instanceof ApiError&&error.status>=400&&error.status<500)){uncertainTransfer.current.add(current.id);setUncertainVersion(v=>v+1);}throw error;}
+        const owned=transferred.current.get(current.id)??new Set<string>();for(const stroke of frozen.strokes)owned.add(stroke.id);transferred.current.set(current.id,owned);
+        return result;
+      });
       // Strokes not in this write (highlighters waiting their turn) stay in the
       // draft; it moves to the new revision once that projection arrives.
       const sent=new Set(frozen.strokes.map(stroke=>stroke.id));
       setDrafts(previous=>{const next={...previous};const rest=(previous[current.id]?.strokes??[]).filter(stroke=>!sent.has(stroke.id));if(rest.length)next[current.id]={...previous[current.id],strokes:rest};else delete next[current.id];return next;});
       // History stays: these draws become queued Cloud strokes (savedDraw).
-      setSavedBatches(previous=>({...previous,[current.id]:{revision:updated.revision,clientIds:frozen.strokes.map(stroke=>stroke.id)}}));
+      setSavedBatches(previous=>({...previous,[current.id]:{revision:updated.revision,clientIds:frozen.strokes.map(stroke=>stroke.id),strokes:frozen.strokes,...(first?{firstPageId:frozen.strokes[0].pageId}:{})}}));
       setFutures(previous=>({...previous,[current.id]:(previous[current.id]??[]).filter(item=>item.kind!=='erase'||!item.drafts.length)}));
-      accept(updated);
-    }catch{setError('Çizimler kaydedilemedi. Taslağınız bu pencerede korunuyor.');}
-    finally{saveLock.current=false;setSaving(null);}
+      // Do not replace the projection or unmount a pointer gesture in flight.
+      if(captureLock.current)pendingAccept.current=()=>accept(updated);else accept(updated);
+    }catch{setError(uncertainTransfer.current.has(current.id)?'Çizimin durumunu doğrulamak için uygulamayı yeniden açın.':'Çizimler kaydedilemedi. Taslağınız bu pencerede korunuyor.');}
+    finally{releaseDraft();if(batchReady.current?.ready===ready)batchReady.current=null;saveLock.current=false;setSaving(null);}
   };
   // Erasures are saved separately from new strokes (one queued job each).
   const eraseGroups=(target:InkProjection,ids:string[]):InkEraseGroup[]|null=>{
@@ -399,7 +466,8 @@ export function useInkDrafts(note:Note|null,enabled:boolean,onSaved:(note:Note)=
     hasDraft:(id:string)=>!!drafts[id]?.strokes.length||!!erasures[id]?.ids.length||!!moves[id],
     sourceId:note?sources[note.id]??'':'',chooseSource,penStyle:note?penStyles[note.id]??{}:{},setPenStyle,highlighterStyle,setHighlighterStyle,
     undo,redo,canUndo:!undoReason,canRedo:!redoReason,undoReason,redoReason,
-    saving:!!note&&saving===note.id,anySaving:!!saving,
+    captureInProgress:()=>captureLock.current,
+    saving:!!note&&saving===note.id,anySaving:!!saving,restoring:!!note&&(loadingDraft.current.has(note.id)||restoring.current.has(note.id)),transferUncertain:!!note&&uncertainTransfer.current.has(note.id),
     dirtyIds:[...new Set([...Object.keys(drafts).filter(id=>drafts[id].strokes.length>0),...Object.keys(erasures).filter(id=>erasures[id].ids.length>0),...Object.keys(moves)])],
     eraseDirty:erasedNow.length>0,canSaveErase:!!options.onSaveErase&&!!projection?.capabilities.eraseInk&&erasedNow.length>0&&(!erasure||erasure.revision===projection?.revision),
     moveDirty:!!moveMark,saveMove,
@@ -423,7 +491,8 @@ export function inkSource(page:InkPage|undefined,chosen:string){const templates=
 export function pageDrawMode(projection:InkProjection|null,page:InkPage|undefined,pendingAllowed=true):'template'|'first'|null{
   if(!projection||!page)return null;
   if(page.strokes.some(stroke=>stroke.template!==false))return (projection.capabilities.appendInk===true||(pendingAllowed&&projection.pendingStrokes.length>0))&&page.ink?.appendInk!==false?'template':null;
-  return projection.capabilities.firstStroke===true&&page.ink?.firstStroke===true&&!page.strokes.length?'first':null;
+  if(pendingAllowed&&!page.strokes.length&&projection.pendingStrokes.some(stroke=>stroke.pageId===page.id&&!stroke.sourceStrokeId&&!isHighlighter(stroke)))return projection.optimistic?'first':'template';
+  return (projection.capabilities.firstStroke===true||(pendingAllowed&&projection.pendingStrokes.length>0))&&page.ink?.firstStroke===true&&!page.strokes.length?'first':null;
 }
 // A highlighter line can start on a page whose writer facts allow recipe 5;
 // while our own batch syncs, the page facts of the queued projection count.
@@ -432,24 +501,24 @@ export function pageHighlighterMode(projection:InkProjection|null,page:InkPage|u
   return projection.capabilities.highlighter===true||(pendingAllowed&&projection.pendingStrokes.length>0);
 }
 // A first stroke is saved alone (recipe 4); until then no other line starts.
-function draftAllows(controller:InkController,mode:'template'|'first'|null){const strokes=controller.draft?.strokes??[];if(strokes.some(isFirstStroke))return false;if(controller.tool==='highlighter')return true;return mode==='template'||(mode==='first'&&!strokes.some(stroke=>!isHighlighter(stroke)));}
+function draftAllows(controller:InkController,mode:'template'|'first'|null){return controller.tool==='highlighter'||mode==='template'||mode==='first';}
 // Drawing stays possible while our own previous batch is still syncing;
 // saving (canAppendInk) waits until the note is synced again.
 // The page image does not gate ink: page identity, size and revision come
 // from the projection, so a stroke drawn over a page whose image is still
 // loading (or missing) is placed and saved exactly the same. `_complete` stays
 // in the signatures for call-site stability only.
-export function canDrawInk(controller:InkController,pageIndex:number,_complete:boolean,blocked:boolean){const {projection,draft}=controller;const page=projection?.pages.find(item=>item.index===pageIndex);return (controller.tool==='highlighter'?pageHighlighterMode(projection,page):true)&&draftAllows(controller,controller.tool==='highlighter'?'template':pageDrawMode(projection,page))&&!!page&&!blocked&&!controller.saving&&(!draft||draft.revision===projection!.revision);}
+export function canDrawInk(controller:InkController,pageIndex:number,_complete:boolean,blocked:boolean){const {projection,draft}=controller;const page=projection?.pages.find(item=>item.index===pageIndex);return (controller.tool==='highlighter'?pageHighlighterMode(projection,page):true)&&draftAllows(controller,controller.tool==='highlighter'?'template':pageDrawMode(projection,page))&&!!page&&!blocked&&(!draft||draft.revision===projection!.revision||(projection!.optimistic===true&&draft.revision===projection!.revision-1));}
 export function canAppendInk(controller:InkController,pageIndex:number,_complete:boolean,blocked:boolean){
-  const {projection,draft}=controller;if(!projection||blocked||controller.saving||(draft&&draft.revision!==projection.revision))return false;
-  const all=draft?.strokes??[];const strokes=all.filter(stroke=>!isHighlighter(stroke));
-  if(!strokes.length&&all.length)return pageHighlighterMode(projection,projection.pages.find(page=>page.id===all[0].pageId),false);
-  if(strokes.some(isFirstStroke))return strokes.length===1&&pageDrawMode(projection,projection.pages.find(page=>page.id===strokes[0].pageId),false)==='first';
-  return pageDrawMode(projection,projection.pages.find(page=>page.index===pageIndex),false)==='template';
+  const {projection,draft}=controller;if(!projection||projection.optimistic||blocked||controller.saving||controller.restoring||controller.transferUncertain||(draft&&draft.revision!==projection.revision))return false;
+  const first=draft?.strokes[0];
+  if(first&&isHighlighter(first))return pageHighlighterMode(projection,projection.pages.find(page=>page.id===first.pageId),false);
+  if(first&&isFirstStroke(first))return pageDrawMode(projection,projection.pages.find(page=>page.id===first.pageId),false)==='first';
+  return pageDrawMode(projection,projection.pages.find(page=>first?page.id===first.pageId:page.index===pageIndex),false)==='template';
 }
 // Stroke eraser: needs the writer's erase capability for the note and page
 // (or our own unsaved strokes on the page).
-export function canEraseInk(controller:InkController,pageIndex:number,_complete:boolean,blocked:boolean){const {projection,draft,erasure}=controller;const page=projection?.pages.find(item=>item.index===pageIndex);if(!page||blocked||controller.saving)return false;const own=!!draft?.strokes.some(stroke=>stroke.pageId===page.id);return (own&&(!draft||draft.revision===projection!.revision))||(projection!.capabilities.eraseInk===true&&page.ink?.eraseInk!==false&&page.strokes.some(stroke=>stroke.erasable===true)&&(!erasure||erasure.revision===projection!.revision));}
+export function canEraseInk(controller:InkController,pageIndex:number,_complete:boolean,blocked:boolean){const {projection,draft,erasure}=controller;const page=projection?.pages.find(item=>item.index===pageIndex);if(!page||blocked||controller.saving||controller.transferUncertain)return false;const own=!!draft?.strokes.some(stroke=>stroke.pageId===page.id);return (own&&(!draft||draft.revision===projection!.revision))||(projection!.capabilities.eraseInk===true&&page.ink?.eraseInk!==false&&page.strokes.some(stroke=>stroke.erasable===true)&&(!erasure||erasure.revision===projection!.revision));}
 // Lasso selection works on the same strokes the eraser may change.
 export function canSelectInk(controller:InkController,pageIndex:number,complete:boolean,blocked:boolean){const {projection,moveMark}=controller;return canEraseInk(controller,pageIndex,complete,blocked)&&(!moveMark||moveMark.revision===projection?.revision);}
 // Short Turkish reason a rail tool is unavailable on the current page.
@@ -462,7 +531,7 @@ export function inkToolReason(controller:InkController,pageIndex:number,_complet
   const page=projection.pages.find(item=>item.index===pageIndex);
   if(!page)return projection.reason||'Bu sayfaya şimdilik çizim eklenemiyor.';
   if(draft&&draft.revision!==projection.revision)return 'Not başka bir yerde değişti; yeni çizgileriniz bu pencerede korunuyor.';
-  if(controller.saving)return 'Çizimler kaydediliyor.';
+  if(controller.saving&&tool!=='pen'&&tool!=='highlighter')return 'Çizimler kaydediliyor.';
   if(blocked)return 'Notun önceki değişikliği eşitleniyor; birazdan çizebilirsiniz.';
   const reason=page.ink?.reason||projection.reason||'';
   if(tool==='highlighter'){
@@ -506,10 +575,10 @@ const ERASER_CSS_RADIUS=7;
 interface Selection {pageId:string;saved:string[];drafts:string[]}
 // One page of a note: saved page image plus its ink layer. Pen mode is shared
 // by all pages; only the page the user is reading shows notices.
-export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineComplete,blocked,imageUrl,onImageError,maskColor='#ffffff'}:{controller:InkController;pageIndex:number;current?:boolean;baselineComplete:boolean;blocked:boolean;imageUrl:string|null;onImageError:()=>void;maskColor?:string}){
-  const {projection,draft,erasure,moveMark,phase,error,drawing,tool,setCapturing}=controller;
+export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineComplete,blocked,imageUrl,onImageError,maskColor='#ffffff'}:{controller:InkController;pageIndex:number;current?:boolean;baselineComplete:boolean;blocked:boolean;imageUrl:string|null;onImageError:()=>void;maskColor?:string;readingMode?:boolean}){
+  const {projection,draft,erasure,moveMark,phase,drawing,tool,setCapturing}=controller;
   const page=projection?.pages.find(item=>item.index===pageIndex);
-  const [current,setCurrent]=useState<InkStroke|null>(null);const [notice,setNotice]=useState('');
+  const [current,setCurrent]=useState<InkStroke|null>(null);const [,setNotice]=useState('');
   const [hits,setHits]=useState<{saved:string[];drafts:string[]}|null>(null);
   const [selection,setSelection]=useState<Selection|null>(null);
   const [lasso,setLasso]=useState<[number,number][]|null>(null);const [drag,setDrag]=useState<[number,number]|null>(null);
@@ -518,7 +587,7 @@ export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineC
   const selectGesture=useRef<{pointer:number;mode:'lasso'|'drag';start:[number,number];path:[number,number][];offset:[number,number]}|null>(null);
   const erasing=tool==='eraser',selecting=tool==='select';
   const available=selecting?canSelectInk(controller,pageIndex,baselineComplete,blocked):erasing?canEraseInk(controller,pageIndex,baselineComplete,blocked):canDrawInk(controller,pageIndex,baselineComplete,blocked);
-  const source=inkSource(page,controller.sourceId);
+  const source=inkSource(page,controller.sourceId)??(!projection?.optimistic&&!page?.strokes.length?projection?.pendingStrokes.find(stroke=>stroke.pageId===page?.id&&!stroke.sourceStrokeId&&!isHighlighter(stroke)):undefined);
   const strokes=draft?.strokes??[];const pending=projection?.pendingStrokes??[];
   // Marked here, or saved and waiting for the Cloud write (pendingErase).
   const queued=(projection?.pendingErase??[]).filter(group=>group.pageId===page?.id).flatMap(group=>group.strokeIds);
@@ -764,7 +833,7 @@ export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineC
   // blank sheet of the page's own size and colour; PageStack keeps the calm
   // placeholder text underneath.
   const image=imageUrl?<img className="page-image" src={imageUrl} alt={`Notun ${pageIndex+1}. sayfası`} onError={onImageError}/>:null;
-  if(phase!=='ready'||!page||!projection)return image;
+  if(phase!=='ready'||!page||!projection)return <>{null}{null}<div className="ink-page" ref={pageBox}>{image}</div></>;
   const geometryById=new Map((geometry?.strokes??[]).map(stroke=>[stroke.id,stroke]));
   const dragOffset=(id:string,draftStroke:boolean):[number,number]=>drag&&(draftStroke?selectedDrafts.has(id):selectedSaved.has(id))?drag:[0,0];
   // Saved strokes drawn somewhere else than the page image shows them.
@@ -773,16 +842,6 @@ export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineC
   const highlighted=(hits?.saved??[]).map(id=>geometryById.get(id)).filter((stroke):stroke is InkGeometryStroke=>!!stroke);
   const hitDrafts=new Set(hits?.drafts??[]);
   const box=selecting&&drawing?selectionBounds():null;const shownBox=box&&drag?[box[0]+drag[0],box[1]+drag[1],box[2]+drag[0],box[3]+drag[1]]:box;
-  const reason=draft&&draft.revision!==projection.revision?'Notun sürümü değişti. Taslak çizgileriniz korunuyor ve eski sürümün üzerine kaydedilmiyor.':
-    erasure&&erasure.revision!==projection.revision?'Notun sürümü değişti. Silinmek üzere işaretlenen çizgiler kaydedilmedi.':
-    moveMark&&moveMark.revision!==projection.revision?'Notun sürümü değişti. Taşınan çizgiler kaydedilmedi.':
-    blocked&&!pending.length?'Notun önceki değişikliği eşitleniyor; birazdan çizebilirsiniz.':
-    (erasing||selecting)&&drawing&&!available?(page.ink?.reason||'Bu sayfadaki çizgiler şimdilik düzenlenemiyor.'):
-    (erasing||selecting)&&drawing&&projection.capabilities.eraseInk&&geometry?.status==='failed'?'Kayıtlı çizgiler okunamadı; yalnızca yeni çizgileriniz düzenlenebilir.':
-    tool==='highlighter'&&drawing&&!available&&!pending.length?(page.ink?.reason||'Bu sayfaya fosforlu kalem çizgisi eklenemiyor.'):
-    !erasing&&!selecting&&tool!=='highlighter'&&!pageDrawMode(projection,page)&&!pending.length?(page.ink?.reason||projection.reason||'Bu notta çizim ekleme şu anda kullanılamıyor.'):
-    !erasing&&!selecting&&drawing&&strokes.some(isFirstStroke)&&!strokes.some(stroke=>stroke.pageId===page.id)?'Başka sayfadaki ilk çizgi kaydediliyor; eşitlenince bu sayfada çizebilirsiniz.':
-    drawing&&available&&(!imageUrl||!baselineComplete)?'Sayfa henüz tam yüklenmedi; çizgileriniz yine de bu sayfaya kaydedilir.':'';
   const mode=drawing&&available?(selecting?'selecting':erasing?'erasing':'drawing'):'';
   // Pen strokes the live renderer draws (same pixels as while drawing); the
   // rest (highlighters, one-sample taps, pens without a known template) stay SVG.
@@ -793,8 +852,7 @@ export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineC
   for(const id of [...shown.current.keys()])if(!pageStrokes.some(stroke=>stroke.id===id))shown.current.delete(id);
   const rasters=new Set(rastered.map(item=>item.stroke.id));
   return <>
-    {isCurrent&&reason&&<p className="ink-notice">{plainReason(reason)}</p>}
-    {isCurrent&&(error||notice)&&<p className="ink-notice" role="alert">{error||notice}</p>}
+    {null}{null}
     <div className="ink-page" ref={pageBox}>{image}
       {(masks.length>0||movedSaved.length>0)&&<svg className="ink-underlay" style={{['--ink-erase-mask' as string]:maskColor}} viewBox={`0 0 ${page.width} ${page.height}`} preserveAspectRatio="none" aria-hidden="true">
         {masks.map(stroke=><Mask key={'m'+stroke.id} className="ink-erase-mask" points={stroke.points} size={stroke.size}/>)}

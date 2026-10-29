@@ -60,7 +60,7 @@ test('dragging with the ellipse queues one page-ops shape job and shows it while
   for(const [value,expected] of [[x1,200],[y1,200],[x2,500],[y2,400]])expect(Math.abs(value-expected)).toBeLessThan(6);
   await expect(page.locator('.shape-pending')).toBeAttached();
   // The next shape waits for the Cloud write.
-  await expect(page.locator('.shape-notice')).toContainText('eşitleniyor');
+  await expect(page.locator('.shape-notice')).toHaveCount(0);
   await expect(page.getByLabel('1. sayfa şekil alanı')).toHaveCount(0);
 });
 // Saved shapes are part of the page image (canvas cache or local renderer):
@@ -83,7 +83,7 @@ test('a line ignores the fill option and a tiny drag sends nothing',async({page}
   await expect(panel.getByRole('checkbox',{name:'Dolgu'})).toBeDisabled();
   const area=page.getByLabel('1. sayfa şekil alanı');const box=(await area.boundingBox())!;
   await page.mouse.move(box.x+100,box.y+100);await page.mouse.down();await page.mouse.move(box.x+101,box.y+101);await page.mouse.up();
-  await expect(page.locator('.shape-notice')).toContainText('sürükleyin');
+  await expect(page.getByRole('alert')).toContainText('sürükleyin');
   expect(requests.filter(r=>r.path.endsWith('/page-ops'))).toHaveLength(0);
   await page.mouse.move(box.x+100,box.y+100);await page.mouse.down();await page.mouse.move(box.x+300,box.y+150,{steps:4});await page.mouse.up();
   await expect.poll(()=>requests.filter(r=>r.path.endsWith('/page-ops')).length).toBe(1);
@@ -92,7 +92,7 @@ test('a line ignores the fill option and a tiny drag sends nothing',async({page}
 });
 test('a page without a preview image still shows its shapes and takes new ones',async({page})=>{
   const {requests}=await fixture(page,{saved:true,twoPages:true});
-  await expect(page.locator('.page-sheet[data-page-index="1"] .page-placeholder')).toHaveText('Bu sayfanın görüntüsü bu cihazda oluşturulamıyor.');
+  await expect(page.locator('.page-sheet[data-page-index="1"] .page-placeholder')).toBeEmpty();
   await expect(page.getByText(/görüntüsü yok|yaklaşık geometri/)).toHaveCount(0);
   await expect(page.locator('.page-sheet[data-page-index="1"] .shape-overlay rect')).toHaveCount(1);
   await rail(page).getByRole('button',{name:'Şekil',exact:true}).click();

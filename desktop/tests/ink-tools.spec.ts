@@ -29,13 +29,13 @@ async function fixture(page:Page,options:{erase?:boolean;pageReason?:string;page
     if(path.endsWith('/editor'))return send({schemaVersion:1,revision:note.revision,model:null,reason:'Bilinmeyen biçimlendirme sözdizimi.',capabilities:{titleEdit:true,textEdit:false,richStyle:false,inkEdit:false}});
     if(path.endsWith('/pages'))return send({providerAvailable:true,pages:pages.map(item=>({...item,available:true,complete:true}))});
     if(path.endsWith('/ink-geometry'))return send({schemaVersion:1,pageId:'page-0',strokes:saved.map(([id,x,y])=>({id,layerId:'layer-0',size:4,points:line(x,y)})),reason:null});
-    if(path.endsWith('/ink')&&method==='GET')return send({schemaVersion:1,revision:note.revision,pages,capabilities:note.syncState!=='synced'?{appendInk:false}:options.blank?{appendInk:false,eraseInk:false,firstStroke:true}:{appendInk:true,eraseInk:erase,firstStroke:false,highlighter:options.highlighter??false},reason:null,rendering:{nativeEquivalent:false,mode:'geometry-only'},pendingStrokes:pending});
+    if(path.endsWith('/ink')&&method==='GET')return send({schemaVersion:1,revision:note.revision,pages,capabilities:note.syncState!=='synced'?{appendInk:false}:options.blank&&!pages[0].strokes.length?{appendInk:false,eraseInk:false,firstStroke:true}:{appendInk:true,eraseInk:erase,firstStroke:false,highlighter:options.highlighter??false},reason:null,rendering:{nativeEquivalent:false,mode:'geometry-only'},pendingStrokes:pending});
     if(path.endsWith('/ink')&&method==='PUT'){pending=data.strokes.map(({tool,...stroke}:any,index:number)=>({...stroke,id:`pending-${index}`,sourceStrokeId:stroke.sourceStrokeId??'',kind:tool==='highlighter'?'highlighter':'fountain'}));note.revision++;note.syncState='pending';return send({note});}
     if((path.endsWith('/ink-move')||path.endsWith('/ink-erase'))&&method==='PUT'){note.revision++;note.syncState='pending';return send({note});}
     if(method==='GET')return send({note});return send({error:{code:'unexpected_mutation',message:'Beklenmeyen değişiklik'}},422);
   });
   await page.goto('/#token='+TOKEN);await page.getByRole('button',{name:/Araç denemesi/}).click();await expect(page.getByLabel('Çizim alanı')).toBeAttached();
-  return {requests};
+  return {requests,finishFirst:()=>{const first=pending[0];pages[0].strokes=[{...first,template:true}];pages[0].ink={...pages[0].ink,appendInk:true,firstStroke:false};pending=[];note.syncState='synced';}};
 }
 const rail=(page:Page)=>page.locator('.tool-rail');
 async function lassoAround(page:Page,cx:number,cy:number){
@@ -50,7 +50,7 @@ test('lasso selects saved strokes, drag moves them and the move autosaves as one
   await rail(page).getByRole('button',{name:'Seçim',exact:true}).click();
   const at=await lassoAround(page,500,500);await expect(page.getByTestId('ink-selection')).toBeVisible();
   await page.mouse.move(...at(540,505));await page.mouse.down();await page.mouse.move(...at(600,545),{steps:5});await page.mouse.up();
-  await expect(page.locator('.editor-footer')).toContainText('1 çizgi taşınmak üzere');
+  await expect(page.locator('.editor-footer')).toHaveAttribute('data-ink-move-count','1');
   await expect(rail(page).getByRole('button',{name:'Geri al',exact:true})).toBeEnabled();
   await expect.poll(()=>requests.filter(r=>r.path.endsWith('/ink-move')).length,{timeout:5000}).toBe(1);
   const move=requests.find(r=>r.path.endsWith('/ink-move'))!;
@@ -66,12 +66,12 @@ test('undo right after a drag cancels the unsaved move without any Cloud request
   await rail(page).getByRole('button',{name:'Seçim',exact:true}).click();
   const at=await lassoAround(page,100,100);
   await page.mouse.move(...at(140,105));await page.mouse.down();await page.mouse.move(...at(240,205),{steps:4});await page.mouse.up();
-  await expect(page.locator('.editor-footer')).toContainText('taşınmak üzere');
+  await expect(page.locator('.editor-footer')).toHaveAttribute('data-ink-move-count','1');
   await rail(page).getByRole('button',{name:'Geri al',exact:true}).click();
-  await expect(page.locator('.editor-footer')).not.toContainText('taşınmak üzere');
+  await expect(page.locator('.editor-footer')).toHaveAttribute('data-ink-move-count','0');
   const redo=rail(page).getByRole('button',{name:'Yinele',exact:true});await expect(redo).toBeEnabled();await expect(redo).toHaveAttribute('title',process.platform==='darwin'?'Yinele (⌘⇧Z)':'Yinele (Ctrl+Y)');
-  await page.keyboard.press('ControlOrMeta+y');await expect(page.locator('.editor-footer')).toContainText('taşınmak üzere');
-  await page.keyboard.press('ControlOrMeta+z');await expect(page.locator('.editor-footer')).not.toContainText('taşınmak üzere');
+  await page.keyboard.press('ControlOrMeta+y');await expect(page.locator('.editor-footer')).toHaveAttribute('data-ink-move-count','1');
+  await page.keyboard.press('ControlOrMeta+z');await expect(page.locator('.editor-footer')).toHaveAttribute('data-ink-move-count','0');
   await page.waitForTimeout(2200);expect(requests.filter(r=>r.method==='PUT')).toHaveLength(0);
 });
 test('Delete erases the lasso selection through the erase job',async({page})=>{
@@ -79,7 +79,7 @@ test('Delete erases the lasso selection through the erase job',async({page})=>{
   await rail(page).getByRole('button',{name:'Seçim',exact:true}).click();
   await lassoAround(page,800,850);await expect(page.getByTestId('ink-selection')).toBeVisible();
   await page.keyboard.press('Delete');await expect(page.getByTestId('ink-selection')).toHaveCount(0);
-  await expect(page.locator('.editor-footer')).toContainText('1 çizgi silinmek üzere');
+  await expect(page.locator('.editor-footer')).toHaveAttribute('data-ink-erase-count','1');
   await expect.poll(()=>requests.filter(r=>r.path.endsWith('/ink-erase')).length,{timeout:5000}).toBe(1);
   expect(requests.find(r=>r.path.endsWith('/ink-erase'))!.data.erase).toEqual([{pageId:'page-0',layerId:'layer-0',strokeIds:['s-c']}]);
   // A saved Cloud delete cannot be restored: undo says so instead of doing nothing silently.
@@ -107,9 +107,9 @@ test('a stroke-free page takes a first stroke in the panel colour, saved alone w
   await page.getByRole('button',{name:'Kalem rengi 1',exact:true}).click();
   await pen.click();const svg=page.getByLabel('Çizim alanı');await expect(svg).toHaveClass(/drawing/);const box=(await svg.boundingBox())!;
   await page.mouse.move(box.x+box.width*.3,box.y+box.height*.3);await page.mouse.down();await page.mouse.move(box.x+box.width*.5,box.y+box.height*.35,{steps:4});await page.mouse.up();
-  await expect(page.locator('.editor-footer')).toContainText('1 çizgi kaydedilmedi');
-  // Only one first stroke per batch: the pen waits for its save.
-  await expect(pen).toBeDisabled();await expect(pen).toHaveAttribute('title',/ilk çizgi kaydediliyor/);
+  await expect(page.locator('.editor-footer')).toHaveAttribute('data-ink-draft-count','1');
+  // The first line is saved alone, but the pen stays available.
+  await expect(pen).toBeEnabled();
   await expect.poll(()=>requests.filter(r=>r.method==='PUT'&&r.path.endsWith('/ink')).length,{timeout:5000}).toBe(1);
   const saved=requests.find(r=>r.method==='PUT'&&r.path.endsWith('/ink'))!;
   expect(saved.data.strokes).toHaveLength(1);const [stroke]=saved.data.strokes;
@@ -139,7 +139,7 @@ test('the highlighter draws a translucent band and is saved alone as its own too
   const saved=requests.find(r=>r.method==='PUT'&&r.path.endsWith('/ink'))!;
   // Pen strokes go first; the highlighter waits in the draft for its own write.
   expect(saved.data.strokes).toHaveLength(1);expect(saved.data.strokes[0].tool).toBeUndefined();
-  await expect(page.locator('.editor-footer')).toContainText('1 çizgi kaydedilmedi');
+  await expect(page.locator('.editor-footer')).toHaveAttribute('data-ink-draft-count','1');
   await expect(band).toHaveCount(1);
 });
 test('a highlighter-only draft is sent as one tool:highlighter stroke with alpha 0x73',async({page})=>{
@@ -151,4 +151,21 @@ test('a highlighter-only draft is sent as one tool:highlighter stroke with alpha
   const [value]=requests.find(r=>r.method==='PUT'&&r.path.endsWith('/ink'))!.data.strokes;
   expect(Object.keys(value).sort()).toEqual(['colorARGB','pageId','points','size','tool']);
   expect([value.tool,value.pageId,value.colorARGB,value.size]).toEqual(['highlighter','page-0',0x73ffcb30,24]);
+});
+
+
+test('a stroke-free page accepts another line before and during the first batch',async({page})=>{
+  const {requests,finishFirst}=await fixture(page,{blank:true});
+  const pen=rail(page).getByRole('button',{name:'Kalem',exact:true});await pen.click();
+  const svg=page.getByLabel('Çizim alanı');const box=(await svg.boundingBox())!;
+  const draw=async(y:number)=>{await expect(svg).toHaveClass(/drawing/);await page.mouse.move(box.x+box.width*.3,box.y+box.height*y);await page.mouse.down();await page.mouse.move(box.x+box.width*.5,box.y+box.height*(y+.05),{steps:4});await page.mouse.up();};
+  await draw(.2);await draw(.4);
+  await expect(page.locator('.editor-footer')).toHaveAttribute('data-ink-draft-count','2');
+  await expect.poll(()=>requests.filter(r=>r.method==='PUT'&&r.path.endsWith('/ink')).length,{timeout:5000}).toBe(1);
+  await expect(pen).toBeEnabled();await expect(svg).toHaveClass(/drawing/);await draw(.6);
+  finishFirst();
+  await expect.poll(()=>requests.filter(r=>r.method==='PUT'&&r.path.endsWith('/ink')).length,{timeout:15000}).toBe(2);
+  const writes=requests.filter(r=>r.method==='PUT'&&r.path.endsWith('/ink'));
+  expect(writes[0].data.strokes).toHaveLength(1);expect(writes[1].data.strokes).toHaveLength(2);
+  expect(writes[1].data.strokes.every((stroke:any)=>stroke.sourceStrokeId==='pending-0')).toBe(true);
 });

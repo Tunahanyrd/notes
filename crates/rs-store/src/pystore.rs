@@ -1204,6 +1204,16 @@ impl Store {
     }
 
     #[cfg(feature = "python")]
+    fn append_ink_draft(&self, py: Python<'_>, identity: &str, revision: &Bound<'_, PyAny>, strokes: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        out(py, self.core.append_ink_draft(identity, &v(revision)?, &v(strokes)?))
+    }
+
+    #[cfg(feature = "python")]
+    fn save_ink_from_draft(slf: &Bound<'_, Self>, identity: &str, strokes: &Bound<'_, PyAny>, expected_revision: &Bound<'_, PyAny>, draft_ids: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        out(slf.py(), slf.borrow().core.save_ink_from_draft(&host(slf), identity, &v(strokes)?, &v(expected_revision)?, &v(draft_ids)?))
+    }
+
+    #[cfg(feature = "python")]
     fn save_ink(slf: &Bound<'_, Self>, identity: &str, strokes: &Bound<'_, PyAny>, expected_revision: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         let (s, r) = (v(strokes)?, v(expected_revision)?);
         out(slf.py(), slf.borrow().core.save_ink(&host(slf), identity, &s, &r))

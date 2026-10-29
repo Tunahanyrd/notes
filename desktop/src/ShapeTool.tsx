@@ -94,7 +94,7 @@ function ShapeSvg({shape,className}:{shape:Omit<ShapeItem,'id'>;className?:strin
 // Saved shapes are part of the page image (Samsung's canvas cache or our
 // local page renderer), so they are drawn here only when the page has no
 // image; the shape being synced is always drawn until the new image arrives.
-export function ShapeLayer({controller,pageIndex,current,hasImage=false}:{controller:ShapeController;pageIndex:number;current:boolean;hasImage?:boolean}){
+export function ShapeLayer({controller,pageIndex,hasImage=false}:{controller:ShapeController;pageIndex:number;current:boolean;hasImage?:boolean}){
   const page=controller.page(pageIndex);const svg=useRef<SVGSVGElement>(null);
   const [drag,setDrag]=useState<{pointer:number;start:[number,number];end:[number,number]}|null>(null);
   if(!page||!page.width||!page.height)return null;
@@ -116,7 +116,6 @@ export function ShapeLayer({controller,pageIndex,current,hasImage=false}:{contro
     void controller.submit(page.id,geometry);
   };
   return <>
-    {current&&controller.active&&(reason||controller.error)&&<p className="ink-notice shape-notice" role={controller.error?'alert':undefined}>{controller.error||reason}</p>}
     <svg ref={svg} className={`shape-overlay ${drawing?'drawing':''}`} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none"
       aria-label={drawing?`${pageIndex+1}. sayfa şekil alanı`:undefined}
       onPointerDown={event=>{if(!drawing||event.button!==0)return;event.preventDefault();controller.setError('');
@@ -144,6 +143,5 @@ export function ShapePanel({controller}:{controller:ShapeController}){
     <label className="pen-size"><span>Kalınlık <output>{Math.round(style.width*10)/10}</output></span><input type="range" aria-label="Şekil çizgi kalınlığı" min={MIN_SHAPE_WIDTH} max={MAX_SHAPE_WIDTH} step={0.5} value={style.width} onChange={event=>setStyle({...style,width:Number(event.target.value)})}/></label>
     <label className="shape-fill"><input type="checkbox" disabled={line} checked={style.fill&&!line} onChange={event=>setStyle({...style,fill:event.target.checked})}/><span>Dolgu</span></label>
     {style.fill&&!line&&<div className="color-palette pen-colors" role="group" aria-label="Şekil dolgu rengi">{shapeColors.map((value,i)=>{const argb=argbOf(value,0x40);const selected=argb===style.fillARGB>>>0;return <button key={value} aria-label={`Dolgu rengi ${i+1}`} aria-pressed={selected} className={selected?'selected':''} style={{backgroundColor:value,opacity:.5}} onClick={()=>setStyle({...style,fillARGB:argb})}/>;})}</div>}
-    <p className="pen-hint">Şekli sayfada sürükleyerek çizin. Ekrandaki görünüm cihazdakinden biraz farklı olabilir.</p>
   </div>;
 }
