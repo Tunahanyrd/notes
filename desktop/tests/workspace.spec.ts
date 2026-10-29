@@ -409,6 +409,8 @@ test('a picture anchored in the text (objectSpan) stays in place while text arou
   await page.keyboard.press('ControlOrMeta+Home');await page.keyboard.press('End');await page.keyboard.type(' yeni');
   await page.keyboard.press('ControlOrMeta+End');await page.keyboard.type(' son');
   await editor.locator('p').first().evaluate(element=>{const node=element.firstChild!;const range=document.createRange();range.setStart(node,0);range.setEnd(node,4);const selection=window.getSelection()!;selection.removeAllRanges();selection.addRange(range);});
+  // WebKit reports a script-made selection to the editor on the next frames.
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   await page.getByRole('button',{name:'Kalın',exact:true}).click();
   await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.editor-footer')).toHaveAttribute('data-dirty','false');expect(writes).toHaveLength(1);
   expect(model.text).toBe('Önce yeni\n\uFFFC\nSonra son');expect(model.objects).toEqual([{start:10,objectId:picture,type:'image'}]);expect(model.spans).toContainEqual({start:0,end:4,kind:'bold',value:true,interval:3});
