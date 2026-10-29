@@ -458,6 +458,7 @@ fn temp_directory() -> std::io::Result<PathBuf> {
 pub enum RenderError {
     Message(&'static str),
     Generic,
+    Refused,
     Encode(&'static str),
 }
 
@@ -487,7 +488,7 @@ pub fn render_page_pixels(pdf: &Path, sha256: &str, page: i64, canvas: (i64, i64
         let outcome = sandbox::run(&args, None, sandbox::PDF_LIMITS, false, Duration::from_secs(RENDER_TIMEOUT))
             .map_err(|_| RenderError::Message("PDF sayfası süre sınırı içinde açılamadı."))?;
         if outcome.code != Some(0) {
-            return Err(RenderError::Message("PDF sayfası güvenle açılamadı."));
+            return Err(RenderError::Refused);
         }
         read_ppm(&output.join("page.ppm"), width as usize, height as usize).map_err(|e| match e {
             Some(m) => RenderError::Message(m),
@@ -504,6 +505,7 @@ pub fn render_error(py: Python<'_>, e: RenderError) -> PyErr {
     match e {
         RenderError::Message(m) => error(py, m),
         RenderError::Generic => default_error(py),
+        RenderError::Refused => error(py, "PDF sayfası güvenle açılamadı."),
         RenderError::Encode(m) => PyValueError::new_err(m),
     }
 }

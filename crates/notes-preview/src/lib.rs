@@ -28,6 +28,11 @@ pub mod pdf;
 pub mod spi;
 pub mod thumbnails;
 mod util;
+#[cfg(test)]
+extern crate self as notes_preview;
+#[cfg(test)]
+#[path = "../tests/common/mod.rs"]
+mod test_common;
 
 pub use env::PreviewEnv;
 pub use ink::{run_child, InkBackend, InkPage, NativeInk};

@@ -119,7 +119,8 @@ fn actual_isolated_renderer_uses_zero_based_pdf_index_and_note_rect() {
         assert_eq!(pixel(&image, 10, 8), color);
         assert_eq!(pixel(&image, 0, 0), [0xff; 4]);
     }
-    assert_eq!(pdf::render_pdf_background(&path, &cand(9, 0, (2, 3, 22, 13))).unwrap_err().kind, Kind::PdfBackground);
+    let refused = pdf::render_pdf_background(&path, &cand(9, 0, (2, 3, 22, 13))).unwrap_err();
+    assert_eq!((refused.kind, refused.code.as_str()), (Kind::PdfBackground, "pdf_render_refused"));
     std::fs::write(&path, b"%PDF-invalid").unwrap();
     assert_eq!(pdf::render_pdf_background(&path, &cand(0, 0, (2, 3, 22, 13))).unwrap_err().kind, Kind::PdfBackground);
 }
@@ -320,4 +321,191 @@ fn expired_pdf_link_refreshes_note_once_and_retries() {
     assert_eq!((error.code.as_str(), error.message.as_str()), ("preview_unavailable", "PDF indirme bağlantısının süresi dolmuş."));
     assert_eq!((downloads2.load(Ordering::SeqCst), refreshes2.load(Ordering::SeqCst)), (2, 1));
     manager2.close();
+}
+
+#[test]
+fn deterministic_pdf_ink_failure_stops_background_retries_until_source_changes() {
+    use notes_preview::ink::{InkBackend, InkPage};
+    use notes_preview::manager::{InkGeometryPreview, JobState};
+    struct Refused(Arc<AtomicUsize>);
+    impl InkBackend for Refused {
+        fn provider_available(&self) -> bool { true }
+        fn inspect_render_pages(&self, _: &Val) -> Vec<InkPage> { vec![] }
+        fn render_ink_page(&self, _: &Val, _: i64) -> Result<Vec<u8>, Fail> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(Fail::new(Kind::InkRender, "synthetic renderer refusal"))
+        }
+    }
+    if !pdf::pdf_provider_available() { return; }
+    let dir = TempDir::new();
+    let store = store(dir.path());
+    let snap = snapshot(b"synthetic note", "application/xml");
+    let id = note_with_document(&store, &snap);
+    let mut pdf_page = cand(0, 1, (2, 3, 22, 13));
+    pdf_page.local_ink = Some(InkGeometryPreview { page_index: 0, width: 30, height: 20,
+        sha256: snap.get("raw_sha256").unwrap().as_str().unwrap().into(), is_dark_mode: false, composite: false, notice: None });
+    let candidate = Candidate::Pdf(pdf_page.clone());
+    let current = Arc::new(Mutex::new(Source(vec![Val::s("source-1")])));
+    let entry_source = current.clone(); let source = current.clone(); let entry_candidate = candidate.clone();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let manager = PreviewManager::with_options(store, TestEnv::new(Some(dir.path()), false), PreviewOptions {
+        ink: Some(Arc::new(Refused(calls.clone()))),
+        entry_hook: Some(Arc::new(move |_| Ok(Entry { source: entry_source.lock().unwrap().clone(), pages: vec![],
+            candidates: BTreeMap::from([(0, entry_candidate.clone())]) }))),
+        source_hook: Some(Arc::new(move |_| Ok(source.lock().unwrap().clone()))),
+        ..Default::default()
+    }).unwrap();
+    pdf::fetch_pdf_with(&pdf_page, &|| Ok(vec![]), &manager.directory().join("pdf-files"), "offline", None,
+                        &|_, _, path, _, _| write_pdf(path)).unwrap();
+    let standin = png(30, 20, &[0xff; 30 * 20 * 4]);
+    let path = manager.path(&candidate).unwrap();
+    std::fs::write(path.with_extension("partial.png"), &standin).unwrap();
+    assert_eq!(manager.request(&id, 0, 0, 0.0).unwrap(), Some(standin.clone()));
+    assert!(manager.wait_idle(Some(Duration::from_secs(10))));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let job = manager.job(&path.file_name().unwrap().to_string_lossy()).unwrap();
+    assert_eq!(job.state, JobState::Ready, "background failure must retain the served stand-in");
+    assert!(job.retry_after.unwrap().saturating_duration_since(std::time::Instant::now()) > Duration::from_secs(590));
+    for _ in 0..3 { assert_eq!(manager.request(&id, 0, 0, 0.0).unwrap(), Some(standin.clone())); }
+    assert!(manager.wait_idle(Some(Duration::from_secs(5))));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    *current.lock().unwrap() = Source(vec![Val::s("source-2")]);
+    assert_eq!(manager.request(&id, 0, 0, 0.0).unwrap(), Some(standin));
+    assert!(manager.wait_idle(Some(Duration::from_secs(10))));
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "new source must be retried without waiting for old backoff");
+    manager.close();
+}
+
+#[test]
+fn pdf_network_error_keeps_standin_and_uses_exponential_retry_delay() {
+    use notes_preview::manager::{InkGeometryPreview, JobState};
+    let dir = TempDir::new();
+    let store = store(dir.path());
+    let snap = snapshot(b"synthetic note", "application/xml");
+    let id = note_with_document(&store, &snap);
+    let mut page = cand(0, 1, (2, 3, 22, 13));
+    page.local_ink = Some(InkGeometryPreview { page_index: 0, width: 30, height: 20,
+        sha256: snap.get("raw_sha256").unwrap().as_str().unwrap().into(), is_dark_mode: false, composite: true, notice: None });
+    let candidate = Candidate::Pdf(page);
+    let entry = Entry { source: Source(vec![Val::s("synthetic")]), pages: vec![], candidates: BTreeMap::from([(0, candidate.clone())]) };
+    let (e1, e2) = (entry.clone(), entry.clone());
+    let env = TestEnv::new(Some(dir.path()), false);
+    *env.download.lock().unwrap() = Some(Box::new(|_, _, _, _, _| Err(Fail::os("synthetic network error"))));
+    let manager = PreviewManager::with_options(store, env, PreviewOptions {
+        entry_hook: Some(Arc::new(move |_| Ok(e1.clone()))),
+        source_hook: Some(Arc::new(move |_| Ok(e2.source.clone()))), ..Default::default()
+    }).unwrap();
+    let path = manager.path(&candidate).unwrap();
+    let standin = png(30, 20, &[0xff; 30 * 20 * 4]);
+    std::fs::write(path.with_extension("partial.png"), &standin).unwrap();
+    assert_eq!(manager.request(&id, 0, 0, 0.0).unwrap(), Some(standin.clone()));
+    assert!(manager.wait_idle(Some(Duration::from_secs(10))));
+    let job = manager.job(&path.file_name().unwrap().to_string_lossy()).unwrap();
+    assert_eq!(job.state, JobState::Ready);
+    assert!(job.retry_after.unwrap().saturating_duration_since(std::time::Instant::now()) > Duration::from_secs(590));
+    assert_eq!(manager.request(&id, 0, 0, 0.0).unwrap(), Some(standin));
+    manager.close();
+}
+
+#[test]
+fn broken_pdf_overlay_decode_keeps_standin_and_retries_for_new_source() {
+    use notes_preview::ink::{InkBackend, InkPage};
+    use notes_preview::manager::InkGeometryPreview;
+    struct Local;
+    impl InkBackend for Local {
+        fn provider_available(&self) -> bool { true }
+        fn inspect_render_pages(&self, _: &Val) -> Vec<InkPage> { vec![] }
+        fn render_ink_page(&self, _: &Val, _: i64) -> Result<Vec<u8>, Fail> {
+            Ok(png(30, 20, &[0xff; 30 * 20 * 4]))
+        }
+    }
+    if !pdf::pdf_provider_available() { return; }
+    let dir = TempDir::new();
+    let store = store(dir.path());
+    let snap = snapshot(b"synthetic note", "application/xml");
+    let id = note_with_document(&store, &snap);
+    let mut page = cand(0, 1, (2, 3, 22, 13));
+    let mut overlay = candidate(b"broken synthetic overlay");
+    overlay.width = 30; overlay.height = 20;
+    page.overlay = Some(overlay);
+    page.local_ink = Some(InkGeometryPreview { page_index: 0, width: 30, height: 20,
+        sha256: snap.get("raw_sha256").unwrap().as_str().unwrap().into(), is_dark_mode: false, composite: false, notice: None });
+    let candidate = Candidate::Pdf(page.clone());
+    let current = Arc::new(Mutex::new(Source(vec![Val::s("source-1")])));
+    let (entry_source, source, entry_candidate) = (current.clone(), current.clone(), candidate.clone());
+    let decodes = Arc::new(AtomicUsize::new(0)); let count = decodes.clone();
+    let manager = PreviewManager::with_options(store, TestEnv::new(Some(dir.path()), false), PreviewOptions {
+        ink: Some(Arc::new(Local)),
+        fetcher: Some(Arc::new(|_, _, _| Ok(b"broken synthetic overlay".to_vec()))),
+        decoder: Some(Arc::new(move |_, _| { count.fetch_add(1, Ordering::SeqCst); Err(Fail::new(Kind::Preview, "bad synthetic overlay")) })),
+        entry_hook: Some(Arc::new(move |_| Ok(Entry { source: entry_source.lock().unwrap().clone(), pages: vec![],
+            candidates: BTreeMap::from([(0, entry_candidate.clone())]) }))),
+        source_hook: Some(Arc::new(move |_| Ok(source.lock().unwrap().clone()))), ..Default::default()
+    }).unwrap();
+    pdf::fetch_pdf_with(&page, &|| Ok(vec![]), &manager.directory().join("pdf-files"), "offline", None,
+                        &|_, _, path, _, _| write_pdf(path)).unwrap();
+    let standin = png(30, 20, &[0xff; 30 * 20 * 4]);
+    let path = manager.path(&candidate).unwrap();
+    std::fs::write(path.with_extension("local.png"), &standin).unwrap();
+    assert_eq!(manager.request(&id, 0, 0, 0.0).unwrap(), Some(standin.clone()));
+    assert!(manager.wait_idle(Some(Duration::from_secs(10))));
+    assert_eq!(decodes.load(Ordering::SeqCst), 1);
+    for _ in 0..3 { assert_eq!(manager.request(&id, 0, 0, 0.0).unwrap(), Some(standin.clone())); }
+    assert!(manager.wait_idle(Some(Duration::from_secs(5))));
+    assert_eq!(decodes.load(Ordering::SeqCst), 1);
+    *current.lock().unwrap() = Source(vec![Val::s("source-2")]);
+    assert_eq!(manager.request(&id, 0, 0, 0.0).unwrap(), Some(standin));
+    assert!(manager.wait_idle(Some(Duration::from_secs(10))));
+    assert_eq!(decodes.load(Ordering::SeqCst), 2);
+    manager.close();
+}
+
+#[test]
+fn pdf_source_change_during_ink_failure_requeues_without_memoizing() {
+    use notes_preview::ink::{InkBackend, InkPage};
+    use notes_preview::manager::InkGeometryPreview;
+    use std::sync::mpsc;
+    struct Changes {
+        calls: Arc<AtomicUsize>, entered: mpsc::Sender<()>, release: Mutex<mpsc::Receiver<()>>,
+    }
+    impl InkBackend for Changes {
+        fn provider_available(&self) -> bool { true }
+        fn inspect_render_pages(&self, _: &Val) -> Vec<InkPage> { vec![] }
+        fn render_ink_page(&self, _: &Val, _: i64) -> Result<Vec<u8>, Fail> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.entered.send(()).unwrap();
+                self.release.lock().unwrap().recv_timeout(Duration::from_secs(10)).unwrap();
+                return Err(Fail::new(Kind::InkRender, "synthetic refusal on old source"));
+            }
+            Ok(png(30, 20, &[0xff; 30 * 20 * 4]))
+        }
+    }
+    if !pdf::pdf_provider_available() { return; }
+    let dir = TempDir::new(); let store = store(dir.path());
+    let snap = snapshot(b"synthetic note", "application/xml"); let id = note_with_document(&store, &snap);
+    let mut page = cand(0, 1, (2, 3, 22, 13));
+    page.local_ink = Some(InkGeometryPreview { page_index: 0, width: 30, height: 20,
+        sha256: snap.get("raw_sha256").unwrap().as_str().unwrap().into(), is_dark_mode: false, composite: false, notice: None });
+    let candidate = Candidate::Pdf(page.clone());
+    let current = Arc::new(Mutex::new(Source(vec![Val::s("source-1")])));
+    let (entry_source, source, entry_candidate) = (current.clone(), current.clone(), candidate.clone());
+    let calls = Arc::new(AtomicUsize::new(0)); let (entered_tx, entered_rx) = mpsc::channel(); let (release_tx, release_rx) = mpsc::channel();
+    let manager = PreviewManager::with_options(store, TestEnv::new(Some(dir.path()), false), PreviewOptions {
+        ink: Some(Arc::new(Changes { calls: calls.clone(), entered: entered_tx, release: Mutex::new(release_rx) })),
+        entry_hook: Some(Arc::new(move |_| Ok(Entry { source: entry_source.lock().unwrap().clone(), pages: vec![],
+            candidates: BTreeMap::from([(0, entry_candidate.clone())]) }))),
+        source_hook: Some(Arc::new(move |_| Ok(source.lock().unwrap().clone()))), ..Default::default()
+    }).unwrap();
+    pdf::fetch_pdf_with(&page, &|| Ok(vec![]), &manager.directory().join("pdf-files"), "offline", None,
+                        &|_, _, path, _, _| write_pdf(path)).unwrap();
+    let standin = png(30, 20, &[0xff; 30 * 20 * 4]);
+    let path = manager.path(&candidate).unwrap(); std::fs::write(path.with_extension("partial.png"), &standin).unwrap();
+    assert_eq!(manager.request(&id, 0, 0, 0.0).unwrap(), Some(standin));
+    entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    *current.lock().unwrap() = Source(vec![Val::s("source-2")]);
+    release_tx.send(()).unwrap();
+    assert!(manager.wait_idle(Some(Duration::from_secs(10))));
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "new source must be retried immediately");
+    assert!(path.exists(), "new source should produce the full image");
+    manager.close();
 }

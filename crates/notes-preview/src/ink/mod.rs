@@ -83,6 +83,20 @@ pub(crate) fn measure<T>(stage: usize, f: impl FnOnce() -> T) -> T {
     result
 }
 
+fn renderer_error(message: &str) -> Fail {
+    if message == "Çizim görüntüleme süresi doldu." {
+        coded_ink_render(UNSAFE, "ink_renderer_timeout")
+    } else {
+        ink_render(UNSAFE)
+    }
+}
+
+fn coded_ink_render(message: &str, code: &str) -> Fail {
+    let mut error = ink_render(message);
+    error.code = code.into();
+    error
+}
+
 /// Hidden argv[1] of the self-exec preparation child.
 pub const CHILD_FLAG: &str = "__notes-ink-render-job";
 pub const MAX_SVG: usize = 16 * 1024 * 1024;
@@ -286,13 +300,13 @@ impl NativeInk {
             return measure_png(|| px::rgba_png(width, height, &pixels)).map_err(|_| ink_render(px::FilteredError::Format.message()));
         }
         if !self.provider_available() {
-            return Err(ink_render("Çizim görüntüleyicisi bu cihazda hazır değil."));
+            return Err(coded_ink_render("Çizim görüntüleyicisi bu cihazda hazır değil.", "ink_renderer_unavailable"));
         }
         let binary = self.renderer();
         let (width, height) = (page.width, page.height);
-        let svg = measure_renderer(|| rs_render::ink_render::run_renderer(&binary, false, body, MAX_SVG)).map_err(|_| ink_render(UNSAFE))?;
+        let svg = measure_renderer(|| rs_render::ink_render::run_renderer(&binary, false, body, MAX_SVG)).map_err(renderer_error)?;
         let pixels = if std::env::var("SAMSUNG_NOTES_INK_RASTER").is_ok_and(|v| v == "rsvg") {
-            let png = measure_renderer(|| rs_render::ink_render::run_renderer(&sandbox::rsvg_path(), true, svg, MAX_PNG)).map_err(|_| ink_render(UNSAFE))?;
+            let png = measure_renderer(|| rs_render::ink_render::run_renderer(&sandbox::rsvg_path(), true, svg, MAX_PNG)).map_err(renderer_error)?;
             px::unfilter_png(&png, width, height, MAX_PNG).map_err(|e| match e {
                 px::FilteredError::Invalid => ink_render(UNSAFE),
                 other => ink_render(other.message()),
@@ -674,7 +688,7 @@ fn start_note_child(exe: &Path, data: Vec<u8>, wanted: i64, slot: Slot, key: Slo
     let (tx, rx) = std::sync::mpsc::channel::<i64>();
     {
         let mut state = slot.0.lock().unwrap();
-        if state.done { drop(state); let _ = child.kill(); let _ = child.wait(); return Err(ink_render(NOT_PREPARED)); }
+        if state.done { drop(state); let _ = child.kill(); let _ = child.wait(); return Err(coded_ink_render(NOT_PREPARED, "ink_prepare_unavailable")); }
         state.sender = Some(tx.clone());
         while let Some(index) = state.pending.pop_front() { let _ = tx.send(index); }
     }
@@ -842,7 +856,7 @@ fn finish_page(key: SlotKey, slot: Slot, index: i64) -> Result<(InkPage, Vec<u8>
                 Some(Lookup::Inventory(Some(raw))) => raw,
                 None => {
                     forget_note(key);
-                    return Err(ink_render(TIMED_OUT));
+                    return Err(coded_ink_render(TIMED_OUT, "ink_prepare_timeout"));
                 }
                 _ => {
                     forget_note(key);
@@ -869,9 +883,9 @@ fn finish_page(key: SlotKey, slot: Slot, index: i64) -> Result<(InkPage, Vec<u8>
         },
         None => {
             forget_note(key);
-            Err(ink_render(TIMED_OUT))
+            Err(coded_ink_render(TIMED_OUT, "ink_prepare_timeout"))
         }
-        _ => Err(ink_render(NOT_PREPARED)),
+        _ => Err(coded_ink_render(NOT_PREPARED, "ink_prepare_unavailable")),
     }
 }
 

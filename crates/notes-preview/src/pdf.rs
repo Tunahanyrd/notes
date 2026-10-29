@@ -177,6 +177,11 @@ pub fn render_pdf_background(path: &Path, candidate: &PdfBackground) -> Result<V
         .map_err(|e| match e {
             rp::RenderError::Message(m) => pdf(m),
             rp::RenderError::Generic => pdf(PDF_DEFAULT),
+            rp::RenderError::Refused => {
+                let mut error = pdf("PDF sayfası güvenle açılamadı.");
+                error.code = "pdf_render_refused".into();
+                error
+            }
             rp::RenderError::Encode(m) => Fail::value(m),
         })?;
     px::rgba_png(candidate.width, candidate.height, &pixels).map_err(Fail::value)

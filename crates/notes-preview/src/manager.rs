@@ -244,9 +244,13 @@ struct State {
     entries: Vec<(String, Arc<Entry>)>,
     /// Insertion-ordered `self.jobs`; replacing a key keeps its position.
     jobs: Vec<(String, Job)>,
+    job_sources: BTreeMap<String, (Source, Candidate)>,
     workers: usize,
     decode_failures: BTreeSet<String>,
     download_failures: BTreeSet<String>,
+    /// Deterministic PDF full-image failures for each note/source. Old
+    /// sources are discarded when the note's source changes.
+    pdf_failures: BTreeMap<String, Vec<(String, Source, [u8; 32])>>,
     partial_canvas: BTreeSet<String>,
     retry_counts: BTreeMap<String, u32>,
     snapshots: Vec<(String, Source, Arc<Val>, usize, Option<Arc<BTreeMap<String, String>>>)>,
@@ -268,6 +272,36 @@ impl State {
     }
     fn pop_job(&mut self, key: &str) {
         self.jobs.retain(|(k, _)| k != key);
+        self.job_sources.remove(key);
+    }
+    fn discard_stale_job(&mut self, identity: &str, key: &str, source: &Source, candidate: &Candidate) {
+        if let Some(failures) = self.pdf_failures.get_mut(identity) {
+            failures.retain(|(_, old_source, _)| old_source == source);
+            if failures.is_empty() { self.pdf_failures.remove(identity); }
+        }
+        if self.job_sources.get(key).is_some_and(|(old_source, old_candidate)| old_source != source || old_candidate != candidate) {
+            self.pop_job(key);
+            self.retry_counts.remove(key);
+        }
+    }
+    fn retry_standin(&self, identity: &str, key: &str, source: &Source, candidate: &Candidate, now: Instant) -> bool {
+        let deterministic_failure = match candidate {
+            Candidate::Canvas(c) => self.decode_failures.contains(&decode_failure_key(key, c)) || self.download_failures.contains(&download_failure_key(key, c)),
+            Candidate::Pdf(_) => {
+                let failure_key = pdf_failure_key(key, candidate);
+                let fingerprint = pdf_candidate_fingerprint(candidate);
+                self.pdf_failures.get(identity).is_some_and(|failures| failures.iter().any(|(k, old_source, old_fingerprint)|
+                    *k == failure_key && old_source == source && *old_fingerprint == fingerprint))
+            },
+            _ => false,
+        };
+        !deterministic_failure && match self.job(key) {
+            None => true,
+            Some(job) => match job.state {
+                JobState::Pending | JobState::Running => false,
+                _ => job.retry_after.is_none_or(|t| now >= t),
+            },
+        }
     }
     /// Room for one more job at `priority`. A full queue must not turn away a
     /// more urgent request (the page on screen is 0, thumbnails 1, warm-up 2):
@@ -794,31 +828,15 @@ impl Inner {
         // page whose cache could not be fetched/decoded, or a composite whose
         // pictures were not downloaded yet. It is returned at once; the full
         // image is retried in the background at most every RETRY_FULL.
-        let stand_in = match candidate {
-            Candidate::Canvas(_) => Some(local_path(&path)),
-            Candidate::Pdf(c) if c.overlay.is_some() && c.local_ink.is_some() => Some(local_path(&path)),
-            Candidate::Pdf(c) if c.local_ink.is_some() => Some(partial_path(&path)),
-            // Composites, and renderer-only pages whose renderer failed
-            // (forced composite stand-in).
-            Candidate::Ink(_) => Some(partial_path(&path)),
-            _ => None,
-        };
+        let stand_in = stand_in_path(candidate, &path);
         if let Some(stand_in) = &stand_in {
             if let Some(raw) = read_cached(stand_in, MAX_PNG as u64)? {
                 if crate::png_valid(&raw, candidate.width(), candidate.height()) {
                     let mut state = this.lock();
-                    let deterministic_failure = match candidate {
-                        Candidate::Canvas(c) => state.decode_failures.contains(&decode_failure_key(&key, c)) || state.download_failures.contains(&download_failure_key(&key, c)),
-                        _ => false,
-                    };
-                    let retry = !deterministic_failure && match state.job(&key) {
-                        None => true,
-                        Some(job) => match job.state {
-                            JobState::Pending | JobState::Running => false,
-                            _ => job.retry_after.is_none_or(|t| Instant::now() >= t),
-                        },
-                    };
+                    state.discard_stale_job(identity, &key, &entry.source, candidate);
+                    let retry = state.retry_standin(identity, &key, &entry.source, candidate, Instant::now());
                     if retry && this.connected() && state.jobs.iter().filter(|(_, j)| matches!(j.state, JobState::Pending | JobState::Running)).count() < MAX_QUEUED {
+                        state.job_sources.insert(key.clone(), (entry.source.clone(), candidate.clone()));
                         state.set_job(&key, Job { state: JobState::Pending, error: None, priority: priority.max(5), local_pdf: None,
                                                   retry_after: None, served: None, offline: false });
                         this.queue.put(this.queue_item(&key, identity, &entry.source, candidate, &path, priority.max(5), None));
@@ -829,6 +847,7 @@ impl Inner {
             }
         }
         let mut state = this.lock();
+        state.discard_stale_job(identity, &key, &entry.source, candidate);
         if let Some(job) = state.job(&key).cloned() {
             match job.state {
                 JobState::Pending | JobState::Running => {
@@ -872,9 +891,12 @@ impl Inner {
         }
         if state.jobs.len() >= 4 * MAX_QUEUED {
             if let Some(at) = state.jobs.iter().position(|(_, j)| !matches!(j.state, JobState::Pending | JobState::Running)) {
-                state.jobs.remove(at);
+                let (old_key, _) = state.jobs.remove(at);
+                state.job_sources.remove(&old_key);
+                state.retry_counts.remove(&old_key);
             }
         }
+        state.job_sources.insert(key.clone(), (entry.source.clone(), candidate.clone()));
         state.set_job(&key, Job { state: JobState::Pending, error: None, priority, local_pdf: local_pdf.clone(), retry_after: None, served: None, offline: false });
         this.queue.put(this.queue_item(&key, identity, &entry.source, candidate, &path, priority, local_pdf));
         Inner::spawn_workers(this, &mut state);
@@ -945,8 +967,9 @@ impl Inner {
             let Some(item) = self.queue.get(Duration::from_millis(500), foreground_only) else { continue };
             {
                 let mut state = self.lock();
+                let same_source = state.job_sources.get(&item.key).is_some_and(|(source, candidate)| *source == item.source && *candidate == item.candidate);
                 match state.job_mut(&item.key) {
-                    Some(job) if job.state == JobState::Pending && job.priority == item.priority => job.state = JobState::Running,
+                    Some(job) if same_source && job.state == JobState::Pending && job.priority == item.priority => job.state = JobState::Running,
                     _ => {
                         drop(state);
                         self.queue.task_done();
@@ -961,16 +984,39 @@ impl Inner {
             crate::ink::take_stage_times();
             crate::ink::take_detail_times();
             let mut stages = Stages::default();
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.process(&item, &mut stages)))
+            let mut result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.process(&item, &mut stages)))
                 .unwrap_or_else(|_| Err(Fail::os("preview worker panicked")));
+            if result.is_err() && !self.stop.load(AtomicOrdering::SeqCst)
+                && (self.env.session_path() != item.session
+                    || self.source(&item.identity).is_ok_and(|source| source != item.source))
+            {
+                result = Err(Fail::store("preview_source_changed", "Not veya hesap değişti.", 409));
+            }
+            if matches!(&item.candidate, Candidate::Pdf(_)) {
+                if let Err(e) = &mut result {
+                    if e.kind == Kind::InkRender && e.code.is_empty() { e.code = "pdf_ink_render".into(); }
+                }
+            }
             (stages.renderer, stages.png) = crate::ink::take_stage_times();
             stages.detail = crate::ink::take_detail_times();
             timing(&item, started, &result, &stages);
+            let deterministic_pdf_error = matches!(&item.candidate, Candidate::Pdf(_))
+                && result.as_ref().is_err_and(deterministic_pdf_failure)
+                && !self.stop.load(AtomicOrdering::SeqCst)
+                && self.env.session_path() == item.session
+                && self.source(&item.identity).is_ok_and(|source| source == item.source);
+            let retry_standin = if item.priority >= 5 && matches!(&item.candidate, Candidate::Pdf(_)) && result.is_err() {
+                stand_in_path(&item.candidate, &item.path).filter(|path| {
+                    read_cached(path, MAX_PNG as u64).ok().flatten()
+                        .is_some_and(|raw| crate::png_valid(&raw, item.candidate.width(), item.candidate.height()))
+                })
+            } else { None };
             {
                 let mut state = self.lock();
                 // A foreground request can supersede a running background job.
                 // Its completion must not replace the newer job record.
-                if !state.job(&item.key).is_some_and(|job| job.state == JobState::Running && job.priority == item.priority) {
+                if !state.job(&item.key).is_some_and(|job| job.state == JobState::Running && job.priority == item.priority)
+                    || !state.job_sources.get(&item.key).is_some_and(|(source, candidate)| *source == item.source && *candidate == item.candidate) {
                     drop(state);
                     self.queue.task_done();
                     continue;
@@ -991,18 +1037,22 @@ impl Inner {
                     self.queue.task_done();
                     continue;
                 }
+                if deterministic_pdf_error { remember_pdf_failure(&mut state, &item); }
                 let start_full = item.priority <= 0 && self.connected() && matches!(&item.candidate, Candidate::Canvas(_))
                     && matches!(&result, Ok(Some(_)));
                 let job = match result {
                     Ok(None) => { state.retry_counts.remove(&item.key); Job { state: JobState::Ready, error: None, priority: 0, local_pdf: None, retry_after: None, served: None, offline: false } },
                     // Served by a stand-in: retry the full image later only.
                     Ok(Some(served)) => {
-                        let count = state.retry_counts.entry(item.key.clone()).or_default();
-                        let delay = RETRY_FULL.saturating_mul(1u32 << (*count).min(6));
-                        *count = count.saturating_add(1);
+                        let delay = next_retry_delay(&mut state, &item.key);
                         Job { state: JobState::Ready, error: None, priority: 0, local_pdf: None,
                               retry_after: Some(Instant::now() + delay), served: Some(served), offline: false }
                     },
+                    Err(_) if retry_standin.is_some() => {
+                        let delay = next_retry_delay(&mut state, &item.key);
+                        Job { state: JobState::Ready, error: None, priority: 0, local_pdf: None,
+                              retry_after: Some(Instant::now() + delay), served: retry_standin, offline: false }
+                    }
                     Err(e) => {
                         let known = e.kind == Kind::Preview || e.kind == Kind::PdfBackground || e.is_api() || e.is_store();
                         let offline = e.is_store() && e.code == "preview_offline";
@@ -1099,13 +1149,20 @@ impl Inner {
                 match native {
                     Ok(Some(layered)) => png = layered,
                     Err(e) => {
+                        if e.code == "preview_source_changed" { return Err(e); }
+                        guard()?;
+                        let deterministic_overlay = deterministic_pdf_overlay_failure(&e);
+                        if deterministic_overlay { remember_pdf_failure(&mut self.lock(), item); }
                         // Samsung's layer is unavailable: the local layer stands in.
                         let Some(local) = &c.local_ink else { return Err(e) };
                         let snapshot = self.snapshot(&item.identity)?;
                         if !snapshot.get("raw_sha256").is_some_and(|v| py_eq(v, &Val::s(local.sha256.clone()))) {
-                            return Err(e);
+                            return Err(Fail::store("preview_source_changed", "Not değişti.", 409));
                         }
-                        let (layered, _) = self.render_local_over(&item.identity, local, &snapshot, &guard, Some(png), true, item.priority)?;
+                        let (layered, _) = match self.render_local_over(&item.identity, local, &snapshot, &guard, Some(png), true, item.priority) {
+                            Ok(rendered) => rendered,
+                            Err(error) => { guard()?; return Err(overlay_fallback_error(error, deterministic_overlay)); }
+                        };
                         let stand_in = local_path(&item.path);
                         guard()?;
                         Inner::cache_png(&stand_in, &layered, width, height, &guard)?;
@@ -1222,9 +1279,28 @@ impl Inner {
                 if self.env.offline() || self.env.session_path().is_none() {
                     return Err(preview("Bu sayfanın çizim katmanı henüz çevrimdışı kullanılabilir değil."));
                 }
+                if overlay.download_url.as_deref().is_none_or(str::is_empty) {
+                    let mut error = preview("Bu sayfanın çizim katmanı bulunamadı.");
+                    error.code = "pdf_overlay_missing".into();
+                    return Err(error);
+                }
                 let raw = (self.fetcher)(overlay, self.env.as_ref(), guard)?;
                 guard()?;
-                let layer = (self.decoder)(&raw, (c.width, c.height))?;
+                let layer = match (self.decoder)(&raw, (c.width, c.height)) {
+                    Ok(layer) => layer,
+                    Err(mut e) => {
+                        guard()?;
+                        if !e.is_os() && !e.is_api() && !e.is_store() {
+                            e.code = "pdf_overlay_decode".into();
+                        }
+                        return Err(e);
+                    }
+                };
+                if !crate::png_valid(&layer, c.width, c.height) {
+                    let mut error = preview("Sayfa görüntüsünün boyutu doğrulanamadı.");
+                    error.code = "pdf_overlay_decode".into();
+                    return Err(error);
+                }
                 // Keep the verified native layer as well as the composite: the
                 // offline inventory then selects the same complete recipe after
                 // a restart.
@@ -1233,7 +1309,10 @@ impl Inner {
             }
         };
         guard()?;
-        pdf::compose_pdf_canvas(png, &layer, c.width, c.height)
+        pdf::compose_pdf_canvas(png, &layer, c.width, c.height).map_err(|mut e| {
+            e.code = "pdf_overlay_compose".into();
+            e
+        })
     }
 
     /// This connection only observes commits; StoreCore opens separate
@@ -1470,6 +1549,57 @@ impl Inner {
     }
 }
 
+fn next_retry_delay(state: &mut State, key: &str) -> Duration {
+    let count = state.retry_counts.entry(key.to_string()).or_default();
+    let delay = RETRY_FULL.saturating_mul(1u32 << (*count).min(6));
+    *count = count.saturating_add(1);
+    delay
+}
+
+fn stand_in_path(candidate: &Candidate, path: &Path) -> Option<PathBuf> {
+    match candidate {
+        Candidate::Canvas(_) => Some(local_path(path)),
+        Candidate::Pdf(c) if c.overlay.is_some() && c.local_ink.is_some() => Some(local_path(path)),
+        Candidate::Pdf(c) if c.local_ink.is_some() => Some(partial_path(path)),
+        Candidate::Ink(_) => Some(partial_path(path)),
+        _ => None,
+    }
+}
+
+fn pdf_failure_key(key: &str, candidate: &Candidate) -> String {
+    format!("{key}:{}:{}", candidate.width(), candidate.height())
+}
+
+fn deterministic_pdf_overlay_failure(error: &Fail) -> bool {
+    matches!(error.code.as_str(), "pdf_overlay_missing" | "pdf_overlay_decode" | "pdf_overlay_compose")
+}
+
+fn overlay_fallback_error(mut error: Fail, deterministic_overlay: bool) -> Fail {
+    if !deterministic_overlay && error.kind == Kind::InkRender {
+        // A local renderer failure does not make the native overlay's network
+        // error permanent: that overlay may become available on a later retry.
+        error.code = "pdf_overlay_network".into();
+    }
+    error
+}
+
+fn deterministic_pdf_failure(error: &Fail) -> bool {
+    deterministic_pdf_overlay_failure(error) || error.code == "pdf_render_refused"
+        || (error.kind == Kind::InkRender && !matches!(error.code.as_str(), "ink_prepare_timeout" | "ink_prepare_unavailable" | "ink_renderer_timeout" | "ink_renderer_unavailable" | "pdf_overlay_network"))
+}
+
+fn pdf_candidate_fingerprint(candidate: &Candidate) -> [u8; 32] {
+    util::sha256(format!("{candidate:?}").as_bytes())
+}
+
+fn remember_pdf_failure(state: &mut State, item: &QueueItem) {
+    let key = pdf_failure_key(&item.key, &item.candidate);
+    let fingerprint = pdf_candidate_fingerprint(&item.candidate);
+    let failures = state.pdf_failures.entry(item.identity.clone()).or_default();
+    failures.retain(|(old_key, source, old)| *source == item.source && !(old_key == &key && *old == fingerprint));
+    failures.push((key, item.source.clone(), fingerprint));
+}
+
 fn download_failure_key(key: &str, c: &CanvasPreviewCandidate) -> String {
     format!("{key}:{}", util::sha256_hex(c.download_url.as_deref().unwrap_or("").as_bytes()))
 }
@@ -1582,6 +1712,185 @@ mod queue_tests {
     }
 
     #[test]
+    fn pdf_failure_memo_blocks_due_retry_only_for_matching_source_and_candidate() {
+        let candidate = Candidate::Pdf(PdfBackground {
+            page_index: 0, pdf_page_index: 0, width: 30, height: 20, rect: (0, 0, 30, 20), annotation_objects: 1,
+            sha256: "a".repeat(64), download_url: None, overlay: None, local_ink: None,
+        });
+        let source = Source(vec![Val::s("source-1")]);
+        let item = QueueItem { priority: 5, sequence: 0, key: "synthetic-key".into(), identity: "synthetic".into(),
+            source: source.clone(), candidate: candidate.clone(), path: PathBuf::from("synthetic.png"), session: None,
+            local_pdf: None, queued: Instant::now() };
+        let mut state = State::default();
+        let mut ready = job(JobState::Ready, 0);
+        ready.retry_after = Some(Instant::now() - Duration::from_secs(1));
+        state.set_job(&item.key, ready);
+        assert!(state.retry_standin(&item.identity, &item.key, &source, &candidate, Instant::now()));
+        remember_pdf_failure(&mut state, &item);
+        assert!(!state.retry_standin(&item.identity, &item.key, &source, &candidate, Instant::now()), "expired delay must not restart a deterministic failure");
+        for index in 0..=4 * MAX_QUEUED {
+            let another = QueueItem { priority: 5, sequence: index as u64, key: format!("key-{index}"),
+                identity: format!("note-{index}"), source: source.clone(), candidate: candidate.clone(),
+                path: PathBuf::from("synthetic.png"), session: None, local_pdf: None, queued: Instant::now() };
+            remember_pdf_failure(&mut state, &another);
+        }
+        assert!(!state.retry_standin(&item.identity, &item.key, &source, &candidate, Instant::now()),
+                "unrelated failures must not evict a deterministic result");
+        assert!(state.retry_standin(&item.identity, &item.key, &Source(vec![Val::s("source-2")]), &candidate, Instant::now()));
+        let mut changed = candidate.clone();
+        if let Candidate::Pdf(pdf) = &mut changed { pdf.width = 31; }
+        assert!(state.retry_standin(&item.identity, &item.key, &source, &changed, Instant::now()));
+        let mut network = Fail::new(Kind::PdfBackground, "synthetic network error");
+        network.code = "link_expired".into();
+        assert!(!deterministic_pdf_failure(&network));
+        assert!(!deterministic_pdf_failure(&Fail::store("preview_source_changed", "changed", 409)));
+        let mut timeout = Fail::new(Kind::InkRender, "timeout"); timeout.code = "ink_prepare_timeout".into();
+        assert!(!deterministic_pdf_failure(&timeout));
+        let transient_fallback = overlay_fallback_error(Fail::new(Kind::InkRender, "renderer failed"), false);
+        assert_eq!(transient_fallback.code, "pdf_overlay_network");
+        assert!(!deterministic_pdf_failure(&transient_fallback));
+        assert!(deterministic_pdf_failure(&overlay_fallback_error(Fail::new(Kind::InkRender, "renderer failed"), true)));
+        let mut decoder = Fail::new(Kind::Preview, "bad image"); decoder.code = "pdf_overlay_decode".into();
+        assert!(deterministic_pdf_failure(&decoder));
+        decoder.code = "pdf_overlay_missing".into();
+        assert!(deterministic_pdf_failure(&decoder));
+    }
+
+    #[test]
+    fn bad_pdf_overlay_is_not_downloaded_again_after_backoff_expires() {
+        use crate::ink::{InkBackend, InkPage};
+        use crate::test_common::{candidate, note_with_document, pdf_fixture, png, snapshot, store, TempDir, TestEnv};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct Local;
+        impl InkBackend for Local {
+            fn provider_available(&self) -> bool { true }
+            fn inspect_render_pages(&self, _: &Val) -> Vec<InkPage> { vec![] }
+            fn render_ink_page(&self, _: &Val, _: i64) -> Result<Vec<u8>, Fail> { Ok(png(30, 20, &[255; 30 * 20 * 4])) }
+        }
+        if !pdf::pdf_provider_available() { return; }
+        let dir = TempDir::new(); let store = store(dir.path());
+        let snap = snapshot(b"synthetic note", "application/xml"); let id = note_with_document(&store, &snap);
+        let mut overlay = candidate(b"invalid synthetic overlay"); overlay.width = 30; overlay.height = 20;
+        let page = PdfBackground { page_index: 0, pdf_page_index: 0, width: 30, height: 20, rect: (2, 3, 22, 13), annotation_objects: 1,
+            sha256: crate::test_common::sha256_hex(&pdf_fixture()), download_url: Some(crate::test_common::URL.into()),
+            overlay: Some(overlay), local_ink: Some(InkGeometryPreview { page_index: 0, width: 30, height: 20,
+                sha256: snap.get("raw_sha256").unwrap().as_str().unwrap().into(), is_dark_mode: false, composite: false, notice: None }) };
+        let candidate = Candidate::Pdf(page.clone());
+        let source = Arc::new(Mutex::new(Source(vec![Val::s("old")])));
+        let (entry_source, current, selected) = (source.clone(), source.clone(), candidate.clone());
+        let calls = Arc::new(AtomicUsize::new(0)); let count = calls.clone();
+        let manager = PreviewManager::with_options(store, TestEnv::new(Some(dir.path()), false), PreviewOptions {
+            ink: Some(Arc::new(Local)),
+            fetcher: Some(Arc::new(move |_, _, _| { count.fetch_add(1, Ordering::SeqCst); Ok(b"invalid synthetic overlay".to_vec()) })),
+            decoder: Some(Arc::new(|_, _| Err(preview("unsupported synthetic overlay")))),
+            entry_hook: Some(Arc::new(move |_| Ok(Entry { source: entry_source.lock().unwrap().clone(), pages: vec![],
+                candidates: BTreeMap::from([(0, selected.clone())]) }))),
+            source_hook: Some(Arc::new(move |_| Ok(current.lock().unwrap().clone()))), ..Default::default()
+        }).unwrap();
+        pdf::fetch_pdf_with(&page, &|| Ok(vec![]), &manager.directory().join("pdf-files"), "offline", None,
+            &|_, _, path, _, _| { std::fs::write(path, pdf_fixture()).unwrap(); Ok((200, None)) }).unwrap();
+        let path = manager.path(&candidate).unwrap(); let key = path.file_name().unwrap().to_string_lossy().into_owned();
+        let standin = png(30, 20, &[255; 30 * 20 * 4]); std::fs::write(path.with_extension("local.png"), &standin).unwrap();
+        assert_eq!(manager.request(&id, 0, 0, 0.0).unwrap(), Some(standin.clone()));
+        assert!(manager.wait_idle(Some(Duration::from_secs(10))));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        {
+            let mut state = manager.inner.lock();
+            assert!(state.pdf_failures.contains_key(&id));
+            state.job_mut(&key).unwrap().retry_after = Some(Instant::now() - Duration::from_secs(1));
+        }
+        assert_eq!(manager.request(&id, 0, 0, 0.0).unwrap(), Some(standin.clone()));
+        assert!(manager.wait_idle(Some(Duration::from_secs(5))));
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "deterministic decode failure must not be retried");
+        *source.lock().unwrap() = Source(vec![Val::s("new")]);
+        assert_eq!(manager.request(&id, 0, 0, 0.0).unwrap(), Some(standin));
+        assert!(manager.wait_idle(Some(Duration::from_secs(10))));
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "a new source must permit retry");
+        manager.close();
+    }
+
+    #[test]
+    fn network_overlay_failure_and_ink_refusal_still_retry() {
+        use crate::ink::{InkBackend, InkPage};
+        use crate::test_common::{candidate, note_with_document, pdf_fixture, png, snapshot, store, TempDir, TestEnv};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct Refused;
+        impl InkBackend for Refused {
+            fn provider_available(&self) -> bool { true }
+            fn inspect_render_pages(&self, _: &Val) -> Vec<InkPage> { vec![] }
+            fn render_ink_page(&self, _: &Val, _: i64) -> Result<Vec<u8>, Fail> {
+                Err(Fail::new(Kind::InkRender, "local renderer refused"))
+            }
+        }
+        if !pdf::pdf_provider_available() { return; }
+        let dir = TempDir::new(); let store = store(dir.path());
+        let snap = snapshot(b"synthetic note", "application/xml"); let id = note_with_document(&store, &snap);
+        let mut overlay = candidate(b"synthetic overlay"); overlay.width = 30; overlay.height = 20;
+        let page = PdfBackground { page_index: 0, pdf_page_index: 0, width: 30, height: 20, rect: (2, 3, 22, 13), annotation_objects: 1,
+            sha256: crate::test_common::sha256_hex(&pdf_fixture()), download_url: Some(crate::test_common::URL.into()),
+            overlay: Some(overlay), local_ink: Some(InkGeometryPreview { page_index: 0, width: 30, height: 20,
+                sha256: snap.get("raw_sha256").unwrap().as_str().unwrap().into(), is_dark_mode: false, composite: false, notice: None }) };
+        let candidate = Candidate::Pdf(page.clone());
+        let entry = Entry { source: Source(vec![Val::s("synthetic")]), pages: vec![], candidates: BTreeMap::from([(0, candidate.clone())]) };
+        let (e1, e2) = (entry.clone(), entry.clone());
+        let calls = Arc::new(AtomicUsize::new(0)); let count = calls.clone();
+        let manager = PreviewManager::with_options(store, TestEnv::new(Some(dir.path()), false), PreviewOptions {
+            ink: Some(Arc::new(Refused)),
+            fetcher: Some(Arc::new(move |_, _, _| {
+                if count.fetch_add(1, Ordering::SeqCst) == 0 { Err(Fail::os("synthetic network")) }
+                else { Ok(b"synthetic overlay".to_vec()) }
+            })),
+            decoder: Some(Arc::new(|_, _| Ok(png(30, 20, &[0; 30 * 20 * 4])))),
+            entry_hook: Some(Arc::new(move |_| Ok(e1.clone()))),
+            source_hook: Some(Arc::new(move |_| Ok(e2.source.clone()))), ..Default::default()
+        }).unwrap();
+        pdf::fetch_pdf_with(&page, &|| Ok(vec![]), &manager.directory().join("pdf-files"), "offline", None,
+            &|_, _, path, _, _| { std::fs::write(path, pdf_fixture()).unwrap(); Ok((200, None)) }).unwrap();
+        let path = manager.path(&candidate).unwrap(); let key = path.file_name().unwrap().to_string_lossy().into_owned();
+        let standin = png(30, 20, &[0xff; 30 * 20 * 4]); std::fs::write(path.with_extension("local.png"), &standin).unwrap();
+        assert_eq!(manager.request(&id, 0, 0, 0.0).unwrap(), Some(standin.clone()));
+        assert!(manager.wait_idle(Some(Duration::from_secs(10))));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        {
+            let mut state = manager.inner.lock();
+            assert!(!state.pdf_failures.contains_key(&id), "network failure must not become deterministic");
+            let job = state.job_mut(&key).unwrap();
+            assert_eq!(job.state, JobState::Ready);
+            job.retry_after = Some(Instant::now() - Duration::from_secs(1));
+        }
+        assert_eq!(manager.request(&id, 0, 0, 0.0).unwrap(), Some(standin));
+        assert!(manager.wait_idle(Some(Duration::from_secs(10))));
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "network recovery should retry the native overlay");
+        assert!(path.exists(), "recovered overlay should produce a full image");
+        manager.close();
+    }
+
+    #[test]
+    fn transient_retries_back_off_and_reset_for_a_new_source() {
+        let mut state = State::default();
+        assert_eq!(next_retry_delay(&mut state, "pdf"), RETRY_FULL);
+        assert_eq!(next_retry_delay(&mut state, "pdf"), RETRY_FULL * 2);
+        assert_eq!(next_retry_delay(&mut state, "pdf"), RETRY_FULL * 4);
+        let old = Source(vec![Val::s("old")]);
+        let new = Source(vec![Val::s("new")]);
+        let candidate = Candidate::Pdf(PdfBackground { page_index: 0, pdf_page_index: 0, width: 1, height: 1,
+            rect: (0, 0, 1, 1), annotation_objects: 1, sha256: "a".repeat(64), download_url: None, overlay: None, local_ink: None });
+        state.job_sources.insert("pdf".into(), (old, candidate.clone()));
+        state.set_job("pdf", job(JobState::Ready, 0));
+        state.discard_stale_job("synthetic", "pdf", &new, &candidate);
+        assert_eq!(next_retry_delay(&mut state, "pdf"), RETRY_FULL);
+    }
+
+    #[test]
+    fn timing_outcome_reports_only_a_safe_error_code() {
+        let mut error = Fail::new(Kind::InkRender, "private note content");
+        error.code = "pdf_ink_render".into();
+        assert_eq!(timing_outcome(&Err(error.clone())), "error:InkRender:pdf_ink_render");
+        error.code = "secret\"content".into();
+        assert_eq!(timing_outcome(&Err(error)), "error:InkRender:invalid_code");
+    }
+
+    #[test]
     fn refreshing_links_invalidates_snapshot_even_when_source_is_unchanged() {
         struct Refresh { store: Arc<StoreCore>, document: String }
         impl PreviewEnv for Refresh {
@@ -1646,6 +1955,22 @@ mod queue_tests {
 #[derive(Default)]
 struct Stages { download: Duration, decode: Duration, local: Duration, renderer: Duration, png: Duration, detail: [Duration; 19] }
 
+fn timing_error_code(code: &str) -> &str {
+    if code.len() <= 64 && code.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+        code
+    } else {
+        "invalid_code"
+    }
+}
+
+fn timing_outcome(result: &Result<Option<PathBuf>, Fail>) -> String {
+    match result {
+        Ok(None) => "ready".to_string(),
+        Ok(Some(_)) => "stand-in".to_string(),
+        Err(e) => format!("error:{:?}:{}", e.kind, timing_error_code(&e.code)),
+    }
+}
+
 fn timing(item: &QueueItem, started: Instant, result: &Result<Option<PathBuf>, Fail>, stages: &Stages) {
     let Some(file) = std::env::var_os("NOTES_PREVIEW_TIMING") else { return };
     let kind = match &item.candidate {
@@ -1653,11 +1978,7 @@ fn timing(item: &QueueItem, started: Instant, result: &Result<Option<PathBuf>, F
         Candidate::Pdf(_) => "pdf",
         Candidate::Ink(_) => "ink",
     };
-    let outcome = match result {
-        Ok(None) => "ready".to_string(),
-        Ok(Some(_)) => "stand-in".to_string(),
-        Err(e) => format!("error:{:?}", e.kind),
-    };
+    let outcome = timing_outcome(result);
     let line = format!("{{\"kind\":\"{kind}\",\"priority\":{},\"waitMs\":{},\"workMs\":{},\"downloadMs\":{},\"decodeMs\":{},\"localMs\":{},\"rendererMs\":{},\"pngEncodeMs\":{},\"snapshotMs\":{},\"inventoryMs\":{},\"bodyMs\":{},\"mediaMs\":{},\"compositeMs\":{},\"payloadMs\":{},\"cacheWriteMs\":{},\"rasterMs\":{},\"identityMs\":{},\"childSpawnMs\":{},\"childReadyMs\":{},\"childReadMs\":{},\"childJsonMs\":{},\"childSnapshotMs\":{},\"childVerifyMs\":{},\"childStrokeDecodeMs\":{},\"childInventoryMs\":{},\"childPageBuildMs\":{},\"childWriteMs\":{},\"outcome\":\"{outcome}\"}}\n",
         item.priority, started.duration_since(item.queued).as_millis(), started.elapsed().as_millis(),
         stages.download.as_millis(), stages.decode.as_millis(), stages.local.as_millis(), stages.renderer.as_millis(), stages.png.as_millis(),
