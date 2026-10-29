@@ -1,3 +1,4 @@
+import {chooseOption} from './select-helper';
 import {test,expect, type Page} from '@playwright/test';
 import {DEFAULT_SHORTCUTS} from '../src/useShortcuts';
 import {readFile} from 'node:fs/promises';
@@ -281,9 +282,9 @@ test('all pages stack like Samsung Notes: pending images poll, missing pages say
   await page.getByRole('button',{name:'Sayfalar',exact:true}).click();await expect(page.getByLabel('Gösterilen sayfa')).toBeFocused();
   await page.emulateMedia({media:'print'});await expect(page.locator('.page-navigation')).toBeHidden();await expect(page.locator('.page-sheet[data-page-index="0"] .page-image')).toBeVisible();await page.emulateMedia({media:'screen'});
   // A page note has no 'show text' mode: pages are the note.
-  await expect(page.getByRole('button',{name:'Metni göster',exact:true})).toHaveCount(0);await page.getByLabel('Gösterilen sayfa').selectOption('3');
+  await expect(page.getByRole('button',{name:'Metni göster',exact:true})).toHaveCount(0);await chooseOption(page,'Gösterilen sayfa','3');
   await expect(page.getByAltText('Notun 4. sayfası')).toBeVisible();await expect(page.getByText('Bu sayfadaki çizimler henüz gösterilemiyor; yalnızca PDF görünüyor.',{exact:true})).toBeVisible();
-  await expect(page.getByLabel('Gösterilen sayfa').locator('option')).toHaveCount(4);await expect(page.getByLabel('Gösterilen sayfa').locator('option[value="1"]')).toHaveJSProperty('disabled',true);
+  await page.getByLabel('Gösterilen sayfa').click();const pageOptions=page.getByRole('listbox',{name:'Gösterilen sayfa'});await expect(pageOptions.getByRole('option')).toHaveCount(4);await expect(pageOptions.locator('[role="option"][data-value="1"]')).toHaveAttribute('aria-disabled','true');await page.getByRole('combobox',{name:'Gösterilen sayfa'}).press('Escape');await expect(pageOptions).toHaveCount(0);
   await expect(page.locator('.page-sheet[data-page-index="3"]')).toHaveCSS('background-color','rgb(0, 0, 0)');await expect(page.locator('.page-sheet[data-page-index="0"]')).toHaveCSS('background-color','rgb(255, 255, 255)');
   const url=await page.getByAltText('Notun 4. sayfası').getAttribute('src');expect(url).toMatch(/^blob:/);
   await page.getByRole('button',{name:'Not listesine dön'}).click();
@@ -376,7 +377,7 @@ test('real rich editor selection, formatting, lists, history and revisioned API 
   await editor.locator('p').first().evaluate(element=>{const node=element.firstChild!;const range=document.createRange();range.setStart(node,0);range.setEnd(node,7);const selection=window.getSelection()!;selection.removeAllRanges();selection.addRange(range);});
   await page.getByRole('button',{name:'Kalın',exact:true}).click();await expect(page.getByRole('button',{name:'Kalın',exact:true})).toHaveAttribute('aria-pressed','true');
   await page.getByRole('button',{name:'İtalik',exact:true}).click();await page.getByRole('button',{name:'Yazı rengi 1',exact:true}).click();await page.getByRole('button',{name:'Vurgu rengi 2',exact:true}).click();
-  await page.getByLabel('Yazı boyutu').selectOption('17');await page.getByLabel('Yazı boyutu').selectOption('');await expect(editor.locator('[data-samsung-kind="fontSize"]')).toHaveCount(0);await page.getByLabel('Yazı boyutu').selectOption('17');await page.getByRole('button',{name:'Ortala',exact:true}).click();await page.getByRole('button',{name:'Onay kutusu',exact:true}).click();await page.getByRole('button',{name:'Girintiyi artır',exact:true}).click();
+  await chooseOption(page,'Yazı boyutu','17');await chooseOption(page,'Yazı boyutu','');await expect(editor.locator('[data-samsung-kind="fontSize"]')).toHaveCount(0);await chooseOption(page,'Yazı boyutu','17');await page.getByRole('button',{name:'Ortala',exact:true}).click();await page.getByRole('button',{name:'Onay kutusu',exact:true}).click();await page.getByRole('button',{name:'Girintiyi artır',exact:true}).click();
   await expect(editor.locator('p').first()).toHaveAttribute('data-native-bullet','check');await expect(editor.locator('p').first()).toHaveCSS('text-align','center');
   await page.getByRole('button',{name:'Geri al',exact:true}).click();await page.getByRole('button',{name:'Yinele',exact:true}).click();
   await page.keyboard.press('ControlOrMeta+s');await expect(page.getByText('Kaydedilmedi',{exact:true})).toHaveCount(0);expect(writes).toHaveLength(1);expect(writes[0]).not.toHaveProperty('body');expect(writes[0].expectedRevision).toBe(1);
@@ -480,9 +481,9 @@ test('device preferences hydrate before writes and serialize the latest user int
       const data=route.request().postDataJSON();writes.push(data);if(writes.length===1)await new Promise<void>(resolve=>{releaseWrite=resolve;});saved=data;return route.fulfill({json:saved});
     });
   });
-  await page.getByRole('button',{name:'Ayarlar',exact:true}).click();await page.getByRole('button',{name:'Liste',exact:true}).click();await page.getByLabel('Varsayılan yakınlaştırma').selectOption('125');expect(writes).toHaveLength(0);
+  await page.getByRole('button',{name:'Ayarlar',exact:true}).click();await page.getByRole('button',{name:'Liste',exact:true}).click();await chooseOption(page,'Varsayılan yakınlaştırma','125');expect(writes).toHaveLength(0);
   releaseRead();await expect.poll(()=>writes.length).toBe(1);expect(writes[0]).toEqual({version:1,theme:'system',darkPages:false,galleryMode:'list',sortAscending:false,toolsOpen:false,defaultZoom:125});
-  await page.getByLabel('Varsayılan yakınlaştırma').selectOption('150');expect(writes).toHaveLength(1);releaseWrite();await expect.poll(()=>writes.length).toBe(2);expect(writes[1]).toEqual({...writes[0],defaultZoom:150});
+  await chooseOption(page,'Varsayılan yakınlaştırma','150');expect(writes).toHaveLength(1);releaseWrite();await expect.poll(()=>writes.length).toBe(2);expect(writes[1]).toEqual({...writes[0],defaultZoom:150});
   await page.getByRole('button',{name:'Ayarları kapat'}).click();await expect(page.locator('.note-rows')).toHaveClass(/gallery-list/);
 });
 
@@ -725,7 +726,7 @@ test('dark paper is a display preference and does not write the note',async({pag
   const {requests,notes}=await setup(page);
   const original=JSON.stringify(notes.find(note=>note.id==='one'));
   await page.getByRole('button',{name:'Ayarlar',exact:true}).click();
-  await page.getByLabel('Tema',{exact:true}).selectOption('dark');
+  await chooseOption(page,'Tema','dark');
   await page.getByRole('button',{name:'Ayarları kapat'}).click();
   await openNote(page,/Aklımda kalanlar/);
   await expect(page.locator('.document')).toHaveCSS('background-color','rgb(252, 252, 252)');
@@ -756,4 +757,51 @@ test('dark paper preserves rich text colours when saving',async({page})=>{
   await editor.click();await page.keyboard.press('ControlOrMeta+End');await page.keyboard.type(' ek');
   await page.keyboard.press('ControlOrMeta+s');await expect.poll(()=>writes.length).toBe(1);
   expect(writes[0].model.spans).toContainEqual(color);
+});
+
+test('folder cards precede notes, show sidebar counts, navigate and expose the folder menu',async({page})=>{
+  await setup(page,async rows=>{rows.find(n=>n.id==='one').folderId='work';rows.find(n=>n.id==='two').folderId='ideas';});
+  await expect(page.locator('.live-folder-card')).toHaveCount(0);
+  await sidebarFolder(page,'Çalışma').click();
+  const card=page.locator('.live-folder-card').filter({hasText:'Fikirler'}),note=page.getByRole('button',{name:/Aklımda kalanlar/});
+  await expect(card).toBeVisible();await expect(note).toBeVisible();
+  expect(await card.evaluate(element=>!!(element.compareDocumentPosition(document.querySelector('.note-row')!)&Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
+  await page.getByRole('button',{name:'Çalışma klasörünü genişlet'}).click();
+  const sidebarCount=await sidebarFolder(page,'Fikirler').locator('small').innerText();await expect(card).toContainText(sidebarCount);expect(sidebarCount).toBe('1');
+  await card.click({button:'right'});await expect(page.getByRole('menuitem')).toHaveText(['Yeniden adlandır','Klasörü taşı','Çöp kutusuna taşı']);await page.keyboard.press('Escape');
+  await card.focus();await page.keyboard.press('Shift+F10');await expect(page.getByRole('menuitem',{name:'Yeniden adlandır'})).toBeVisible();await page.keyboard.press('Escape');
+  await card.focus();await page.keyboard.press('Enter');await expect(page.getByRole('heading',{name:'Fikirler',exact:true})).toBeVisible();await expect(sidebarFolder(page,'Fikirler')).toHaveClass(/active/);await expect(page.locator('.live-folder-card')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:/Hafta sonu için/})).toBeVisible();
+  await sidebarFolder(page,'Çalışma').click();await card.click();await expect(page.getByRole('heading',{name:'Fikirler',exact:true})).toBeVisible();await sidebarFolder(page,'Çalışma').click();await page.getByLabel('Notlarında ara').fill('Aklımda');await expect(page.locator('.live-folder-card')).toHaveCount(0);await page.getByLabel('Aramayı temizle').click();
+  await page.getByRole('button',{name:'Tüm notlar',exact:false}).click();await expect(page.locator('.live-folder-card')).toHaveCount(0);
+  await page.getByRole('button',{name:'Görünüm'}).click();await page.getByRole('button',{name:'Favoriler',exact:true}).click();await expect(page.locator('.live-folder-card')).toHaveCount(0);
+});
+
+test('folder cards work in list mode and accept note drops; colours follow the theme',async({page})=>{
+  const {requests,state}=await setup(page,async rows=>{rows.find(n=>n.id==='one').folderId='work';});state.autoConfirm=false;
+  await sidebarFolder(page,'Çalışma').click();const card=page.locator('.live-folder-card').filter({hasText:'Fikirler'});
+  await expect(card).toBeVisible();const light=await card.locator('.trash-folder-body').evaluate(el=>getComputedStyle(el).backgroundColor);
+  await page.getByRole('button',{name:'Görünüm'}).click();await page.getByRole('button',{name:'Liste görünümü'}).click();await expect(page.locator('.gallery-list .live-folder-card')).toBeVisible();
+  await holdOn(page,page.getByRole('button',{name:/Aklımda kalanlar/}));await moveOver(page,card);await expect(card).toHaveClass(/drop-target/);await page.mouse.up();
+  await expect.poll(()=>patches(requests).length).toBe(1);expect(patches(requests)[0]).toMatchObject({path:'/api/notes/one',data:{folderId:'ideas',expectedRevision:1}});
+  await page.getByRole('button',{name:'Görünüm'}).click();await page.getByRole('button',{name:'Izgara görünümü'}).click();
+  await page.getByRole('button',{name:'Ayarlar',exact:true}).click();await chooseOption(page,'Tema','dark');await page.getByRole('button',{name:'Ayarları kapat'}).click();
+  await expect(card).toBeVisible();const dark=await card.locator('.trash-folder-body').evaluate(el=>getComputedStyle(el).backgroundColor);expect(dark).not.toBe(light);
+});
+
+test('trashed folders open nested contents, preserve read-only notes and restore real items',async({page})=>{
+  const {folders,notes,requests}=await setup(page);Object.assign(notes.find(n=>n.id==='one'),{trashed:true,folderId:'trash-parent'});Object.assign(notes.find(n=>n.id==='two'),{trashed:true,folderId:'trash-child'});notes.push({...base,id:'normal-in-trash',folderId:'trash-parent',title:'Klasörde kalan not',body:'Korunan içerik',preview:'Korunan içerik'});
+  folders.push({state:'trashed',syncState:'synced',error:null,id:'trash-parent',name:'Eski çalışma',parentId:null,color:null,noteCount:1},{state:'trashed',syncState:'synced',error:null,id:'trash-child',name:'Eski fikirler',parentId:'trash-parent',color:null,noteCount:1});
+  const folderQueries:string[]=[];page.on('request',request=>{const url=new URL(request.url());if(url.pathname==='/api/notes'&&url.searchParams.get('folder')==='trash-parent')folderQueries.push(url.searchParams.get('filter')||'');});
+  await page.reload();await page.getByRole('button',{name:'Çöp kutusu',exact:true}).click();
+  const folder=(name:string)=>page.locator('.trash-folder-card').filter({hasText:name});
+  await expect(folder('Eski çalışma')).toBeVisible();await expect(folder('Eski fikirler')).toHaveCount(0);const light=await folder('Eski çalışma').locator('.trash-folder-body').evaluate(el=>getComputedStyle(el).backgroundColor);
+  await page.getByRole('button',{name:'Ayarlar',exact:true}).click();await chooseOption(page,'Tema','dark');await page.getByRole('button',{name:'Ayarları kapat'}).click();const dark=await folder('Eski çalışma').locator('.trash-folder-body').evaluate(el=>getComputedStyle(el).backgroundColor);expect(dark).not.toBe(light);
+  await folder('Eski çalışma').click();await expect(page.getByRole('heading',{name:'Eski çalışma',exact:true})).toBeVisible();await expect.poll(()=>folderQueries.includes('trash')&&folderQueries.includes('all')).toBe(true);await expect(folder('Eski fikirler')).toBeVisible();await expect(page.getByRole('button',{name:/Aklımda kalanlar/})).toBeVisible();await expect(page.getByRole('button',{name:/Hafta sonu için/})).toHaveCount(0);
+  await page.getByRole('button',{name:/Aklımda kalanlar/}).click();await expect(page.getByLabel('Not başlığı')).toHaveAttribute('readonly','');await expect(page.getByLabel('Not içeriği')).toHaveAttribute('readonly','');await page.getByRole('button',{name:'Not listesine dön'}).click();
+  const retained=page.getByRole('button',{name:/Klasörde kalan not/});await expect(retained).toBeVisible();await retained.click({button:'right'});await expect(page.getByRole('menuitem',{name:'Geri yükle',exact:true})).toHaveCount(0);await expect(page.getByRole('menuitem',{name:'Taşı',exact:true})).toHaveCount(0);await page.keyboard.press('Escape');await retained.click();await expect(page.getByLabel('Not başlığı')).toHaveAttribute('readonly','');await expect(page.getByLabel('Not içeriği')).toHaveAttribute('readonly','');await expect(page.getByRole('button',{name:'Geri yükle',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Not seçenekleri'})).toHaveCount(0);await page.getByRole('button',{name:'Not listesine dön'}).click();
+  await folder('Eski fikirler').focus();await page.keyboard.press('Enter');await expect(page.getByRole('heading',{name:'Eski fikirler',exact:true})).toBeVisible();const note=page.getByRole('button',{name:/Hafta sonu için/});await expect(note).toBeVisible();await note.click({button:'right'});const menu=page.getByRole('menu',{name:'Not menüsü'});await expect(menu.getByRole('menuitem')).toHaveText(['Geri yükle']);await menu.getByRole('menuitem',{name:'Geri yükle'}).click();
+  await expect.poll(()=>patches(requests).some(r=>r.path==='/api/notes/two'&&r.data.trashed===false)).toBe(true);
+  await page.getByRole('button',{name:'Çöp kutusuna dön'}).click();await expect(page.getByRole('heading',{name:'Eski çalışma',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Klasörü geri yükle',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Geri yükle',exact:true}).click();await expect.poll(()=>patches(requests).some(r=>r.path==='/api/folders/trash-parent'&&r.data.trashed===false)).toBe(true);
 });

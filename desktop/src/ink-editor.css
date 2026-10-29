@@ -5,3 +5,5 @@
 .ink-overlay.erasing{pointer-events:auto;touch-action:none;cursor:cell}.ink-erase-mask{stroke:var(--ink-erase-mask,var(--ui-text-ffffff));fill:var(--ink-erase-mask,var(--ui-text-ffffff));pointer-events:none}polyline.ink-erase-mask{fill:none}.ink-erase-target{stroke:#f26549;fill:#f26549;stroke-opacity:.45;fill-opacity:.45;pointer-events:none}polyline.ink-erase-target{fill:none}.ink-erase-hit{opacity:.35}
 .ink-overlay.selecting{pointer-events:auto;touch-action:none;cursor:default}.ink-lasso{fill:#229bff14;stroke:#229bff;stroke-width:1.5;stroke-dasharray:6 4;vector-effect:non-scaling-stroke;pointer-events:none}.ink-selection{fill:#229bff0d;stroke:#229bff;stroke-width:1.5;stroke-dasharray:5 4;vector-effect:non-scaling-stroke;pointer-events:none;cursor:move}.ink-moved{pointer-events:none}
 .ink-underlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:hidden}.ink-raster{position:absolute;pointer-events:none;max-width:none}.ink-live{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+/* Zoomed pages may be wider than the window (horizontal scroll), like Samsung Notes. */
+.page-document{max-width:none}

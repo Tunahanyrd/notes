@@ -212,3 +212,25 @@ test('card dates and untitled names carry the year when it is not the current on
   const later=page.getByRole('button',{name:/Metin notu 24\.04\.2026/});
   await expect(later).toContainText('24 Nis 2026');
 });
+
+test('ctrl + wheel zooms the pages around the page on screen and the page number follows',async({page})=>{
+  await setup(page);
+  await page.getByRole('button',{name:/Çizim/}).click();
+  await expect(page.locator('.page-sheet')).toHaveCount(3);
+  const scroll=page.locator('.canvas-scroll');
+  // Bring page 2 under the reading line (40 % down the scroll area).
+  await page.locator('.page-sheet[data-page-index="1"]').evaluate(el=>{const c=el.closest('.canvas-scroll')!;c.scrollTop+=el.getBoundingClientRect().top-c.getBoundingClientRect().top-c.clientHeight*.4+40;});
+  await expect(page.getByLabel('Gösterilen sayfa')).toContainText('2 / 3');
+  const width=()=>page.locator('.page-sheet[data-page-index="1"]').evaluate(el=>el.getBoundingClientRect().width);
+  const before=await width();
+  const box=(await scroll.boundingBox())!;await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
+  await page.keyboard.down('Control');for(let i=0;i<5;i++)await page.mouse.wheel(0,-100);await page.keyboard.up('Control');
+  await expect.poll(width).toBeGreaterThan(before*1.3);
+  // Still page 2 on screen and in the selector.
+  const onLine=await scroll.evaluate(c=>{const line=c.getBoundingClientRect().top+c.clientHeight*.4;return [...c.querySelectorAll('.page-sheet')].find(el=>{const r=el.getBoundingClientRect();return r.top<=line&&r.bottom>=line;})?.getAttribute('data-page-index');});
+  expect(onLine).toBe('1');
+  await expect(page.getByLabel('Gösterilen sayfa')).toContainText('2 / 3');
+  await page.keyboard.down('Control');for(let i=0;i<10;i++)await page.mouse.wheel(0,100);await page.keyboard.up('Control');
+  await expect.poll(width).toBeLessThan(before);
+  await expect(page.getByLabel('Gösterilen sayfa')).toContainText('2 / 3');
+});

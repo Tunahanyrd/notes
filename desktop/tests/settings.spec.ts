@@ -1,3 +1,4 @@
+import {chooseOption} from './select-helper';
 import {test,expect,type Page} from '@playwright/test';
 import {DEFAULT_SHORTCUTS} from '../src/useShortcuts';
 const TOKEN='settings_synthetic_session_123456789';
@@ -31,11 +32,11 @@ async function setup(page:Page,options:{connected?:boolean;badStorage?:boolean}=
 test('settings persist only working device preferences and call explicit sync',async({page})=>{
   const {writes,errors,getPreferences}=await setup(page);
   await page.getByRole('button',{name:'Liste',exact:true}).click();
-  await page.getByLabel('Not sıralaması',{exact:true}).selectOption('newest');
+  await chooseOption(page,'Not sıralaması','newest');
   await page.getByRole('switch',{name:'Metin araçlarını göster'}).uncheck();
-  await page.getByLabel('Varsayılan yakınlaştırma',{exact:true}).selectOption('125');
+  await chooseOption(page,'Varsayılan yakınlaştırma','125');
   await expect.poll(getPreferences).toEqual({version:1,theme:'system',darkPages:false,galleryMode:'list',sortAscending:false,toolsOpen:false,defaultZoom:125});
-  await expect(page.getByLabel('Varsayılan yakınlaştırma',{exact:true})).toHaveValue('125');
+  await expect(page.getByLabel('Varsayılan yakınlaştırma',{exact:true})).toHaveAttribute('data-value','125');
   expect(writes.every(path=>path==='PUT /api/preferences')).toBe(true);
   await page.getByRole('button',{name:'Şimdi eşitle',exact:true}).click();
   await expect.poll(()=>writes.filter(path=>path!=='PUT /api/preferences')).toEqual(['POST /api/sync']);
@@ -44,9 +45,9 @@ test('settings persist only working device preferences and call explicit sync',a
   await page.reload();
   await page.getByRole('button',{name:'Ayarlar',exact:true}).click();
   await expect(page.getByRole('button',{name:'Liste',exact:true})).toHaveAttribute('aria-pressed','true');
-  await expect(page.getByLabel('Not sıralaması',{exact:true})).toHaveValue('newest');
+  await expect(page.getByLabel('Not sıralaması',{exact:true})).toHaveAttribute('data-value','newest');
   await expect(page.getByRole('switch',{name:'Metin araçlarını göster'})).not.toBeChecked();
-  await expect(page.getByLabel('Varsayılan yakınlaştırma',{exact:true})).toHaveValue('125');
+  await expect(page.getByLabel('Varsayılan yakınlaştırma',{exact:true})).toHaveAttribute('data-value','125');
   expect(errors).toEqual([]);
   await page.getByRole('dialog',{name:'Ayarlar',exact:true}).evaluate(el=>Promise.all(el.getAnimations().map(animation=>animation.finished)));
   await page.screenshot({path:'/tmp/notes-settings-desktop.png'});
@@ -73,19 +74,32 @@ test('settings narrow layout stays bounded, keyboard close restores focus',async
 test('theme selection follows system and persists',async({page})=>{
   await page.emulateMedia({colorScheme:'light'});
   const {getPreferences}=await setup(page);
-  const theme=page.getByLabel('Tema',{exact:true});
   const color=()=>page.locator('.sidebar').evaluate(el=>getComputedStyle(el).backgroundColor);
   const light=await color();
-  await theme.selectOption('dark');
+  await chooseOption(page,'Tema','dark');
   await expect.poll(color).not.toBe(light);
   await expect.poll(()=>getPreferences().theme).toBe('dark');
-  await theme.selectOption('light');
+  await chooseOption(page,'Tema','light');
   await expect.poll(color).toBe(light);
-  await theme.selectOption('system');
+  await chooseOption(page,'Tema','system');
   await page.emulateMedia({colorScheme:'dark'});
   await expect.poll(color).not.toBe(light);
   await page.emulateMedia({colorScheme:'light'});
   await expect.poll(color).toBe(light);
   await page.getByRole('switch',{name:'Not sayfalarını koyu göster'}).check();
   await expect.poll(()=>getPreferences().darkPages).toBe(true);
+});
+test('custom select supports keyboard, dismissal, ARIA and dark theme',async({page})=>{
+  await setup(page);
+  const combo=page.getByRole('combobox',{name:'Tema'}),popup=page.getByRole('listbox',{name:'Tema'});
+  await combo.focus();await combo.press('Enter');await expect(combo).toHaveAttribute('aria-expanded','true');
+  await expect(popup).toHaveAttribute('id',await combo.getAttribute('aria-controls') as string);
+  await expect(popup.getByRole('option',{name:'Sistem'})).toHaveAttribute('aria-selected','true');
+  await combo.press('End');await combo.press('Enter');await expect(combo).toHaveText('Koyu');await expect(combo).toHaveAttribute('aria-expanded','false');
+  await combo.press('Alt+ArrowDown');await expect(popup).toBeVisible();await expect(popup).toHaveCSS('background-color','rgb(37, 37, 40)');await expect(popup).toHaveCSS('color','rgb(242, 242, 242)');
+  await expect(popup.getByRole('option',{name:'Koyu'})).toHaveAttribute('aria-selected','true');await combo.press('Home');await combo.press('ArrowDown');await combo.press('Enter');await expect(combo).toHaveText('Açık');
+  await combo.press('Space');await combo.press('k');await combo.press('Enter');await expect(combo).toHaveText('Koyu');
+  await combo.click();await combo.press('Escape');await expect(combo).toBeFocused();await expect(popup).toHaveCount(0);
+  await combo.click();await page.getByText('Uygulamanın görünümünü seçin.').click();await expect(popup).toHaveCount(0);
+  await combo.click();await combo.press('Tab');await expect(popup).toHaveCount(0);
 });

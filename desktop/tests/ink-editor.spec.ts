@@ -1,3 +1,4 @@
+import {chooseOption} from './select-helper';
 import {test,expect,type Page} from '@playwright/test';
 import {DEFAULT_SHORTCUTS} from '../src/useShortcuts';
 const TOKEN='synthetic_local_session_1234567890';
@@ -47,11 +48,11 @@ test('ink autosaves like Samsung clients, keeps page identity and lets drawing c
   expect(saved.path).toBe('/api/notes/ink-one/ink');expect(saved.data.expectedRevision).toBe(1);expect(saved.data.strokes.map((stroke:any)=>[stroke.pageId,stroke.sourceStrokeId])).toEqual([['page-0','source-0']]);
   for(const stroke of saved.data.strokes){expect(Object.keys(stroke).sort()).toEqual(['pageId','points','sourceStrokeId']);expect(stroke.points[0].x).toBeCloseTo(250,0);expect(stroke.points[0].y).toBeCloseTo(200,0);expect(stroke.points[0].timeMs).toBe(0);expect(stroke.points.every((point:any)=>point.pressure===.5&&Number.isInteger(point.timeMs))).toBe(true);}
   await expect(page.getByText('Çizimler eşitleniyor',{exact:true})).toBeVisible();await expect(page.locator('.tool-rail').getByRole('button',{name:'Kalem',exact:true})).toBeEnabled();
-  await page.getByLabel('Gösterilen sayfa').selectOption('1');await draw(page);await expect(page.getByText('1 çizgi kaydedilmedi')).toBeVisible();
+  await chooseOption(page,'Gösterilen sayfa','1');await draw(page);await expect(page.getByText('1 çizgi kaydedilmedi')).toBeVisible();
   await page.waitForTimeout(2500);expect(requests.filter(request=>request.method==='PUT')).toHaveLength(1);
   await page.getByRole('button',{name:'Not listesine dön'}).click();await page.getByRole('button',{name:/İkinci çizim/}).click();await expect(page.getByLabel('Çizim alanı')).toBeAttached();await expect(page.getByText('1 çizgi kaydedilmedi')).toHaveCount(0);
   await page.getByRole('button',{name:'Not listesine dön'}).click();await page.getByRole('button',{name:/Çizim denemesi/}).click();await expect(page.getByText('1 çizgi kaydedilmedi')).toBeVisible();
-  await page.reload();await page.getByRole('button',{name:/Çizim denemesi/}).click();await expect(page.getByLabel('Gösterilen sayfa')).toBeVisible();await page.getByLabel('Gösterilen sayfa').selectOption('1');
+  await page.reload();await page.getByRole('button',{name:/Çizim denemesi/}).click();await expect(page.getByLabel('Gösterilen sayfa')).toBeVisible();await chooseOption(page,'Gösterilen sayfa','1');
   // The line drawn while the first batch was syncing survived the restart on this device.
   await expect(page.getByText('1 çizgi kaydedilmedi')).toBeVisible();
   // Both pages are on screen: the syncing line on page 1 and the restored draft on page 2.

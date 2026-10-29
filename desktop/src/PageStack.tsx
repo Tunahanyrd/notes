@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState, type ReactNode} from 'react';
+import {useEffect, useLayoutEffect, useRef, useState, type ReactNode} from 'react';
 import {api, ApiError, notePath, request} from './api';
 import type {PreviewPage} from './usePagePreview';
 
@@ -50,6 +50,9 @@ function usePageImage(noteId:string,revision:number|undefined,index:number,wante
   // Bumped to try again after the retries ran out: the page came back into
   // view, the window regained focus or the connection returned.
   const [epoch,setEpoch]=useState(0);const exhausted=useRef(false);
+  // A page on screen never gives up: after the backoff it keeps asking every
+  // 30 s (the engine answers from its cache once the image exists).
+  const onScreen=useRef(visible);onScreen.current=visible;
   useEffect(()=>()=>{if(shown.current)URL.revokeObjectURL(shown.current);},[]);
   useEffect(()=>{
     const again=()=>{if(exhausted.current){exhausted.current=false;setEpoch(value=>value+1);}};
@@ -71,7 +74,7 @@ function usePageImage(noteId:string,revision:number|undefined,index:number,wante
           // 404: this page has no image source at all. Everything else may pass.
           final=error instanceof ApiError&&(error.status===404||error.status===400);
         }
-        if(response?.status===202&&polls<MAX_PENDING_POLLS){polls++;await sleep(250,controller.signal);continue;}
+        if(response?.status===202&&(polls<MAX_PENDING_POLLS||onScreen.current)){polls++;await sleep(250,controller.signal);continue;}
         if(response&&response.status===200&&response.headers.get('content-type')?.split(';')[0].trim()==='image/png'){
           const blob=await response.blob();if(controller.signal.aborted)return;
           if(blob.size){
@@ -79,7 +82,7 @@ function usePageImage(noteId:string,revision:number|undefined,index:number,wante
           }
         }
         if(final){setState(previous=>previous.url?previous:{url:null,phase:'final'});return;}
-        if(retries>=MAX_RETRIES){exhausted.current=true;setState(previous=>previous.url?previous:{url:null,phase:'waiting'});return;}
+        if(retries>=MAX_RETRIES&&!onScreen.current){exhausted.current=true;setState(previous=>previous.url?previous:{url:null,phase:'waiting'});return;}
         setState(previous=>previous.url?previous:{url:null,phase:'waiting'});
         await sleep(BACKOFF_MS[Math.min(retries,BACKOFF_MS.length-1)],controller.signal);retries++;polls=0;
       }
@@ -113,18 +116,36 @@ function PageItem({noteId,revision,page,isCurrent,register,render,renderUnavaila
 
 // All pages of a note stacked vertically like Samsung Notes. The current page
 // is the one crossing a reading line 40% down the scroll area; `jump` scrolls.
-export function PageStack({noteId,revision,pages,current,onCurrent,jump,render,renderUnavailable,pageSize}:{noteId:string;revision:number|undefined;pages:PreviewPage[];current:number;onCurrent:(index:number)=>void;jump:{index:number;seq:number}|null;render:(page:PreviewPage,url:string|null,isCurrent:boolean)=>ReactNode;renderUnavailable?:(page:PreviewPage,isCurrent:boolean)=>ReactNode;pageSize?:(index:number)=>PageSize|undefined}){
+export function PageStack({noteId,revision,pages,current,onCurrent,jump,render,renderUnavailable,pageSize,zoom}:{noteId:string;revision:number|undefined;pages:PreviewPage[];current:number;onCurrent:(index:number)=>void;jump:{index:number;seq:number}|null;render:(page:PreviewPage,url:string|null,isCurrent:boolean)=>ReactNode;renderUnavailable?:(page:PreviewPage,isCurrent:boolean)=>ReactNode;pageSize?:(index:number)=>PageSize|undefined;zoom?:number}){
   const stack=useRef<HTMLDivElement>(null);const elements=useRef(new Map<number,HTMLElement>());
   const latest=useRef({current,onCurrent});latest.current={current,onCurrent};
+  // The point of the page on the reading line (40 % down), kept in place when
+  // the zoom changes the page sizes; otherwise another page slides under it.
+  const anchor=useRef<{index:number;fraction:number;x:number}|null>(null);
+  const capture=()=>{
+    const container=stack.current?.closest('.canvas-scroll') as HTMLElement|null;if(!container)return;
+    const box=container.getBoundingClientRect();const line=box.top+box.height*.4;
+    for(const [index,element] of elements.current){const rect=element.getBoundingClientRect();
+      if(rect.top<=line&&rect.bottom>=line&&rect.height>0){anchor.current={index,fraction:(line-rect.top)/rect.height,x:container.scrollWidth>container.clientWidth?(container.scrollLeft+container.clientWidth/2)/container.scrollWidth:.5};return;}}
+  };
+  useLayoutEffect(()=>{
+    const container=stack.current?.closest('.canvas-scroll') as HTMLElement|null;const kept=anchor.current;if(!container||!kept)return;
+    const element=elements.current.get(kept.index);if(!element)return;
+    const box=container.getBoundingClientRect(),rect=element.getBoundingClientRect();
+    container.scrollTop+=rect.top+rect.height*kept.fraction-(box.top+box.height*.4);
+    container.scrollLeft=kept.x*container.scrollWidth-container.clientWidth/2;
+  },[zoom]);
   const register=(index:number,element:HTMLElement|null)=>{if(element)elements.current.set(index,element);else elements.current.delete(index);};
   useEffect(()=>{
     const container=stack.current?.closest('.canvas-scroll') as HTMLElement|null;if(!container)return;
     let frame=0;
-    const measure=()=>{frame=0;const box=container.getBoundingClientRect();const line=box.top+box.height*.4;let best:number|null=null,distance=Infinity;
+    const measure=()=>{frame=0;capture();const box=container.getBoundingClientRect();const line=box.top+box.height*.4;let best:number|null=null,distance=Infinity;
       for(const [index,element] of elements.current){const rect=element.getBoundingClientRect();const gap=rect.top>line?rect.top-line:rect.bottom<line?line-rect.bottom:0;if(gap<distance||(gap===distance&&best!==null&&index<best)){best=index;distance=gap;}}
       if(best!==null&&best!==latest.current.current)latest.current.onCurrent(best);};
     const schedule=()=>{if(!frame)frame=requestAnimationFrame(measure);};
-    container.addEventListener('scroll',schedule,{passive:true});const resize=new ResizeObserver(schedule);resize.observe(container);schedule();
+    // Page sizes change without a scroll event (zoom, images arriving): the
+    // stack is observed too, so the page number follows.
+    container.addEventListener('scroll',schedule,{passive:true});const resize=new ResizeObserver(schedule);resize.observe(container);if(stack.current)resize.observe(stack.current);schedule();
     return()=>{container.removeEventListener('scroll',schedule);resize.disconnect();if(frame)cancelAnimationFrame(frame);};
   },[pages.length]);
   useEffect(()=>{if(jump)elements.current.get(jump.index)?.scrollIntoView({block:'start'});},[jump?.seq]);

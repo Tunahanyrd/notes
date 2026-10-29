@@ -158,6 +158,7 @@ struct QueueItem {
     path: PathBuf,
     session: Option<PathBuf>,
     local_pdf: Option<PathBuf>,
+    queued: Instant,
 }
 
 impl PartialEq for QueueItem {
@@ -259,6 +260,23 @@ impl State {
     }
     fn pop_job(&mut self, key: &str) {
         self.jobs.retain(|(k, _)| k != key);
+    }
+    /// Room for one more job at `priority`. A full queue must not turn away a
+    /// more urgent request (the page on screen is 0, thumbnails 1, warm-up 2):
+    /// it takes the slot of the least urgent pending job, whose queue entry
+    /// the worker then skips. False only when nothing less urgent is waiting.
+    fn make_room(&mut self, priority: i64) -> bool {
+        if self.jobs.iter().filter(|(_, j)| matches!(j.state, JobState::Pending | JobState::Running)).count() < MAX_QUEUED {
+            return true;
+        }
+        let victim = self.jobs.iter()
+            .filter(|(_, j)| j.state == JobState::Pending && j.priority > priority)
+            .max_by_key(|(_, j)| j.priority)
+            .map(|(k, _)| k.clone());
+        match victim {
+            Some(victim) => { self.pop_job(&victim); true }
+            None => false,
+        }
     }
 }
 
@@ -744,7 +762,7 @@ impl Inner {
         QueueItem {
             priority, sequence: self.sequence.fetch_add(1, AtomicOrdering::SeqCst), key: key.to_string(),
             identity: identity.to_string(), source: source.clone(), candidate: candidate.clone(), path: path.to_path_buf(),
-            session: self.env.session_path(), local_pdf,
+            session: self.env.session_path(), local_pdf, queued: Instant::now(),
         }
     }
 
@@ -833,7 +851,7 @@ impl Inner {
         {
             return Err(Fail::store("preview_offline", "Bu sayfa henüz indirilmemiş. Bağlantı kurduğunda tekrar açabilirsin.", 503));
         }
-        if state.jobs.iter().filter(|(_, j)| matches!(j.state, JobState::Pending | JobState::Running)).count() >= MAX_QUEUED {
+        if !state.make_room(priority) {
             return Err(Fail::store("preview_busy", "Diğer sayfalar hazırlanıyor. Biraz sonra tekrar açabilirsin.", 429));
         }
         if state.jobs.len() >= 4 * MAX_QUEUED {
@@ -919,8 +937,10 @@ impl Inner {
             // A panic while rendering a hostile note must not kill this worker:
             // the job would stay Running and, once every worker died, previews
             // would never be produced again until restart.
+            let started = Instant::now();
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.process(&item)))
                 .unwrap_or_else(|_| Err(Fail::os("preview worker panicked")));
+            timing(&item, started, &result);
             {
                 let mut state = self.lock();
                 let job = match result {
@@ -1338,4 +1358,56 @@ impl crate::thumbnails::PagePreviews for PreviewManager {
 
 fn pdf_error(message: &str) -> Fail {
     Fail::new(notes_host::Kind::PdfBackground, message)
+}
+
+#[cfg(test)]
+mod queue_tests {
+    use super::*;
+
+    fn job(state: JobState, priority: i64) -> Job {
+        Job { state, error: None, priority, local_pdf: None, retry_after: None, served: None, offline: false }
+    }
+
+    #[test]
+    fn a_full_queue_gives_the_page_on_screen_a_warm_up_slot() {
+        // Before: a full queue answered 429 to the page on screen, the UI gave
+        // up and showed "not ready" although the page could be drawn at once.
+        let mut state = State::default();
+        for i in 0..MAX_QUEUED {
+            state.set_job(&format!("warm{i}"), job(JobState::Pending, 2));
+        }
+        assert!(state.make_room(0));
+        assert_eq!(state.jobs.len(), MAX_QUEUED - 1);
+        // Equal or more urgent work is never evicted.
+        let mut busy = State::default();
+        for i in 0..MAX_QUEUED {
+            busy.set_job(&format!("open{i}"), job(if i % 2 == 0 { JobState::Running } else { JobState::Pending }, 0));
+        }
+        assert!(!busy.make_room(0));
+        assert!(!busy.make_room(2));
+        assert_eq!(busy.jobs.len(), MAX_QUEUED);
+    }
+}
+
+/// Diagnostics only, off unless NOTES_PREVIEW_TIMING names a file: one JSON
+/// line per job with the page kind, priority, queue wait, work time and
+/// outcome. No note ids, titles or content.
+fn timing(item: &QueueItem, started: Instant, result: &Result<Option<PathBuf>, Fail>) {
+    let Some(file) = std::env::var_os("NOTES_PREVIEW_TIMING") else { return };
+    let kind = match &item.candidate {
+        Candidate::Canvas(_) => "canvas",
+        Candidate::Pdf(_) => "pdf",
+        Candidate::Ink(_) => "ink",
+    };
+    let outcome = match result {
+        Ok(None) => "ready".to_string(),
+        Ok(Some(_)) => "stand-in".to_string(),
+        Err(e) => format!("error:{:?}:{}:{}", e.kind, e.code, e.message.replace(['"', '\\', '\n'], " ")),
+    };
+    let line = format!("{{\"kind\":\"{kind}\",\"priority\":{},\"waitMs\":{},\"workMs\":{},\"outcome\":\"{outcome}\"}}\n",
+        item.priority, started.duration_since(item.queued).as_millis(), started.elapsed().as_millis());
+    use std::io::Write;
+    if let Ok(mut out) = std::fs::OpenOptions::new().create(true).append(true).open(file) {
+        let _ = out.write_all(line.as_bytes());
+    }
 }

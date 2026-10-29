@@ -2,7 +2,7 @@
 // WebKitGTK runs CSS animations/transitions of opacity on a separate
 // compositing layer; creating that layer flickers on Wayland. Setting the
 // opacity from requestAnimationFrame is painted in place instead.
-const SURFACES='.dropdown,.context-menu,.settings-modal,.modal-backdrop,.toast,.alert,.conflict-panel,.document-search,.selection-bar';
+const SURFACES='.select-popup,.dropdown,.context-menu,.settings-modal,.modal-backdrop,.toast,.alert,.conflict-panel,.document-search,.selection-bar';
 const DURATION_MS=130;
 const ease=(t:number)=>1-Math.pow(1-t,3);
 

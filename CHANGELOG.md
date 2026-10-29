@@ -22,6 +22,18 @@ result was also checked in the official app on a phone or tablet.
 
 - Card dates and untitled note names show the year when it is not the current
   one.
+- Page images no longer stay at "not ready": a full preview queue gives the
+  page on screen the slot of background work, and the UI keeps asking for a
+  page on screen instead of giving up after a few minutes.
+- Ctrl + mouse wheel zooms pages around the page on screen (also past the
+  window width); the page number follows.
+- The pen button in a handwriting note's text view leads back to the pages.
+
+### Changed
+
+- Native dropdowns replaced with a themed Windows 11 style dropdown.
+- Folders show their subfolders as cards above the notes; trashed folders can
+  be opened (read-only notes, restore).
 
 ### Security
 

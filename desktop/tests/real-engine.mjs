@@ -88,8 +88,8 @@ try{
  await expect(page.locator('.folder-item .state-dot').first()).toHaveCSS('width','5px');
  await page.getByRole('button',{name:'Ayarlar',exact:true}).click();await page.getByRole('button',{name:'Liste',exact:true}).click();
  const preferenceSaved=page.waitForResponse(response=>response.url().endsWith('/api/preferences')&&response.request().method()==='PUT'&&response.request().postDataJSON().defaultZoom===125&&response.status()===200);
- await page.getByLabel('Varsayılan yakınlaştırma').selectOption('125');await preferenceSaved;await page.getByRole('button',{name:'Ayarları kapat'}).click();await page.reload();await expect(page.locator('.note-rows')).toHaveClass(/gallery-list/);
- await page.getByRole('button',{name:'Ayarlar',exact:true}).click();await expect(page.getByLabel('Varsayılan yakınlaştırma')).toHaveValue('125');await page.getByRole('button',{name:'Ayarları kapat'}).click();
+ await page.getByLabel('Varsayılan yakınlaştırma').click();await page.getByRole('option',{name:'%125',exact:true}).click();await preferenceSaved;await page.getByRole('button',{name:'Ayarları kapat'}).click();await page.reload();await expect(page.locator('.note-rows')).toHaveClass(/gallery-list/);
+ await page.getByRole('button',{name:'Ayarlar',exact:true}).click();await expect(page.getByLabel('Varsayılan yakınlaştırma')).toHaveAttribute('data-value','125');await page.getByRole('button',{name:'Ayarları kapat'}).click();
  await page.screenshot({path:'/tmp/notes-cloud-offline-desktop.png',fullPage:true});
  await Promise.all(responseChecks);
  const unexpectedConsole=consoleErrors.filter(entry=>{const expected=thumbnailFailures.get(entry.url);return !expected||!entry.text.startsWith('Failed to load resource:')||!entry.text.includes(`status of ${expected.status} `);});

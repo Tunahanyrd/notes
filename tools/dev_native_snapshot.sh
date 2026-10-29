@@ -17,12 +17,13 @@ mode=${1:-restart}
 
 if [ "$mode" = refresh ]; then
     (cd "$ROOT/desktop" && npm run build >/dev/null)
-    (cd "$ROOT" && cargo build -p notes-engine >/dev/null)
+    # Release build: the debug engine draws page images 10-50x slower.
+    (cd "$ROOT" && cargo build --release -p notes-engine >/dev/null)
     next=$SNAP.next
     rm -rf "$next"; mkdir -p "$next/desktop" "$next/tools" "$next/bin"; chmod 700 "$next"
     cp -a "$ROOT/desktop/dist" "$next/desktop/"
     # Engine binary at a stable path inside the copy (<root>/bin is searched first).
-    cp -a "$ROOT/target/debug/notes-engine" "$next/bin/"
+    cp -a "$ROOT/target/release/notes-engine" "$next/bin/"
     for link in tools/ink-renderer references target artifacts; do ln -s "$ROOT/$link" "$next/$link"; done
     "$next/bin/notes-engine" --help >/dev/null 2>&1 || { echo "notes-engine in $next does not run" >&2; exit 1; }
     rm -rf "$SNAP.old"; [ -d "$SNAP" ] && mv "$SNAP" "$SNAP.old"; mv "$next" "$SNAP"

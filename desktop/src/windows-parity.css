@@ -11,3 +11,13 @@
 .trash-folder-state{color:#a8742c!important}
 .thumbnail-band{position:absolute;left:0;right:0;bottom:0;padding:3px 6px;background:#000000a6;color:var(--ui-text-ffffff);font-size:11px;line-height:16px;text-align:center;z-index:1}
 .gallery-list .thumbnail-band{font-size:8px;line-height:11px;padding:1px 2px}
+
+/* Live subfolders precede notes in both gallery layouts. */
+.live-folder-card{align-self:start}
+.live-folder-card.drop-target .trash-folder-body{background:var(--ui-selection);box-shadow:inset 0 0 0 1px var(--accent)}
+.gallery-list .live-folder-card{width:100%;max-width:none;flex-direction:row;align-items:center;border:1px solid var(--ui-border-e3e3e7);border-radius:8px;background:var(--ui-bg-fcfcfc)}
+.gallery-list .live-folder-card .trash-folder-tab{display:none}
+.gallery-list .live-folder-card .trash-folder-body{display:flex;align-items:center;gap:12px;width:100%;min-height:48px;padding:8px 12px;border:0;box-shadow:none;background:transparent}
+.gallery-list .live-folder-card .trash-folder-body strong{flex:1;min-width:0;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gallery-list .live-folder-card:hover:not(:disabled){background:var(--ui-hover)}
+.gallery-list .live-folder-card.drop-target{background:var(--ui-selection)}
