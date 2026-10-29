@@ -59,9 +59,17 @@
     <color type="primary" scheme_preference="dark">#7a2c25</color>
   </branding>
   <releases>
-    <release version="0.1.0" date="2026-10-27">
+    <release version="0.0.1-alpha" date="2026-10-28" type="development">
+      <url type="details">https://github.com/Tunahanyrd/notes/releases/tag/v0.0.1-alpha</url>
       <description>
-        <p>First packaged release.</p>
+        <p>First public pre-release (alpha).</p>
+        <ul>
+          <li>Samsung account sign-in and Samsung Cloud sync with offline reading</li>
+          <li>Plain and rich text editing, also in notes with handwriting or inserted pictures</li>
+          <li>Pen with colour and thickness, highlighter, eraser, lasso move, shapes</li>
+          <li>Page background colours, page management, PDF insertion and templates</li>
+          <li>Previews for every page type; every Cloud write is verified by reading the note back</li>
+        </ul>
       </description>
     </release>
   </releases>

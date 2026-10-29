@@ -15,14 +15,14 @@ Windows app. No Samsung code, resource text or resource identifiers are reproduc
 ## List and Linux mapping
 
 Scope: **list** = note list, **view** = open note, **text** = rich text editor focused.
-"Linux" = default binding in `samsung_notes/shortcuts.py` (schema 2); all are remappable in
-Settings → Klavye kısayolları except rows marked *fixed*.
+"Linux" = default binding in `crates/rs-store/src/shortcuts.rs` (schema 2); all are remappable in
+Settings → Keyboard shortcuts (UI text: "Klavye kısayolları") except rows marked *fixed*.
 
 | Windows key | Windows action | Group | Linux | Linux action id / note |
 |---|---|---|---|---|
 | Tab | Focus next control | text 1 | Tab (*fixed*) | browser focus navigation |
 | Shift+Tab | Focus previous control | text 1 | Shift+Tab (*fixed*) | browser focus navigation |
-| Ctrl+N | Add page | text 1 | — | not bound: Windows lists Ctrl+N twice; Linux keeps Ctrl+N = new note. Page add stays in the page organiser (Sayfaları düzenle) |
+| Ctrl+N | Add page | text 1 | — | not bound: Windows lists Ctrl+N twice; Linux keeps Ctrl+N = new note. Page add stays in the page organiser (UI text: "Sayfaları düzenle", Edit pages) |
 | Ctrl+N | New note | text 1 | Ctrl+N | `newNote` |
 | Ctrl+Shift+T | New text box | text 1 | — | no text boxes in Linux |
 | Ctrl+/ | Strikethrough | text 2 | Ctrl+/ | `strikethrough` |
@@ -37,10 +37,10 @@ Settings → Klavye kısayolları except rows marked *fixed*.
 | Ctrl+mouse wheel | Zoom in/out | view 3 | *fixed* | over the page area |
 | Ctrl+Alt+L | Zoom lock | view 3 | — | no zoom lock in Linux |
 | Enter | Leave reading mode | view 3 | Enter (*fixed*) | leaves reading mode when focus is not in a control |
-| Alt+Enter | Toggle reading mode | view 3 | Alt+Enter | `readingMode` (Okuma modu) |
+| Alt+Enter | Toggle reading mode | view 3 | Alt+Enter | `readingMode` (UI text: "Okuma modu", Reading mode) |
 | Alt+F | Toggle full screen | view 3 | Alt+F | `fullScreen` |
 | Ctrl+T | Toggle pen panel | view 4 | Ctrl+T | `penSettings`: shows/hides the right tool panel (pen panel on ink pages) |
-| Alt+P | Toggle page settings panel | view 4 | Alt+P | `pageSettings` (Sayfa ayarları menu) |
+| Alt+P | Toggle page settings panel | view 4 | Alt+P | `pageSettings` (UI menu "Sayfa ayarları", Page settings) |
 | Alt+R | Toggle audio controls | view 4 | — | no audio |
 | Ctrl+' / Ctrl+, / Ctrl+. | Audio play/pause, seek ±10 s | view 4 | — | no audio |
 | Ctrl+Shift+P | Print | view 4 | Ctrl+Shift+P | `printNote` |
@@ -58,6 +58,6 @@ list, page navigation, pen/eraser toggles.
 BracketLeft, BracketRight, Comma, Period, Quote, Semicolon, Enter. Reserved: Ctrl+A/C/V/X/
 Z/Y/Q/W, Ctrl+Shift+Z/N/K/I/V. Non-empty bindings are unique. Stored under metadata
 `keyboard_shortcuts_v2`; an old `keyboard_shortcuts_v1` document (and a schema 1 PUT) is
-upgraded by keeping its three bindings and unassigning colliding new defaults. Python
-`samsung_notes/shortcuts.py`, Rust `crates/rs-store/src/shortcuts.rs` (+ `notes-engine`
-backend), UI `desktop/src/useShortcuts.ts`.
+upgraded by keeping its three bindings and unassigning colliding new defaults. Rust
+`crates/rs-store/src/shortcuts.rs` (+ `notes-engine` backend; the frozen Python reference
+is not part of the public repository), UI `desktop/src/useShortcuts.ts`.

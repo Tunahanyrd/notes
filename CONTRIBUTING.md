@@ -30,11 +30,26 @@ React UI (desktop/src)  ──HTTP + bearer token──▶  engine on 127.0.0.1 
 
 ## Getting set up
 
+Requirements: Rust stable 1.95+, Node.js 22+, Python 3 (standard library only,
+for helper scripts), the Tauri 2 system libraries (webkit2gtk-4.1, gtk3,
+libsoup3) and, for previews, poppler-utils, librsvg, ImageMagick and
+bubblewrap.
+
 ```sh
 tools/fetch_sdocx.sh                       # GPL-3.0 renderer library at the pinned commit
 cargo build -p notes-engine -p notes-cli
 cargo build --release --manifest-path tools/ink-renderer/Cargo.toml
-(cd desktop && npm ci)
+tools/build_ink_wasm.sh                    # optional live pen preview (needs wasm32-unknown-unknown)
+(cd desktop && npm ci && npm run build)
+cargo run --manifest-path desktop/src-tauri/Cargo.toml   # desktop shell
+```
+
+For UI work without an account, run the engine offline against a throwaway
+directory and open the printed URL in a browser:
+
+```sh
+target/debug/notes-engine --data-dir /tmp/notes-dev --offline --port 0 \
+    --runtime-file /tmp/notes-dev/runtime.json --frontend-dir desktop/dist
 ```
 
 Or use the container in [docs/DOCKER.md](docs/DOCKER.md), which has every
@@ -63,8 +78,12 @@ Workflow for a behaviour change:
    (copy the library out first; also re-record the `no-magick` variant) and
    review the golden diff in the pull request. Re-blessing is never a way to
    make a failing replay pass: the PR must explain each changed response, and
-   golden changes need a maintainer's review.
+   golden changes need a maintainer's review. Never re-record in the same PR
+   as an unrelated change, and never re-record to hide a difference you
+   cannot explain.
 3. UI changes: keep `tsc` clean and add a Playwright spec with a mocked API.
+4. User-visible changes get a line under `[Unreleased]` in
+   [CHANGELOG.md](CHANGELOG.md).
 
 Never make a suite pass by loosening an assertion, hiding an error or adding
 retries. A regression test should fail before the fix and pass after it.
@@ -95,6 +114,19 @@ be merged.
 - **Report precisely.** "Saved locally", "uploaded", and "verified by
   readback" are different states in code, UI and pull request descriptions.
 
+## Never write to Samsung Cloud from tests
+
+- Automated tests, CI jobs and fixtures never contact Samsung. Every suite
+  runs the engine with `--offline` against synthetic libraries and empty XDG
+  directories; a test that needs the network is a bug.
+- Manual live checks are done only by a maintainer, only on dedicated test
+  notes created for that purpose (never on personal notes), one controlled
+  write at a time followed by a full readback. A write whose outcome is unknown
+  is not repeated.
+- The live probe scripts are not part of this repository. Pull requests are
+  judged on source review and offline tests; do not ask reviewers to run
+  writes against their own accounts.
+
 ## Privacy rules
 
 - Never commit or paste tokens, cookies, authorization codes, signed download
@@ -103,10 +135,28 @@ be merged.
   notes — not in code, tests, fixtures, logs, issues or PR descriptions.
 - Tests use synthetic data only. Never point a test at a real library or a
   developer's state directory; CI runs with empty XDG directories.
-- Live probes (`tools/live_*.py`) are run by hand, only against a dedicated
-  test note, and their outputs stay outside the repository. Publish only
+- Results of manual live checks stay outside the repository. Publish only
   sanitized summaries (counts, pass/fail), never raw payloads.
 - No absolute home paths in committed files.
+
+## Reporting a note the client refuses
+
+When the client keeps a note read-only, refuses ink on it or shows no preview,
+it usually met a structure it does not support yet. Such reports are very
+useful, but **never attach the note, its content, title, screenshots of it or
+any exported file**. Describe its structure only:
+
+- what the app said (the reason text shown in the UI) and what you tried;
+- counts: pages, strokes per page (roughly), PDF pages, pictures, shapes, text
+  boxes, attached files or audio;
+- how the note was made: device and app (e.g. Galaxy Tab, Samsung Notes
+  version; Windows app), and which features you used (template, locked note,
+  grouped objects, rotated page, page background, …);
+- whether it has a picture inserted into the text, or a picture placed freely
+  on the page.
+
+Maintainers reproduce the structure with a synthetic note of their own. Do not
+send private data even if asked; a counts-only description is enough to start.
 
 ## Samsung material
 

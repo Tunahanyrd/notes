@@ -9,6 +9,7 @@ target/
 *.sqlite3
 # synthetic libraries replayed by the golden conformance (generated test data)
 !crates/notes-engine/conformance/golden/library/*/library.sqlite3
+!desktop/tests/fixtures/demo-library/library.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
 

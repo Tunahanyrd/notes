@@ -87,7 +87,7 @@ These are lookups of the same kind as exception classes:
   `pageList`, matching the server order pageList, contentFileList, bodyText seen in live readback.
   `pdf_page_sizes` still shells out to `pdfinfo -f 1 -l 201 <path>`. The GIL is released and the
   timeout kills the child. `OSError`, timeout, a non-zero exit status or no sizes →
-  `DocumentError('PDF okunamadı.')`.
+  `DocumentError('PDF okunamadı.')` (UI text: "Could not read the PDF.").
 - **`ink_erase`.** The Python `_INVENTORY_MEMO` is no longer used, because decoding runs in Rust
   (rs-ink keeps its own memo for appends). Results are unchanged; there is no cross-module cache
   coupling.
@@ -153,7 +153,7 @@ These are small fixtures; large real notes were not measured, per the privacy ru
   (30 successful edits/projections hashed byte-for-byte, the rest exception class + message)
   identical.
 
-## page_shapes (Shapes / Şekil)
+## page_shapes (Shapes; UI text "Şekil")
 
 - Core: `page_shapes::{normalize_shape, prepare_add_shape, prepare_core, project_shapes,
   read_shape_object, build_shape_object, shape_path}` over plain inputs (`StyleIn`/`Fill`

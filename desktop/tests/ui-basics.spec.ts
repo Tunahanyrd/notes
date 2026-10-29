@@ -199,3 +199,16 @@ test('dragging a note card shows grabbing, and no-drop where the drop cannot hap
   await page.keyboard.press('Escape');await page.mouse.up();
   expect(await page.evaluate(()=>document.documentElement.className)).not.toMatch(/note-drag/);
 });
+
+test('card dates and untitled names carry the year when it is not the current one',async({page})=>{
+  // Notes are from 2026-04-24. In 2026 the year is implied; a year later it must be shown
+  // (otherwise "27 Ara" and a later "12 Oca" look out of order).
+  await page.clock.setFixedTime(new Date('2026-10-29T12:00:00Z'));
+  await setup(page);
+  const card=page.getByRole('button',{name:/Metin notu 24\.04/});
+  await expect(card).toContainText('Metin notu 24.04');await expect(card).not.toContainText('2026');
+  await expect(card).toContainText('24 Nis');
+  await page.clock.setFixedTime(new Date('2027-01-12T12:00:00Z'));await page.reload();
+  const later=page.getByRole('button',{name:/Metin notu 24\.04\.2026/});
+  await expect(later).toContainText('24 Nis 2026');
+});

@@ -1,195 +1,195 @@
-# Bağımsız istemci: ilk protokol çekirdeği
+# Independent client: initial protocol core
 
-> Not: Buradaki kanıt kayıtları (arındırılmış ölçümler, ham analiz çıktıları) özel tutulur ve herkese açık depoda yer almaz.
+> Note: The evidence records referenced here (sanitized measurements, raw analysis output) are kept private and are not part of the public repository.
 
-Hedef Rust çekirdek ve Tauri/React masaüstü uygulaması. Rust kitaplığı XML ve
-giriş kriptografisini, Python araştırma araçları sınırlı HTTP akışını yürütüyor.
-Linux'ta kullanıcı girişi, şifreli callback, UAT ve Notes'a özel access token
-edinme **gerçek sunucuda HTTP 200 ile doğrulandı**. Refresh alanı `-1` sentinel;
-ilk aşamada kalıcı yenileme doğrulanmadı. Sonraki UAT yenileme kanıtı aşağıdadır.
-Ayrı Cloud tokenı alındı, ilk 51 değişiklik ve
-bir notun metadata/karşılaştırma XML'i indirildi. XML/multipart çözümleyici ve
-sınırlı düz metin yazıcı eklendi: Linux'tan oluşturulan kontrollü test notu
-cihazda görüldü; cihazdaki metin değişikliği aynı not kimliğiyle Linux'a döndü.
-Son Linux güncellemesi, sunucu zamanını ilerleten düzeltmenin ardından cihazda
-da görüldü; kullanıcı açıkça teyit etti.
-Tauri/React metin uygulaması ve kalıcı Python eşitleme servisi artık mevcut.
-Genel not/kalem düzenleme ve tam Samsung Notes özellik eşitliği henüz yok.
-(Canlı giriş ve gerçek cihazla düz metin aktarım kanıtları özel tutulur.)
+The target is a Rust core and a Tauri/React desktop application. The Rust library
+handles XML and sign-in cryptography; Python research tools run a limited HTTP flow.
+On Linux, user sign-in, the encrypted callback, the UAT and acquiring a Notes-specific
+access token were **verified against the real server with HTTP 200**. The refresh field is a `-1` sentinel;
+persistent renewal was not verified in the first stage. Later UAT renewal evidence is below.
+A separate Cloud token was obtained, and the first 51 changes and
+one note's metadata/compare XML were downloaded. An XML/multipart parser and a
+limited plain-text writer were added: a controlled test note created from Linux was
+seen on device; a text change made on the device came back to Linux under the same note ID.
+The last Linux update was also seen on device after the fix that advances the server
+time; the user explicitly confirmed it.
+A Tauri/React text application and a persistent Python sync service now exist.
+General note/pen editing and full Samsung Notes feature parity do not exist yet.
+(Evidence for live sign-in and plain-text transfer with a real device is kept private.)
 
-## Uygulama katmanı — 25 Ekim 2026
+## Application layer — 25 October 2026
 
-`samsung_notes/` uygulama servisi SQLite kütüphanesi, kalıcı cursor ve değişmez
-işlem kimlikli gönderim kuyruğu kullanır. Arayüz gerçek API'den okur; Samsung
-tokenı arayüze verilmez. Açma ve sınırlar [README](../README.md), HTTP sözleşmesi
-[APP_CONTRACT](APP_CONTRACT.md) içinde.
-
-İlk uygulama aşamasında 78 uygulama/edinme/önizleme testi ve 79 araştırma aracı testi geçti. Ön yüzün sentetik
-tarayıcı, gerçek çevrimdışı servis ve native süreç testleri ayrı kayıtta tutulur.
-Uygulamanın HTTP API'si ile kontrollü bir not oluşturma ve düzenleme gerçek
-Cloud'a gönderildi; her iki sonuçta da içerik geri okumayla eşleşti. Native
-uygulama açılışı ve yeniden başlatma sonrası 33/33 notun, hesabın ve son
-kontrollü düzenlemenin korunması doğrulandı. Uygulama Wayland penceresi olarak
-çalıştı. Bu uygulama katmanı deneyinde ayrıca Android ekran teyidi istenmedi.
-
-Başarılı gönderim teyidinden sonra başarısız okuma, tekrar yazma yerine aynı
-işlem kaydından yalnız okumayla uzlaştırılır. Sonucu bilinmeyen gönderim otomatik
-tekrarlanmaz. Yerel düzenleme sürüm kontrolü ve çakışmada kopya koruma testlidir;
-sunucuda atomik compare-and-swap olduğu iddia edilmez. Geçerli hesap UAT'sinden
-yeni Notes yetkilendirme kodu ve Cloud oturumu alma yolu canlı HTTP 200/200/200
-ile doğrulandı. Sunucu henüz geçerli aynı Notes tokenını/son tarihini döndürdü;
-süresi dolmuş token yenilenmesi ayrıca doğrulanmış değildir.
-(Oturum yenileme kanıtı özel tutulur.)
-
-Favoriler, not çöp kutusu/geri alma, klasörler ve not taşıma artık Cloud
-işlemleridir. Uygulamanın HTTP API'sinden oluşturulan ayrı test notu/klasöründe
-11 işlem, zorunlu sunucu geri okumasıyla geçti. Kullanıcı ayrıca gerçek arayüz
-çöp kutusu işleminin buluta ulaştığını teyit etti. Kalıcı silme, dolu klasör
-silme ve kaybolan klasör yolunu yeniden oluşturma desteklenmez.
-(Protokol kanıtı ve uygulama doğrulaması özel tutulur.)
-
-Bağımsız başlık yazımı ve desteklenen zengin metin notları da gerçek Cloud
-üzerinde doğrulandı. Kontrollü rich notun kalın/italik/kırmızı metni ve sağa
-hizalaması Android Samsung Notes ekranında kullanıcı tarafından teyit edildi;
-sağlanan ekran görüntüsüyle ayrıca karşılaştırıldı. Bu tek notun doğrulaması,
-bütün stillerin veya kalem yazıcısının doğrulandığı anlamına gelmez.
-(Editör kanıtı özel tutulur.)
-
-Büyük sabit bir önizleme girdisinde eşlenmiş ölçüm: 31,367 → 1,302 saniye duvar
-saati, 29,045 → 1,296 saniye CPU. Çıktı adaylarının kimlik/hash/boyutları aynı
-kaldı; bu tek ayrıştırma ölçümüdür, bütün notların açılma süresi değildir.
-
-Büyük çizimli notların sınırlı XML/multipart okuması 16.384 parçaya kadar açılır;
-1.024 parçadan büyük belgeler düzenlenmez. Başlık/metin önizlemesine ek olarak
-kaydedilmiş canvas cache dosyaları hash doğrulamasıyla indirilip sınırlı yerel
-Samsung codec'iyle PNG'ye açılır. Bu, bütün çizim/PDF nesnelerini yeniden çizen
-bir belge motoru değildir. Dosya yönlendirmesinde hesap başlıkları taşınmaz;
-hesap veya kaynak değişince sonraki indirme/yayımlama adımı durur. Ayrıntı:
+The `samsung_notes/` application service uses a SQLite library, a persistent cursor and
+an outbox with immutable operation IDs. The UI reads from the real API; the Samsung
+token is not handed to the UI. Launching and limits are in the [README](../README.md); the HTTP contract is in
 [APP_CONTRACT](APP_CONTRACT.md).
 
-Aşağıdaki kontrollü protokol deneyleri uygulama katmanından önceki kanıtlardır.
+In the first application stage, 78 application/acquisition/preview tests and 79 research tool tests passed. The frontend's synthetic
+browser, real offline service and native process tests are recorded separately.
+A controlled note creation and edit through the application's HTTP API were sent to the real
+Cloud; in both cases the content matched on readback. After native
+application launch and restart, preservation of 33/33 notes, the account and the last
+controlled edit was verified. The application ran as a Wayland window.
+In this application-layer experiment, no Android screen confirmation was additionally requested.
 
-`tools/notes_payload.py` bounded XML/multipart ayrıştırır ve özel yerel cache
-üretir; SDOCX veya çizim renderer'ı değildir. `tools/notes_writer.py` yalnız
-yeni, tek sayfalı düz metin not oluşturur. `tools/notes_sync_probe.py` uzaktan
-yazmayı bu istemcinin oluşturduğu kontrollü nota sınırlar. İndirilen kişisel
-notlar değiştirilmedi. Aynı test notuna kontrollü güncelleme aşağıda doğrulanmıştır.
+After a confirmed successful send, a failed read is reconciled read-only from the same
+operation record instead of writing again. A send with an unknown outcome is not automatically
+retried. Local edit version checking and copy-preservation on conflict are tested;
+no atomic compare-and-swap on the server is claimed. The path that obtains a
+new Notes authorization code and Cloud session from the current account UAT was verified live with HTTP 200/200/200.
+The server still returned the same valid Notes token/expiry;
+renewal of an expired token is not separately verified.
+(Session renewal evidence is kept private.)
 
-İlk geri yazma hazırlığı cihazdan gelen ikinci boş sayfayı yakalayıp çevrimdışı
-durdu; sunucuya update gönderilmedi. Bu nedenle özgün tek sayfalı taslağı yeniden
-kurmak yeterli değil. Cihazın son XML yapısı korunmalı; `noteTree` tam envanter
-olarak gönderilirken veri parçaları compareForUpsync sonucuna göre seçilmeli.
-Android `k1.a.m/n` bu ayrımı uyguluyor; aynı protokolü kullanmak sayfa kaybını önler.
+Favorites, note trash/restore, folders and note moves are now Cloud
+operations. On a separate test note/folder created from the application's HTTP API,
+11 operations passed with mandatory server readback. The user also confirmed that a real UI
+trash operation reached the cloud. Permanent deletion, deleting a populated
+folder and recreating a vanished folder path are not supported.
+(Protocol evidence and application validation are kept private.)
 
-## Aynı notu güncelleme — canlı doğrulandı
+Independent title writing and supported rich-text notes were also verified on the real
+Cloud. The bold/italic/red text and right
+alignment of the controlled rich note were confirmed by the user on the Android Samsung Notes screen;
+they were also compared against the provided screenshot. Verification of this single note
+does not mean all styles or the pen writer were verified.
+(Editor evidence is kept private.)
 
-`tools/notes_snapshot_update.py`, bu istemcinin oluşturduğu notun son cihaz
-snapshot'ını esas alır. İki boş sayfanın kimlikleri ve içeriği, başlık, metadata
-ve mevcut metin işaretlemeleri korunur. Compare sonucu yalnız gövdeyi istiyorsa
-tam noteTree ile gövde parçası gönderilir; beklenmeyen kaynak veya farklı commit
-güncellemeyi durdurur. İstek sonucu belirsizse otomatik tekrar yoktur.
+Paired measurement on one large fixed preview input: 31.367 → 1.302 seconds wall
+clock, 29.045 → 1.296 seconds CPU. The ID/hash/sizes of the output candidates stayed
+the same; this is a single parsing measurement, not the open time for every note.
 
-İlk denemede compare 200, update 403/128409 döndü: sunucu zamanı ile iç nesne
-zamanı aynı max hesabına alınmıştı. Gerçek Android snapshot'ında bazı iç
-değerler 16 haneli, root syncModifiedTime 13 hanelidir. Yeniden okuma reddin
-ardından not XML'inin ve commit'in değişmediğini doğruladı. Bu başarısız deneme
-korundu; aynı işlem kaydı tekrar kullanılmadı.
+Bounded XML/multipart reading of large drawn notes opens up to 16,384 parts;
+documents with more than 1,024 parts are not edited. In addition to title/text previews,
+saved canvas cache files are downloaded with hash verification and decoded to PNG with a limited local
+Samsung codec. This is not a document engine that redraws every drawing/PDF
+object. Account headers are not carried across file redirects;
+if the account or source changes, the next download/publish step stops. Details:
+[APP_CONTRACT](APP_CONTRACT.md).
 
-Native `k1.a.k → sync.db.t.j → entity.getServerTimestamp` ve `k1.a.n` zinciri
-root syncModifiedTime'ın saklanan sunucu zamanından geldiğini gösteriyor.
-İlk düzeltme bu alanı bire bir korudu; body/attributes/tree-body için ham iç
-zamanın maksimumunu bir artırdı. Ayrı kayıtla yapılan compare 200 ve update 201
-döndü. Sonraki downsync 200 yanıtında:
+The controlled protocol experiments below are evidence predating the application layer.
 
-- Cihazdan gelen metin aynen korunmuş, Linux satırı eklenmiş.
-- İki sayfa/layer kaynağı ve tam sayfa ağacı semantik olarak değişmemiş.
-- Yerel not kimliği aynı; commit ve fileRevision yazma sonucuyla eşleşmiş.
+`tools/notes_payload.py` parses bounded XML/multipart and produces a private local cache;
+it is not an SDOCX or drawing renderer. `tools/notes_writer.py` only creates
+new, single-page plain-text notes. `tools/notes_sync_probe.py` restricts remote
+writes to the controlled note created by this client. Downloaded personal
+notes were not modified. A controlled update to the same test note is verified below.
 
-(Reddedilen deneme, düzeltme kaynağı ve başarılı geri okuma kayıtları özel tutulur.)
-Bu ara aşamada Linux satırının cihaz ekranında görünmesi kullanıcı tarafından
-teyit edilmemişti. Kullanıcı bu kontrolde metni yeniden düzenlediğini bildirdi;
-sonraki cihaz sürümü ayrıca indirilip korundu. Kullanıcı not listesindeyken
-yapılan ayrı denemede içerik tekrar 201/200 ile doğrulandı, fakat hemen alınan
-GetNoteInfoView.syncModifiedTime ilerlememişti. Android `c4.f` eşit sunucu
-zamanında yalnız commit'i günceller; içeriği indirmez. Bu nedenle içerik geri
-okuma başarısı tek başına cihazın güncellemeyi alacağını kanıtlamıyor.
+The first write-back preparation caught a second empty page coming from the device and stopped
+offline; no update was sent to the server. Therefore rebuilding the original single-page
+draft is not enough. The device's latest XML structure must be preserved; `noteTree` is sent as the full
+inventory while data parts are selected according to the compareForUpsync result.
+Android `k1.a.m/n` applies this distinction; using the same protocol prevents page loss.
 
-Önceki çıkarımın düzeltmesi: serializer saklanan zamanı korusa da normal yerel
-kayıt öncesinde `WDocSaveOperation.setDocumentTimeEntity`, keepServerTimestamp
-false iken `TimeManager.getCurrentTime()` ile ServerTimestamp'ı ilerletir.
-`TimeManager` sunucu farkıyla düzeltilmiş epoch-ms kullanır; SDK zamanını
-uygulama zamanına çeviren kod 16 haneli SDK zamanını 1000'e böler. Ürün düzeyi
-saat farkı yönetimi henüz yoktur. Bu oturumda sunucu timestamp'ı ile yerel
-isteğin saniyeye yuvarlanmış zamanı arasında 514 ms gözlendi; ölçüm ağ gecikmesini
-ve yuvarlamayı içerir, kesin saat farkı değildir.
+## Updating the same note — verified live
 
-Schema 5 düzeltmesi root syncModifiedTime ve displayModifiedTime için yeni
-epoch-ms, iç body/attributes/tree-body için ayrı ham sayaç kullanır. Önceki
-başarılı kontrollü revision ile commit, dosya hash'i, başlık/metin ve tüm kimlik
-envanteri eşleşirse metne dokunmadan yeniden yayımlama desteklenir. Böylece
-Linux satırı iki kez eklenmez. Bu onarım compare 200 → update 201 → info 200 →
-downsync 200 ile uygulandı. Bu kez GetNoteInfoView.syncModifiedTime gerçekten
-ilerledi ve hazırlanan zamanla eşleşti; metin, iki sayfa ve yeni commit tekrar
-doğrulandı. Kullanıcı not listesindeyken eşitleyip notu yeniden açtı ve
-**“Evet, artık görünüyor”** diyerek Linux satırının cihazda göründüğünü teyit etti.
-Kontrollü düz metin döngüsü böylece gerçek cihazda tamamlandı.
-(Düzeltme, onarım/geri okuma ve cihaz teyidi kayıtları özel tutulur.)
+`tools/notes_snapshot_update.py` is based on the latest device
+snapshot of the note created by this client. The IDs and content of both empty pages, the title, metadata
+and existing text markup are preserved. If the compare result requests only the body,
+the body part is sent with the full noteTree; an unexpected source or a different commit
+stops the update. If the request outcome is ambiguous, there is no automatic retry.
 
-Bu, genel amaçlı not düzenleme veya atomik çakışma çözümü
-kanıtı değildir: compare ile update arasında yarış penceresi vardır.
+On the first attempt compare returned 200 and update returned 403/128409: the server time and the internal object
+time had been taken into the same max computation. In the real Android snapshot some internal
+values are 16 digits, while the root syncModifiedTime is 13 digits. A re-read after the rejection
+verified that the note XML and the commit had not changed. This failed attempt
+was preserved; the same operation record was not reused.
 
-Bu aşamadaki doğrulama: Rust çalışma alanında 65 test (doctest dahil), Python
-araştırma araçlarında 79 test geçti; Rust format ve Clippy kontrolleri temiz.
-Canlı istekler test sayısına dahil edilmedi. O aşamadaki eksikler: tam envanter ve
-kalıcı cursor, oturum yenileme, çevrimdışı kuyruk, silmeler/çatışmalar, ekler ve
-çizimler, kayıpsız genel editör, Tauri arayüzü.
+The native `k1.a.k → sync.db.t.j → entity.getServerTimestamp` and `k1.a.n` chain
+shows that the root syncModifiedTime comes from the stored server time.
+The first fix preserved this field as-is; for body/attributes/tree-body it incremented the maximum of the raw internal
+time by one. A compare with a separate record returned 200 and update returned 201.
+In the subsequent downsync 200 response:
 
-Eski tek sayfa yeniden kurucusu `tools/notes_update.py` canlı yazma yolu
-kapatıldı; yardımcıları ve sentetik tarihsel testleri korunuyor. Canlı doğrulanan
-yol `tools/notes_snapshot_update.py` içindedir.
+- The text from the device was preserved exactly and the Linux line was added.
+- The two page/layer sources and the full page tree were semantically unchanged.
+- The local note ID was the same; commit and fileRevision matched the write result.
 
-Aşağıdaki bölümler önceki aşamaların kapsamını ve kanıtını korur.
+(The records of the rejected attempt, the fix source and the successful readback are kept private.)
+At this intermediate stage, the user had not confirmed that the Linux line was visible on the device
+screen. The user reported re-editing the text during this check;
+the next device version was also downloaded and preserved. In a separate attempt made while the user was on the
+note list, the content was again verified with 201/200, but the
+GetNoteInfoView.syncModifiedTime fetched immediately afterwards had not advanced. Android `c4.f`, on an equal server
+time, only updates the commit; it does not download the content. Therefore a successful content
+readback alone does not prove that the device will receive the update.
 
-## Kaynak ve kapsam
+Correction of the earlier inference: although the serializer preserves the stored time, before a normal local
+save `WDocSaveOperation.setDocumentTimeEntity`, when keepServerTimestamp is
+false, advances ServerTimestamp with `TimeManager.getCurrentTime()`.
+`TimeManager` uses epoch-ms corrected by the server offset; the code that converts SDK time to
+application time divides the 16-digit SDK time by 1000. Product-level
+clock skew handling does not exist yet. In this session, 514 ms was observed between the server timestamp and the
+local request time rounded to the second; the measurement includes network latency
+and rounding and is not an exact clock skew.
+
+The schema 5 fix uses a new epoch-ms for the root syncModifiedTime and displayModifiedTime,
+and a separate raw counter for the internal body/attributes/tree-body. If the previous
+successful controlled revision matches on commit, file hash, title/text and the entire ID
+inventory, republishing without touching the text is supported. This way the
+Linux line is not added twice. This repair was applied with compare 200 → update 201 → info 200 →
+downsync 200. This time GetNoteInfoView.syncModifiedTime actually
+advanced and matched the prepared time; the text, both pages and the new commit were
+verified again. While on the note list, the user synced and reopened the note and,
+saying **“Evet, artık görünüyor”** (user's words: "Yes, it's visible now"), confirmed that the Linux line was seen on device.
+The controlled plain-text round trip was thus completed on a real device.
+(The fix, repair/readback and device confirmation records are kept private.)
+
+This is not evidence of general-purpose note editing or atomic conflict
+resolution: there is a race window between compare and update.
+
+Validation at this stage: 65 tests in the Rust workspace (including doctests) and 79 tests in the Python
+research tools passed; Rust format and Clippy checks clean.
+Live requests were not counted among the tests. Gaps at that stage: full inventory and
+persistent cursor, session renewal, offline queue, deletions/conflicts, attachments and
+drawings, a lossless general editor, the Tauri UI.
+
+The live write path of the old single-page rebuilder `tools/notes_update.py`
+was disabled; its helpers and synthetic historical tests are kept. The live-verified
+path is in `tools/notes_snapshot_update.py`.
+
+The sections below preserve the scope and evidence of earlier stages.
+
+## Source and scope
 
 Android Notes 4.4.45.37 APK SHA-256:
 `daed1eff8c8ee9dfb8afe2771e39e893a8808f3230d6d522a8aa647db09b8667`.
-Android uygulamasındaki değişiklik okuyucu (`b4.a`) `NoteChangesView`, `hasNext`, `lastChangePoint` ve not alanlarını okuyor.
-`networkutils.l.d()` HTTP GET seçiyor. İlgili uç
-`/samsungnotes/v1/notes/changes` veya `/samsungnotes/v3/notes/changes` ve query
-alanı `lastChangePoint`. Kullanılacak sürümün sunucu/hesap pazarlığı henüz
-çözülmedi; istemci kendiliğinden birini seçip istek göndermiyor.
+The change reader in the Android app (`b4.a`) reads `NoteChangesView`, `hasNext`, `lastChangePoint` and the note fields.
+`networkutils.l.d()` selects HTTP GET. The relevant endpoint is
+`/samsungnotes/v1/notes/changes` or `/samsungnotes/v3/notes/changes`, with the query
+field `lastChangePoint`. Server/account negotiation of which version to use is not yet
+resolved; the client does not pick one on its own and send a request.
 
-`notes-protocol` cursor ve commit değerlerini değiştirmeden korur; eksik
-silinme bayrağını false'a çevirmeden `None` tutar. Bilinmeyen elemanların ham
-XML parçaları giriş sırasıyla korunur. Bu parçalar bağımsız, yeniden
-gönderilebilir XML belgeleri değildir: kökteki namespace bildirimlerine
-bağlı olabilirler. Ayrıştırıcı tam XML roundtrip veya kayıpsız not editörü
-iddiası taşımaz. Not düzeyindeki `isEncrypted` ile EDP'nin noteTree üzerindeki
-`encrypted` niteliği aynı kavram olarak kullanılmayacak.
+`notes-protocol` preserves cursor and commit values without modification; it keeps a missing
+deleted flag as `None` instead of turning it into false. Raw
+XML fragments of unknown elements are preserved in input order. These fragments are not independent,
+re-sendable XML documents: they may depend on the namespace declarations at the
+root. The parser makes no claim of full XML roundtrip or of being a lossless note
+editor. The note-level `isEncrypted` and EDP's `encrypted` attribute on noteTree
+will not be treated as the same concept.
 
-2 MiB giriş ve 50.000 XML düğümü sınırı, zorunlu pagination/kimlik alanları,
-yinelenen bilinen alanların reddi ve açık boolean/numeric kontrolü bizim
-istemci doğrulama politikamızdır. Bunlar Samsung sunucusunun eksiksiz şeması
-olarak sunulmaz. DTD entity tanımları kabul edilmez, dış entity resolver yoktur.
-Bir hata mesajı not kimliğini veya yanıt içeriğini yazdırmaz.
+The 2 MiB input and 50,000 XML node limits, mandatory pagination/ID fields,
+rejection of duplicated known fields and explicit boolean/numeric checks are our
+client validation policy. They are not presented as the complete schema of the Samsung
+server. DTD entity definitions are not accepted; there is no external entity resolver.
+Error messages do not print note IDs or response content.
 
-`a1.t.Q/R/S/T` yardımcılarıyla karşılaştırma sonucunda boolean ve sayılarda
-whitespace normalizasyonu kaldırıldı. Boolean için yalnız true/false
-(büyük-küçük harf duyarsız) kabul edilir; Android diğer metinleri false'a
-çevirse de bizim doğrulama politikamız belirsiz girdiyi reddeder. Sayılar
-decimal veya küçük `0x` önekli hex olarak okunur; zaman signed 64-bit,
-SDK sürümü signed 32-bit. Android'in bozuk SDK değerini sıfıra düşüren
-fallback'i burada uygulanmaz, açık hata verilir. Bu farklar önce başarısız
-regresyon testleriyle gösterildi, ardından düzeltildi. Bu ilk aşamada 15 test geçti;
-Clippy `-D warnings` temiz. Kanıt: özel kanıt arşivi.
+Following comparison with the `a1.t.Q/R/S/T` helpers, whitespace normalization for booleans and numbers
+was removed. For booleans only true/false
+(case-insensitive) is accepted; although Android turns other text into false,
+our validation policy rejects ambiguous input. Numbers are read as
+decimal or as hex with a lowercase `0x` prefix; time is signed 64-bit, the
+SDK version signed 32-bit. Android's fallback that drops a corrupt SDK value to zero
+is not applied here; an explicit error is returned. These differences were first shown with failing
+regression tests and then fixed. In this first stage 15 tests passed;
+Clippy `-D warnings` clean. Evidence: the private evidence archive.
 
-Fixture elle oluşturulmuş sentetik veridir. Birden çok `changes` elemanını
-koruma davranışı testlidir; gerçek sunucunun bir sayfada birden çok not
-gönderdiği henüz gözlenmedi. Android uygulamasının bu alanı nasıl doldurduğu gerçek
-yanıtla karşılaştırılmalı. Mevcut testler canlı protokol uyumluluğunu kanıtlamaz.
+The fixture is hand-made synthetic data. Preserving multiple `changes` elements
+is tested; the real server has not yet been observed sending multiple notes on one
+page. How the Android app populates this field should be compared against a real
+response. The current tests do not prove live protocol compatibility.
 
-## Çalıştırma
+## Running
 
 ```sh
 cargo test --workspace --locked
@@ -197,71 +197,71 @@ cargo run -p notes-cli --locked -- inspect-changes crates/notes-protocol/tests/f
 cargo run -p notes-cli --locked -- inspect-tree crates/notes-protocol/tests/fixtures/tree.xml
 ```
 
-CLI yalnız sayıları ve pagination durumunu gösterir; not ID'si, cursor veya
-alan içeriklerini ekrana yazmaz. Girdi dosyasını değiştirmez. `sync` gibi
-henüz uygulanmamış bir komut hata verir.
+The CLI only shows counts and pagination state; it does not print note IDs, the cursor or
+field contents. It does not modify the input file. A command not yet implemented,
+such as `sync`, returns an error.
 
-## Not ağacı
+## Note tree
 
-`tree::parse_note_tree` artık `noteTree` ve `CompareForUpsyncView` köklerini,
-sayfa → katman → nesne hiyerarşisini, içerik dosyalarını, yüzen nesneleri ve
-gövde metni kaydını ayrıştırıyor. Kaynak `n1.o`;
-bu bir belge renderer'ı veya fark hesaplama motoru değil. Hash değerleri
-yorumlanmadan korunur. Ağacın `ver` ve `t` alanları kaynakta decimal okunur;
-changes yanıtındaki hex desteği bu alanlara uygulanmaz.
+`tree::parse_note_tree` now parses the `noteTree` and `CompareForUpsyncView` roots,
+the page → layer → object hierarchy, content files, floating objects and the
+body text record. Source: `n1.o`;
+this is not a document renderer or a diff engine. Hash values are preserved
+without interpretation. The tree's `ver` and `t` fields are read as decimal in the source;
+the hex support from the changes response is not applied to these fields.
 
-Özgün XML namespace ve bilinmeyen nitelikleriyle saklanır; değiştirilip tekrar
-gönderilebilen bir serializer henüz yok. 2 MiB / 50.000 düğüm sınırına ek
-64 derinlik, 4.096 varlık ve alan/ek veri sınırları uygulanır. Bunlar istemci
-politikasıdır. CLI yalnız yapı sayılarını gösterir, saklanan XML'i yazdırmaz.
-11 ağaç testi ve ek CLI testiyle çalışma alanında **27 test geçti**;
-Clippy `-D warnings` temiz. Yeni kanıtlar `tests-with-tree.log` ve
-`clippy-with-tree.log`; sentetik testler canlı sunucu uyumluluğunu kanıtlamaz.
+The original XML is stored with its namespaces and unknown attributes; there is not yet a serializer
+that can modify and re-send it. In addition to the 2 MiB / 50,000 node limit,
+64 depth, 4,096 entity and field/extra data limits apply. These are client
+policy. The CLI only shows structure counts and does not print the stored XML.
+With 11 tree tests and an additional CLI test, **27 tests passed** in the workspace;
+Clippy `-D warnings` clean. New evidence: `tests-with-tree.log` and
+`clippy-with-tree.log`; synthetic tests do not prove live server compatibility.
 
-## Sonraki kanıtlar
+## Next evidence
 
-1. Samsung Account kullanıcı etkileşimi, yönlendirme, oturum yenileme ve
-   bağımsız uygulamanın kabul koşulları.
-2. Hesap token'ından ayrı SCSP Cloud token edinme ve ERS adres seçimi.
-3. Gerçek, kontrollü `NoteChangesView` yanıtıyla parser karşılaştırması.
-4. NoteTree/metadata, binary dosyalar, upload URL ve commit ilişkisi.
-5. Test notu indirip açma; kontrollü değişikliği geri gönderme, ardından
-   çevrimdışı düzenleme, silme ve çakışma davranışı.
+1. Samsung Account user interaction, redirects, session renewal and the
+   acceptance conditions for an independent application.
+2. Acquiring an SCSP Cloud token separate from the account token, and ERS address selection.
+3. Parser comparison against a real, controlled `NoteChangesView` response.
+4. The relationship between NoteTree/metadata, binary files, upload URL and commit.
+5. Downloading and opening a test note; sending a controlled change back, followed by
+   offline editing, deletion and conflict behavior.
 
-Windows VM kuruldu; resmi Notes hesabı tanıdı ve not indirmeye başladı.
-Çalışan resmi Notes ve Android cihazları
-referans oturumunda (özel, depoda yok) aynı test notuyla karşılaştırılacak.
+A Windows VM was set up; the official Notes recognized the account and started downloading notes.
+The running official Notes and Android devices
+will be compared with the same test note in a reference session (private, not in the repository).
 
-## Hesap hazırlığı
+## Account preparation
 
-[PKCE S256](PKCE.md) için çevrimdışı primitive eklendi. 32 bayt işletim sistemi
-rastgeleliği, strict RFC verifier kontrolü ve gizli Debug davranışı testli.
-Toplam 33 test + 1 doctest geçti; Clippy/format temiz. Bu modül HTTP veya
-Samsung giriş uyumluluğu sağlamaz. Hesap araştırması (özel tutulur, depoda yok)
-gerçek GET başlangıç isteğini, yerel paket kontrolünü ve kalan belirsizlikleri
-ayrı tutar. Test notu transferini beklemeden protokol çalışması sürer.
+An offline primitive was added for [PKCE S256](PKCE.md). 32 bytes of operating system
+randomness, strict RFC verifier checking and secret-hiding Debug behavior are tested.
+33 tests + 1 doctest passed in total; Clippy/format clean. This module does not provide HTTP or
+Samsung sign-in compatibility. The account research (kept private, not in the repository)
+separately records the real GET start request, the local package check and the remaining uncertainties.
+Protocol work continues without waiting for the test note transfer.
 
-Sonraki aşamada `entrypoint` modülü ve `inspect-entrypoint FILE.json` komutu
-eklendi. İstek hazırlayıcı GET / countryCode / Basic(appId + boş parola)
-sözleşmesini uygular, HTTP göndermez; response parser sınırlı JSON metadata
-okur. Python probe ile Linux'tan alınan HTTP 200 yanıtı Rust CLI ile de
-ayrıştırıldı. Bu aşamada **42 test + 1 doctest** geçti; Clippy/format temizdi.
-Metadata parser tek başına giriş URL'sini veya RSA anahtarını doğrulamaz.
+In the next stage the `entrypoint` module and the `inspect-entrypoint FILE.json` command
+were added. The request builder implements the GET / countryCode / Basic(appId + empty password)
+contract and does not send HTTP; the response parser reads bounded JSON metadata.
+The HTTP 200 response obtained from Linux with the Python probe was also
+parsed with the Rust CLI. At this stage **42 tests + 1 doctest** passed; Clippy/format were clean.
+The metadata parser alone does not validate the sign-in URL or the RSA key.
 
-Sonraki `signin::PreparedSignIn` katmanı sabit Samsung giriş URL'si ve DER/RSA
-kontrollerini ekledi. 34 alanlı profile yeni PKCE/state yerleştirir; bağımsız
-Java fixture'ıyla doğrulanan KDF/AES/RSA zincirinden sonra çift URL kodlaması
-uygular. `notes-cli prepare-signin ENTRYPOINT.json PROFILE.json NEW_OUTPUT_DIR`
-çevrimdışı olarak özel URL ve V2 transaction dosyalarını oluşturur. Profildeki
-kimlikler kendiliğinden düzeltilmez: Notes IPC kimliği/callback'i ile Account
-web OAuth girdileri farklıdır; ayrıntılar özel hesap araştırması raporundadır (depoda yok).
+The subsequent `signin::PreparedSignIn` layer added the fixed Samsung sign-in URL and DER/RSA
+checks. It places a new PKCE/state into the 34-field profile; after the KDF/AES/RSA chain verified
+against an independent Java fixture, it applies double URL encoding.
+`notes-cli prepare-signin ENTRYPOINT.json PROFILE.json NEW_OUTPUT_DIR`
+creates the private URL and V2 transaction files offline. IDs in the profile
+are not corrected automatically: the Notes IPC ID/callback and the Account
+web OAuth inputs differ; details are in the private account research report (not in the repository).
 
-Python probe üzerinden gönderilen doğru web profiline sunucu HTTP 307 verdi;
-gönderilen state, iki client ID, callback ve response_type karşılaştırması
-başarılı. Kullanıcı hesabıyla giriş yapılmadı. `tools/capture_oauth_callback.py`
-stdin'den verilen URI'yi işlem hedefine/state'e/süreye bağlar, geçerli dönüşü
-bir kez özel dosyaya kaydeder. Masaüstü URI handler kaydı ve token isteği yok.
-Güncel toplam **49 Rust testi + 1 doctest ve 6 Python callback testi** geçti.
-Sentetik Rust CLI → Python callback capture → replay reddi de çevrimdışı
-kontrol edildi. Bu testler gerçek callback teslimini veya token kabulünü
-kanıtlamaz. Clippy `-D warnings` temiz.
+For the correct web profile sent via the Python probe, the server returned HTTP 307;
+comparison of the sent state, both client IDs, callback and response_type
+succeeded. No sign-in with the user account was performed. `tools/capture_oauth_callback.py`
+binds a URI given on stdin to the operation target/state/duration and records a valid return
+once to a private file. There is no desktop URI handler registration and no token request.
+The current total of **49 Rust tests + 1 doctest and 6 Python callback tests** passed.
+Synthetic Rust CLI → Python callback capture → replay rejection was also checked
+offline. These tests do not prove real callback delivery or token acceptance.
+Clippy `-D warnings` clean.

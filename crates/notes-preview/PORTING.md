@@ -106,7 +106,7 @@ and `allowed_url`.
   Signed picture links refused once are renewed by one read-only note GET per 10 min (as for PDFs).
   `MAX_DOWNLOAD` and the SPI input bound are 32 MiB (photo-heavy canvas caches and pictures exceed 8 MiB).
 - **Free-floating objects (intended, 2026-10-28).** A note with a non-empty `floatingObjectList` (a picture inserted
-  on a phone) was refused whole ("Bu not eklenmiş nesneler taşıyor."). Each floating object is now drawn by the page
+  on a phone) was refused whole ("Bu not eklenmiş nesneler taşıyor.", UI text: "This note carries attached objects."). Each floating object is now drawn by the page
   composite of the page its `pageIndex` names, after (over) that page's layer objects, from its own `rect` taken as
   page-local (observed on a phone note with `pageIndex` 0; other indices unobserved); a frame that misses the page,
   or an unplaceable `pageIndex`, is flagged (`NOTICE_HIDDEN`), never moved. Such a page always takes the composite

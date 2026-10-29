@@ -1,60 +1,60 @@
-# Çevrimdışı PKCE S256 parçası
+# Offline PKCE S256 component
 
-> Not: Buradaki kanıt kayıtları (arındırılmış ölçümler, ham analiz çıktıları) özel tutulur ve herkese açık depoda yer almaz.
+> Note: The evidence records referenced here (sanitized measurements, raw analysis output) are kept private and are not part of the public repository.
 
-`notes_protocol::pkce`, bağımsız istemci için standart bir hazırlık parçasıdır.
-Samsung'a bağlanmaz; giriş URL'si, callback, token isteği veya kullanıcı arayüzü
-oluşturmaz. Windows Account sabitlerinde `code_verifier`, `code_challenge` ve
-`code_challenge_method` bulunması araştırma gerekçesidir. Bu kod, Samsung'un
-S256'yı veya bağımsız Linux istemcisini kabul ettiğini kanıtlamaz.
+`notes_protocol::pkce` is a standard preparation component for the independent client.
+It does not connect to Samsung; it does not create a sign-in URL, callback, token request or user
+interface. The presence of `code_verifier`, `code_challenge` and
+`code_challenge_method` among the Windows Account constants is the research rationale. This code does not prove that Samsung
+accepts S256 or an independent Linux client.
 
-`CodeVerifier::generate()` işletim sisteminden 32 rastgele bayt alır ve
-padding içermeyen base64url ile 43 karaktere dönüştürür. RNG hatası doğrudan
-`RandomUnavailable` olur; zayıf kaynak veya `plain` fallback yoktur.
-`from_secret()` yalnız 43–128 ASCII unreserved karakter kabul eder; boşlukları
-silmez ve Unicode normalleştirmez. Bu kontrol entropiyi ölçmez. Yeni işlem
-için `generate()` kullanılmalıdır. `s256_challenge()` SHA-256 sonucunu
-padding içermeyen base64url olarak döndürür; yöntem sabiti `S256_METHOD`'dır.
-[RFC 7636 §4.1–4.2 ve Appendix B](https://www.rfc-editor.org/rfc/rfc7636.txt).
+`CodeVerifier::generate()` takes 32 random bytes from the operating system and
+converts them to 43 characters of unpadded base64url. An RNG error becomes
+`RandomUnavailable` directly; there is no weak source or `plain` fallback.
+`from_secret()` only accepts 43–128 ASCII unreserved characters; it does not strip
+whitespace or apply Unicode normalization. This check does not measure entropy. For a new operation,
+`generate()` should be used. `s256_challenge()` returns the SHA-256 result as
+unpadded base64url; the method constant is `S256_METHOD`.
+[RFC 7636 §4.1–4.2 and Appendix B](https://www.rfc-editor.org/rfc/rfc7636.txt).
 
-Verifier özel alanda `Zeroizing<String>` içinde tutulur; `Debug` yalnız
-`CodeVerifier([REDACTED])` yazar. `Display`, otomatik serialization ve `Clone`
-yoktur. `expose_secret()` gelecekteki token isteği için açıkça çağrılması
-gereken erişimdir; sonucu loglanmamalıdır. Verifier ve rastgele bayt tamponu
-drop sırasında temizlenir. Çağıranın `from_secret()` girdisi, işletim sistemi
-kopyaları ve kripto işlem ara durumları için tam bellek temizliği garantisi
-verilmez. [Zeroizing belgesi](https://docs.rs/zeroize/1.9.1/zeroize/struct.Zeroizing.html).
+The verifier is held in a private field inside `Zeroizing<String>`; `Debug` only
+writes `CodeVerifier([REDACTED])`. There is no `Display`, automatic serialization or `Clone`.
+`expose_secret()` is the accessor that must be called explicitly for a future token request;
+its result must not be logged. The verifier and the random byte buffer
+are cleared on drop. No full memory-clearing guarantee is given for the caller's `from_secret()` input,
+operating system copies or intermediate state of crypto operations.
+[Zeroizing documentation](https://docs.rs/zeroize/1.9.1/zeroize/struct.Zeroizing.html).
 
-Bağımlılıklar Cargo.lock ile sabitlenmiştir:
+Dependencies are pinned with Cargo.lock:
 
-| Kitaplık | Sürüm | Kullanım |
+| Library | Version | Use |
 | --- | --- | --- |
-| getrandom | 0.4.3 | İşletim sistemi CSPRNG'si; hata döndüren `fill` |
+| getrandom | 0.4.3 | Operating system CSPRNG; error-returning `fill` |
 | sha2 | 0.10.9 | RustCrypto SHA-256 |
-| base64 | 0.23.1 | URL-safe, padding'siz kodlama; yalnız alloc özelliği |
-| zeroize | 1.9.1 | Sahip olunan gizli tamponları drop sırasında temizleme |
+| base64 | 0.23.1 | URL-safe, unpadded encoding; alloc feature only |
+| zeroize | 1.9.1 | Clearing owned secret buffers on drop |
 
-[getrandom](https://docs.rs/getrandom/0.4.3/getrandom/fn.fill.html),
-[sha2](https://docs.rs/sha2/0.10.9/sha2/) ve
-[base64](https://docs.rs/base64/0.23.1/base64/) API'leri kullanılır; kriptografik
-algoritma yeniden yazılmadı. `sha2` 0.11.1'in paket manifesti Rust 1.88
-istediğinden projenin 1.85 hedefi için 0.10.9 seçildi. Linux bağımlılıklarının
-bildirdiği MSRV'ler 1.85'i aşmıyor; bazı eski geçişli paketler MSRV bildirmiyor.
-Derleme/test mevcut Rust **1.99.1** ile yapıldı; **Rust 1.85 üzerinde derleme
-henüz doğrulanmadı**. Workspace `rust-version = "1.85"` korunuyordu.
-2026-10-27 bağımlılık güncellemesinde (parking_lot 0.13 → Rust 1.95, rusqlite 0.41 →
-1.89) workspace `rust-version` 1.95'e çıkarıldı; `sha2` 0.10.9'da kalıyor (ayrı karar).
+The [getrandom](https://docs.rs/getrandom/0.4.3/getrandom/fn.fill.html),
+[sha2](https://docs.rs/sha2/0.10.9/sha2/) and
+[base64](https://docs.rs/base64/0.23.1/base64/) APIs are used; no cryptographic
+algorithm was reimplemented. Because the package manifest of `sha2` 0.11.1 requires Rust 1.88,
+0.10.9 was chosen for the project's 1.85 target. The MSRVs declared by the Linux dependencies
+do not exceed 1.85; some old transitive packages do not declare an MSRV.
+Build/test was done with the current Rust **1.99.1**; **building on Rust 1.85 has
+not been verified yet**. The workspace kept `rust-version = "1.85"`.
+In the 2026-10-27 dependency update (parking_lot 0.13 → Rust 1.95, rusqlite 0.41 →
+1.89) the workspace `rust-version` was raised to 1.95; `sha2` stays at 0.10.9 (a separate decision).
 
-Doğrulama: altı PKCE testi RFC Appendix B vektörünü, sınır uzunlukları,
-unreserved karakterleri, geçersiz girdi reddini, üretilen değerin boyutunu ve
-Debug/hata gizliliğini kapsar. Bir compile-fail doctest `Display` bulunmadığını
-kontrol eder. Rastgele değer testi yalnız biçim/OS kaynağı erişimini kontrol
-eder; istatistiksel entropi ölçümü değildir. Workspace'te **33 test ve 1
-doctest geçti**; Clippy `-D warnings` ve format kontrolü temiz.
-Kanıt: özel kanıt arşivi.
+Validation: six PKCE tests cover the RFC Appendix B vector, boundary lengths,
+unreserved characters, rejection of invalid input, the size of the generated value and
+Debug/error secrecy. One compile-fail doctest checks that `Display` is absent.
+The random value test only checks format/OS source access;
+it is not a statistical entropy measurement. In the workspace **33 tests and 1
+doctest passed**; Clippy `-D warnings` and format check clean.
+Evidence: the private evidence archive.
 
-Güvenlik tasarımında OWASP ASVS 10.1.2, 11.2.1 ve 11.5.1 kapsamı esas alındı:
-yeni verifier üretimi, hazır kripto kitaplıkları ve güçlü rastgelelik.
-Transaction/state bağlama, callback doğrulama, tek kullanım ve oturum yaşam
-döngüsü henüz uygulanmadı; bu parça tek başına güvenli bir OAuth istemcisi
-veya ASVS uyumluluk değerlendirmesi değildir.
+The security design was based on the scope of OWASP ASVS 10.1.2, 11.2.1 and 11.5.1:
+generating a new verifier, established crypto libraries and strong randomness.
+Transaction/state binding, callback validation, single use and the session
+lifecycle are not implemented yet; this component alone is not a secure OAuth client
+or an ASVS compliance assessment.

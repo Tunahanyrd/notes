@@ -7,7 +7,7 @@ behaviour is unchanged (all notes-* crate tests, HTTP conformance PASS, PyO3
 port `rust` and `rust-strict` suites green). Nothing has been executed on macOS
 yet; that is what the checklist below is for.
 
-Türkçe özet en altta.
+Summary at the end.
 
 ## How the app works on macOS
 
@@ -157,7 +157,7 @@ Useful environment variables (same names as on Linux):
 | `LINUX_NOTES_ENGINE=native` | use a `notes-engine` binary child instead of in-process (debugging) |
 | `NOTES_MACOS_SANDBOX_EXEC=0` | disable the Seatbelt layer of the preview helpers |
 
-## Test checklist for Yusuf
+## Test checklist for Mac testers
 
 Never use the project owner's account, library or exported data. Everything
 below uses a synthetic library or **your own** Samsung account in a throwaway
@@ -210,7 +210,7 @@ Without `--no-browser` it opens the UI in your default browser.
 
     LINUX_NOTES_OFFLINE=1 LINUX_NOTES_DATA_DIR="$NOTES_TEST/offline-lib" "$EXE" 2> "$NOTES_TEST/app-stderr.log"
 
-- [ ] window opens with the UI (no "Uygulama kaynakları bulunamadı" error)
+- [ ] window opens with the UI (no "Uygulama kaynakları bulunamadı" error; UI text: "App resources not found")
 - [ ] the same checks as step 2 inside the app window
 - [ ] quitting the app (Cmd+Q) leaves no `notes-engine`/`pdftoppm`/`ink-render` process behind (`ps aux | grep -E 'pdftoppm|ink-render'`)
 
@@ -227,7 +227,7 @@ Without `--no-browser` it opens the UI in your default browser.
 3. Click sign in. The browser opens Samsung's page; sign in with **your** account.
 4. When the browser asks to open "Notlar", allow it.
 5. Expected: the app comes to the front, status becomes connected, sync starts,
-   and the browser shows the local "Giriş tamamlandı" page. If the hand-off
+   and the browser shows the local "Giriş tamamlandı" page (UI text: "Sign-in complete"). If the hand-off
    starts a second copy instead of returning to the running one, quit both and
    start it through LaunchServices instead:
    `open -n "$APP" --env XDG_STATE_HOME="$XDG_STATE_HOME" --env LINUX_NOTES_DATA_DIR="$NOTES_TEST/library"`.
@@ -337,33 +337,33 @@ these Unix-only assumptions remain in callers and would need abstraction:
 - `std::os::unix` imports (`OsStrExt`, `FromRawFd`, ...) across crates
 - URL-scheme registration (`notes_platform::url_scheme` + `notes-login::handler`)
 
-## Türkçe özet
+## Summary
 
-macOS portu için altyapı hazır, ancak **henüz bir Mac'te çalıştırılmadı**.
-Kod `aarch64-apple-darwin` için derleniyor (Linux'tan `tools/macos/cross_check.sh`
-ile, testler ve masaüstü kabuğu dahil); Linux davranışı değişmedi (notes-*
-testleri, HTTP uygunluk testi PASS, PyO3 `rust`/`rust-strict` yeşil).
+The infrastructure for the macOS port is ready, but it has **not yet been run on a Mac**.
+The code compiles for `aarch64-apple-darwin` (from Linux with `tools/macos/cross_check.sh`,
+including tests and the desktop shell); Linux behaviour is unchanged (notes-*
+tests, HTTP conformance test PASS, PyO3 `rust`/`rust-strict` green).
 
-- Platform katmanı: `crates/notes-platform` (dizinler, `open`, süreç, araç
-  bulma, ön izleme yalıtımı, soket, URL şeması). Linux'ta birebir eski davranış.
-- macOS'ta uygulama saf Rust motorunu süreç içinde çalıştırır; veri
-  `~/Library/Application Support/org.linuxnotes.desktop` altında; açıkça
-  verilen `XDG_*` değişkenleri yalıtılmış test profili için geçerli.
-- Giriş: `ms-app` şeması `Info.plist` ile tanımlı; geri çağrı Apple Event ile
-  çalışan uygulamaya gelir ve aynı `notes_login::dispatch` koduna verilir.
-- Ön izleme: bwrap yok; `env -i` + Seatbelt (ağ yok, yalnız çıktı dizinine
-  yazma). Linux'a göre daha zayıf yalıtım (dosya okuma serbest, PDEATHSIG yok).
-- Yusuf için: önkoşullar, derleme (`tools/macos/build_app.sh`), sentetik
-  kütüphaneyle çevrimdışı test, kendi hesabıyla yalıtılmış dizinde giriş, geri
-  gönderilecekler (token'sız loglar) yukarıdaki kontrol listesinde.
-- CI: `.github/workflows/macos.yml` (macos-14: cargo test, çevrimdışı duman
-  testi, bilgi amaçlı uygunluk, Playwright Chromium/WebKit, imzasız .app) ve
-  Linux eşlik işi (aynı testler + darwin derleme kontrolü).
-- Dağıtım: `tools/macos/build_app.sh --release --dmg --version X` imzasız,
-  notarize edilmemiş `<AppName>-<sürüm>-<mimari>.dmg` + `.sha256` üretir;
-  release.yml bunu `macos-dmg` artifact'ı olarak ekler. İlk açılış: sağ tık →
-  Aç, ya da `xattr -dr com.apple.quarantine`. İmzalama için Apple Developer ID
-  gerekir; CI'da kapalı (`if: false`) belgeli bir adım var.
-- Paylaşım: `tools/export_for_collaborator.sh OUT --git` (artifacts, references,
-  yedekler, veritabanları, Samsung ikonları/fontları, iç notlar ve canlı Cloud
-  probe'ları hariç; Samsung ikonları yerine özgür Lucide seti).
+- Platform layer: `crates/notes-platform` (directories, `open`, processes, tool
+  lookup, preview isolation, sockets, URL scheme). On Linux, exactly the previous behaviour.
+- On macOS the app runs the pure Rust engine in-process; data lives under
+  `~/Library/Application Support/org.linuxnotes.desktop`; explicitly set
+  `XDG_*` variables apply for an isolated test profile.
+- Sign-in: the `ms-app` scheme is declared in `Info.plist`; the callback reaches
+  the running app as an Apple Event and is passed to the same `notes_login::dispatch` code.
+- Previews: no bwrap; `env -i` + Seatbelt (no network, writes only to the output
+  directory). Weaker isolation than on Linux (file reads unrestricted, no PDEATHSIG).
+- For Mac testers: prerequisites, build (`tools/macos/build_app.sh`), offline test with
+  the synthetic library, sign-in with their own account in an isolated directory,
+  and what to send back (token-free logs) are in the checklist above.
+- CI: `.github/workflows/macos.yml` (macos-14: cargo test, offline smoke
+  test, informational conformance, Playwright Chromium/WebKit, unsigned .app) and the
+  Linux parity job (same tests + darwin compile check).
+- Distribution: `tools/macos/build_app.sh --release --dmg --version X` produces an unsigned,
+  non-notarized `<AppName>-<version>-<arch>.dmg` + `.sha256`;
+  release.yml adds it as the `macos-dmg` artifact. First launch: right-click →
+  Open, or `xattr -dr com.apple.quarantine`. Signing requires an Apple Developer ID;
+  CI has a documented, disabled (`if: false`) step.
+- Sharing: `tools/export_for_collaborator.sh OUT --git` (excludes artifacts, references,
+  backups, databases, Samsung icons/fonts, internal notes and live Cloud
+  probes; the free Lucide set replaces the Samsung icons).

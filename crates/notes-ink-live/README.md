@@ -1,59 +1,60 @@
 # notes-ink-live
 
-Canlı kalem önizlemesi, GPL-3.0. Kalemin altındaki çizgi, kayıtlı sayfaların
-kullandığı çiziciyle çizilir: sabitlenmiş **twangodev/sdocx** commit
+Live pen preview, GPL-3.0. The stroke under the pen is drawn with the same
+renderer that saved pages use: the pinned **twangodev/sdocx** commit
 `41e9c1099b29a48dc7320501573d7c4858f09303` (`references/upstream/sdocx`,
-`tools/fetch_sdocx.sh`) ve aynı resvg sürümü (`=0.49.0`, crates/rs-render ile
-aynı). Algoritma yeniden yazılmadı; burada yalnız yazıcının girdisi taklit edilir:
+`tools/fetch_sdocx.sh`) and the same resvg version (`=0.49.0`, same as
+crates/rs-render). The algorithm was not rewritten; this crate only reproduces
+the writer's input:
 
-- `rs-ink` capture nicelemesi (Q5 konum, Q12 basınç, float32 birikim);
-  `src/quantize_expected.txt` Python oracle'ından (`normalize_capture`) alındı.
-- Şablon kalem: sayfa çizicisinin gördüğü `rendering` nesnesi
-  (`GET /api/notes/:id/ink-pens`), stylus kanalları düşürülür (yazıcı da
-  düşürür), renk/kalınlık değişince recipe 3 kuralları (fixedWidth, tolerans).
-- Boş sayfada ilk çizgi: recipe 4 FountainPen `18;0;100;`, araç 3.
-- tools/ink-renderer `calibrated` ayarları (InkPen2 `9;`, profil 1440×2304).
+- `rs-ink` capture quantization (Q5 position, Q12 pressure, float32 accumulation);
+  `src/quantize_expected.txt` was taken from the Python oracle (`normalize_capture`).
+- Template pen: the `rendering` object the page renderer sees
+  (`GET /api/notes/:id/ink-pens`); stylus channels are dropped (the writer
+  drops them too); when color/width changes, recipe 3 rules (fixedWidth, tolerance).
+- First stroke on an empty page: recipe 4 FountainPen `18;0;100;`, tool 3.
+- tools/ink-renderer `calibrated` settings (InkPen2 `9;`, profile 1440×2304).
 
-Ayrı Cargo workspace'idir (kök workspace üyesi değil; GPL kaynak ve lockfile
-motor derlemesine girmez).
+It is a separate Cargo workspace (not a member of the root workspace; the GPL
+source and lockfile do not enter the engine build).
 
-## Derleme
+## Build
 
 ```sh
 tools/build_ink_wasm.sh            # desktop/public/ink-live.wasm (Vite → dist/)
 cd desktop && npm run build
 ```
 
-`wasm32-unknown-unknown` std gerekir. Dağıtım Rust paketlerinde çoğu zaman yok:
-`rustup target add wasm32-unknown-unknown` ya da `RUSTUP_HOME`/`CARGO_HOME`
-ile bu hedefi içeren yalıtılmış bir rustup. Derleme `--locked` ve
-`--remap-path-prefix` ile yapılır; aynı kaynak, aynı araç zinciri ve aynı
-kayıt kaynağıyla iki temiz derlemede aynı `.wasm` baytları ölçüldü. Çıktı
-`.gitignore`'da; depoya önceden derlenmiş `.wasm` konmaz. Dosya yoksa arayüz
-sessizce eski SVG çizgisine döner.
+Requires the `wasm32-unknown-unknown` std. Distribution Rust packages often lack it:
+`rustup target add wasm32-unknown-unknown`, or an isolated rustup that includes
+this target via `RUSTUP_HOME`/`CARGO_HOME`. The build uses `--locked` and
+`--remap-path-prefix`; two clean builds with the same source, the same toolchain
+and the same registry source were measured to produce identical `.wasm` bytes.
+The output is in `.gitignore`; no prebuilt `.wasm` is committed to the
+repository. If the file is missing, the UI silently falls back to the old SVG stroke.
 
-Arayüz modülü bir Web Worker'da çalıştırır (`desktop/src/inkLiveWorker.ts`).
-CSP'de `script-src 'wasm-unsafe-eval'` gerekir (motorun ve Tauri'nin CSP'sine
-eklendi; string `eval` açılmaz).
+The UI runs the module in a Web Worker (`desktop/src/inkLiveWorker.ts`).
+The CSP needs `script-src 'wasm-unsafe-eval'` (added to the engine's and
+Tauri's CSP; string `eval` is not enabled).
 
 ## C-ABI
 
 `src/wasm.rs`: `ink_alloc/ink_free`, `ink_pen_new(json)`, `ink_render(pen,
-samples f64×4, n, scale)`, `ink_out_rect/ptr/len` (düz alfa RGBA), `ink_error`.
-wasm-bindgen yok.
+samples f64×4, n, scale)`, `ink_out_rect/ptr/len` (straight-alpha RGBA), `ink_error`.
+No wasm-bindgen.
 
-## Doğrulama
+## Verification
 
-- `cargo test --release` (12 test): niceleme oracle eşitliği, basınç → genişlik
-  (stylus Fountain), ilk çizgi fare profili, recipe 3, desteklenmeyen kalemlerin
-  reddi, determinism, renk.
-- `node tools/ink_live_fidelity.mjs`: aynı sentetik çizgiler için `.wasm`
-  çıktısı ile yerel yol (Python oracle nicelemesi → tools/ink-renderer →
-  resvg) aynı ölçekte piksel piksel karşılaştırılır.
+- `cargo test --release` (12 tests): quantization oracle equality, pressure → width
+  (stylus Fountain), first-stroke mouse profile, recipe 3, rejection of
+  unsupported pens, determinism, color.
+- `node tools/ink_live_fidelity.mjs`: for the same synthetic strokes, the `.wasm`
+  output and the local path (Python oracle quantization → tools/ink-renderer →
+  resvg) are compared pixel by pixel at the same scale.
 - Playwright `desktop/tests/ink-live.spec.ts`.
 
-Sınırlar: çizim yerel çizicinin çıktısıdır, Samsung GPU pikseli değildir.
-Yeni InkPen2 çizgisi stylus kanalı taşımadığı için sdocx'in yaklaşık InkPen2
-yolu çizer; kayıttan sonra sayfa önizleyicisi de aynı çizgiyi aynı yoldan
-çizer (notes-preview `admitted`, stylus kanalsız InkPen2 2026-10-27'den beri
-kabul; önceden sayfanın tamamı reddediliyordu).
+Limits: the drawing is the local renderer's output, not Samsung GPU pixels.
+Because a new InkPen2 stroke carries no stylus channel, sdocx's approximate
+InkPen2 path draws it; after saving, the page previewer draws the same stroke
+via the same path (notes-preview `admitted`; stylus-less InkPen2 has been
+accepted since 2026-10-27; previously the whole page was rejected).

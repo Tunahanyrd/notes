@@ -68,8 +68,9 @@ yet. All of their own names are ported.
      preparation entirely.
    - Inside the child, the verified resource and the decoded strokes are cached per exact source,
      so the inventory and all pages share one decode.
-   - Error messages and their mapping are the same as Python: no admitted page gives "bulunmuyor",
-     a failed body gives "hazırlanamadı", and a timeout gives "süresi doldu".
+   - Error messages and their mapping are the same as Python: no admitted page gives "bulunmuyor"
+     (UI text: "not found"), a failed body gives "hazırlanamadı" ("could not be prepared"), and a
+     timeout gives "süresi doldu" ("timed out").
    - `inspect_render_pages` still uses the `-m samsung_notes.ink_render_job inventory` child,
      which runs the Rust `_prepare_pages`.
 5. **Renderer not linked in process.** The GPL sdocx renderer is not linked into the extension.

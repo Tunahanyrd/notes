@@ -47,7 +47,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TOP_FILES = [
     'Cargo.toml', 'Cargo.lock', 'branding.json', 'LICENSE', 'NOTICE',
     'THIRD_PARTY_LICENSES.md', 'THIRD_PARTY_LICENSES.json', 'deny.toml',
-    'README.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md', 'SECURITY.md',
+    'README.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md', 'SECURITY.md',
     'Dockerfile', '.dockerignore', '.gitignore', 'rust-toolchain.toml', '.semgrepignore',
 ]
 # Directories copied recursively (minus EXCLUDE_GLOBS).
@@ -69,9 +69,10 @@ EXTRA_FILES = [
     'tools/export_for_collaborator.sh', 'tools/third_party_licenses.py',
     'tools/fetch_sdocx.sh', 'tools/flatpak_sources.sh', 'tools/build_ink_wasm.sh',
     'tools/dev_native_snapshot.sh', 'tools/semgrep.sh', 'tools/clippy_security.sh',
+    'tools/screenshots.mjs',  # README screenshots from the synthetic demo library
 ]
 # Glob patterns (relative to the root) for loose files, e.g. packaging scripts.
-TOP_GLOBS: list[str] = []
+TOP_GLOBS: list[str] = ['docs/screenshots/*.png']  # README screenshots (synthetic demo data only)
 
 # Excluded even inside allowed directories (fnmatch on the POSIX relative path).
 EXCLUDE_GLOBS = [
@@ -160,6 +161,7 @@ def rel(path: Path, base: Path) -> str:
 SYNTHETIC_DATABASES = {
     'crates/notes-engine/conformance/golden/library/main/library.sqlite3',
     'crates/notes-engine/conformance/golden/library/uninit/library.sqlite3',
+    'desktop/tests/fixtures/demo-library/library.sqlite3',  # invented demo user for tools/screenshots.mjs
 }
 
 

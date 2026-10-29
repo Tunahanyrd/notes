@@ -1,11 +1,11 @@
 # Samsung Notes structured text editor contract
 
-> Not: Buradaki kanıt kayıtları (arındırılmış ölçümler, ham analiz çıktıları) özel tutulur ve herkese açık depoda yer almaz.
+> Note: the evidence records referred to here (sanitized measurements, raw analysis output) are kept private and are not part of the public repository.
 
 This is a conservative implementation of the Notes 4.4.45.37 format-4000
 text-object annotation stream. It is not HTML, Markdown, or a complete Spen
 document writer. Source references and digests are in
-özel kanıt arşivi.
+the private evidence archive.
 
 ## Product/API boundary
 
@@ -121,8 +121,7 @@ opened from the editor.
 ### Text-anchored objects (`objectSpan/objectSpan`, `s1.a`) — editor-projection-v4
 
 A picture inserted into the text on a phone lives in the note-level
-`floatingObjectList` (see docs/INK_APPLICATION.md, "Serbest yerleşimli
-nesneler"); the body text marks its place with one U+FFFC wrapped in an
+`floatingObjectList` (see [INK_APPLICATION.md, "Floating objects"](INK_APPLICATION.md#floating-objects-2026-10-28)); the body text marks its place with one U+FFFC wrapped in an
 object span:
 
     <?a 'objectSpan/objectSpan'='<object id>,0,0'?>[U+FFFC]<?a 'objectSpan/objectSpan'?>

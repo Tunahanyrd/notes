@@ -28,7 +28,9 @@ type Draft = {title:string;body:string;revision:number;dirty:boolean;editor?:Edi
 interface EditorProjection {schemaVersion:1;capabilities:{titleEdit:boolean;textEdit:boolean;richStyle:boolean;inkEdit:boolean};model:EditorModel|null;reason:string|null;revision:number}
 const navItems = [{id:'all',label:'Tüm notlar',icon:Folder},{id:'favorites',label:'Favoriler',icon:Heart},{id:'conflicts',label:'Çakışmalar',icon:ShieldAlert},{id:'trash',label:'Çöp kutusu',icon:Trash2}] as const;
 const syncLabels:Record<Note['syncState'],string> = {synced:'Bulutla eşitlendi',pending:'Buluta gönderilmeyi bekliyor',local:'Bu cihazda kayıtlı',conflict:'İki farklı sürüm var',error:'Eşitleme tamamlanamadı',uncertain:'Eşitleme kontrol ediliyor'};
-const date = (value:number|null, detailed=false) => value ? new Intl.DateTimeFormat('tr-TR', detailed ? {day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'} : {day:'numeric',month:'short'}).format(value) : '';
+// The year is shown whenever it is not the current one ("30 Haz 2025").
+const otherYear = (value:number) => new Date(value).getFullYear()!==new Date().getFullYear();
+const date = (value:number|null, detailed=false) => value ? new Intl.DateTimeFormat('tr-TR', {...(detailed ? {day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'} as const : {day:'numeric',month:'short'} as const), ...(otherYear(value)?{year:'numeric'} as const:{})}).format(value) : '';
 const message = (e:unknown) => e instanceof Error ? e.message : 'İşlem tamamlanamadı.';
 
 // Samsung clients name untitled notes by kind and creation day (MM/DD);
@@ -36,7 +38,7 @@ const message = (e:unknown) => e instanceof Error ? e.message : 'İşlem tamamla
 // Samsung keeps trashed items 30 days (Windows NoteTrashManager "Remove Deleted Notes Over 30 Days").
 const TRASH_DAYS=30,DAY=86400000;
 function daysLeft(trashedAt:number|null|undefined){return trashedAt&&trashedAt>0?Math.max(0,Math.ceil((trashedAt+TRASH_DAYS*DAY-Date.now())/DAY)):null;}
-function untitledName(note:Note){const day=note.createdAt??note.modifiedAt;const stamp=day?new Date(day).toLocaleDateString('en-US',{month:'2-digit',day:'2-digit'}):'';return `${!note.editable&&!(note.preview||'').trim()?'El yazısı notu':'Metin notu'}${stamp?' '+stamp:''}`;}
+function untitledName(note:Note){const day=note.createdAt??note.modifiedAt;const d=day?new Date(day):null;const stamp=d?[d.getDate(),d.getMonth()+1].map(n=>String(n).padStart(2,'0')).join('.')+(otherYear(d.getTime())?'.'+d.getFullYear():''):'';return `${!note.editable&&!(note.preview||'').trim()?'El yazısı notu':'Metin notu'}${stamp?' '+stamp:''}`;}
 export default function App() {
   const [authorized] = useState(()=>{try{return initializeApi();}catch{return false;}});
   const {preferences,changePreferences,preferenceError}=usePreferences(authorized);
