@@ -156,13 +156,27 @@ pub fn missing_report() -> Vec<String> {
 
 /// Extra CA bundle loaded after OpenSSL's default verify paths. Linux:
 /// none (the distribution OpenSSL already points at the system store).
-/// macOS: `/etc/ssl/cert.pem` (Apple's bundled roots) when present, because
-/// a statically linked Homebrew OpenSSL otherwise only knows its own
-/// `OPENSSLDIR`, which does not exist on Macs without Homebrew.
+/// The system CA bundle, loaded in addition to OpenSSL's default paths.
+/// macOS: `/etc/ssl/cert.pem` (Apple's bundled roots), because a statically
+/// linked Homebrew OpenSSL otherwise only knows its own `OPENSSLDIR`, which
+/// does not exist on Macs without Homebrew. Linux: an OpenSSL bundled in an
+/// AppImage keeps its build host's `OPENSSLDIR` (Ubuntu `/usr/lib/ssl`), which
+/// does not exist on Arch, Fedora or openSUSE, so the distribution's bundle is
+/// found by its well-known path. `SSL_CERT_FILE` always wins.
 pub fn extra_ca_file() -> Option<PathBuf> {
-    if cfg!(target_os = "macos") && std::env::var_os("SSL_CERT_FILE").is_none() {
-        let path = PathBuf::from("/etc/ssl/cert.pem");
-        return path.is_file().then_some(path);
+    if std::env::var_os("SSL_CERT_FILE").is_some() {
+        return None;
     }
-    None
+    let candidates: &[&str] = if cfg!(target_os = "macos") {
+        &["/etc/ssl/cert.pem"]
+    } else {
+        &[
+            "/etc/ssl/certs/ca-certificates.crt",                // Debian, Ubuntu, Arch, Gentoo
+            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", // Fedora, RHEL
+            "/etc/pki/tls/certs/ca-bundle.crt",                  // older Fedora/RHEL
+            "/etc/ssl/ca-bundle.pem",                            // openSUSE
+            "/etc/ssl/cert.pem",                                 // Alpine, Void, Arch
+        ]
+    };
+    candidates.iter().map(PathBuf::from).find(|path| path.is_file())
 }

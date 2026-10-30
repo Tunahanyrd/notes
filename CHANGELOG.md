@@ -11,6 +11,19 @@ result was also checked in the official app on a phone or tablet.
 
 ## [Unreleased]
 
+### Fixed
+
+- AppImage on Arch, Fedora and openSUSE: sync failed with "Cloud yanıtı
+  alınamadı" because the bundled OpenSSL looked for CA certificates in
+  Ubuntu's /usr/lib/ssl; the distribution's CA bundle is now found by its
+  well-known path.
+
+### Added
+
+- Arch Linux package (`notes-*.pkg.tar.zst`) in every release.
+
+## [0.0.2-alpha] - 2026-10-29
+
 ### Added
 
 - Dark theme: Settings → Tema (Sistem / Açık / Koyu). "Sistem" follows the
@@ -103,5 +116,6 @@ The user interface is in Turkish.
 - Previews of pictures, shapes and text boxes are drawn by this client and are
   close to, not identical with, the official renderer.
 
-[Unreleased]: https://github.com/Tunahanyrd/notes/compare/v0.0.1-alpha...HEAD
+[Unreleased]: https://github.com/Tunahanyrd/notes/compare/v0.0.2-alpha...HEAD
+[0.0.2-alpha]: https://github.com/Tunahanyrd/notes/compare/v0.0.1-alpha...v0.0.2-alpha
 [0.0.1-alpha]: https://github.com/Tunahanyrd/notes/releases/tag/v0.0.1-alpha

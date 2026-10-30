@@ -11,8 +11,8 @@ signs in with a Samsung account, syncs notes with Samsung Cloud and lets you
 read and edit them in a native window — no Wine, Windows VM or Android
 emulator involved. A macOS build exists but has not yet been tested on a Mac.
 
-> **Alpha software.** The first public pre-release is
-> [v0.0.1-alpha](https://github.com/Tunahanyrd/notes/releases/tag/v0.0.1-alpha).
+> **Alpha software.** Releases are
+> [pre-releases](https://github.com/Tunahanyrd/notes/releases).
 > Every Cloud write is checked by reading the note back, but keep backups of
 > notes that matter and expect rough edges. The user interface is in Turkish.
 
@@ -95,9 +95,9 @@ not pixel-identical to the official renderer.
 
 ## Install
 
-Download the files from the
-[v0.0.1-alpha release](https://github.com/Tunahanyrd/notes/releases/tag/v0.0.1-alpha)
-into one directory and check them first:
+Download the package for your system and `SHA256SUMS` from the
+[latest release](https://github.com/Tunahanyrd/notes/releases) (pre-releases are
+alphas) into one directory and check them first:
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS
@@ -105,20 +105,23 @@ sha256sum -c --ignore-missing SHA256SUMS
 
 | Package | Install |
 |---|---|
-| AppImage (any x86_64 distribution) | `chmod +x Notes_0.0.1-alpha_amd64.AppImage && ./Notes_0.0.1-alpha_amd64.AppImage` |
-| Debian / Ubuntu | `sudo apt install ./Notes_0.0.1-alpha_amd64.deb` |
-| Fedora / openSUSE / RHEL | `sudo dnf install ./Notes-0.0.1-0.alpha.x86_64.rpm` |
-| Flatpak | `flatpak install --user io.github.tunahanyrd.Notes-0.0.1-alpha.flatpak` |
+| Arch Linux | `sudo pacman -U ./notes-*.pkg.tar.zst` |
+| AppImage (any x86_64 distribution) | `chmod +x Notes_*_amd64.AppImage && ./Notes_*_amd64.AppImage` |
+| Debian / Ubuntu | `sudo apt install ./Notes_*_amd64.deb` |
+| Fedora / openSUSE / RHEL | `sudo dnf install ./Notes-*.x86_64.rpm` |
+| Flatpak | `flatpak install --user io.github.tunahanyrd.Notes-*.flatpak` |
 
 The Flatpak bundle needs the GNOME 50 runtime from Flathub; if it is missing,
 add Flathub first:
 `flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`.
-The .deb and .rpm pull in poppler-utils, bubblewrap and xdg-utils; ImageMagick
-is recommended (PDF export). The AppImage expects `pdftoppm`/`pdfinfo`
-(poppler-utils) and `bwrap` (bubblewrap) on the host for page previews.
+The Arch, .deb and .rpm packages pull in poppler, bubblewrap and xdg-utils;
+ImageMagick is recommended (PDF export). The AppImage expects `pdftoppm`/`pdfinfo`
+(poppler) and `bwrap` (bubblewrap) on the host for page previews, and does not
+add itself to the application menu (use your desktop's AppImage integration,
+e.g. Gear Lever or AppImageLauncher).
 
-**macOS** (`Notes-0.0.1-alpha-arm64.dmg` for Apple silicon,
-`Notes-0.0.1-alpha-x86_64.dmg` for Intel): the disk image is **unsigned and
+**macOS** (`Notes-*-arm64.dmg` for Apple silicon,
+`Notes-*-x86_64.dmg` for Intel): the disk image is **unsigned and
 not notarized** and has not yet been tested on a real Mac. Check it against
 `SHA256SUMS` (or its `.sha256` file), drag the app to Applications, then
 right-click it → **Open** (or run

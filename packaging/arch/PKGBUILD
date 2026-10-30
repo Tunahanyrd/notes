@@ -38,6 +38,7 @@ sha256sums=('SKIP'
             'SKIP')
 
 _lib=/usr/lib/$pkgname
+_appid=io.github.tunahanyrd.Notes
 
 prepare() {
   cd "$pkgname-$pkgver"
@@ -78,18 +79,20 @@ package() {
   install -d "$pkgdir$_lib/desktop"
   cp -r --no-preserve=ownership desktop/dist "$pkgdir$_lib/desktop/dist"
 
-  sed 's/{{exec}}/notes/g; s/{{icon}}/notes/g' packaging/linux/desktop.hbs \
-    | install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/Notes.desktop"
+  # Desktop file, icon and window app id share the application id, so docks
+  # and window switchers find the icon (Wayland matches app_id to the file).
+  sed "s/{{exec}}/notes/g; s/{{icon}}/$_appid/g" packaging/linux/desktop.hbs \
+    | install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/$_appid.desktop"
   install -Dm644 packaging/linux/io.github.tunahanyrd.Notes.metainfo.xml \
     "$pkgdir/usr/share/metainfo/io.github.tunahanyrd.Notes.metainfo.xml"
   local size
   for size in 32 64 128; do
     install -Dm644 "desktop/src-tauri/icons/${size}x${size}.png" \
-      "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/notes.png"
+      "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/$_appid.png"
   done
-  install -Dm644 desktop/src-tauri/icons/128x128@2x.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/notes.png"
-  install -Dm644 desktop/src-tauri/icons/icon.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/notes.png"
-  install -Dm644 desktop/public/icon.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/notes.svg"
+  install -Dm644 desktop/src-tauri/icons/128x128@2x.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/$_appid.png"
+  install -Dm644 desktop/src-tauri/icons/icon.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/$_appid.png"
+  install -Dm644 desktop/public/icon.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/$_appid.svg"
 
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 NOTICE THIRD_PARTY_LICENSES.md -t "$pkgdir/usr/share/licenses/$pkgname/"

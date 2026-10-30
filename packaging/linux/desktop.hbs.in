@@ -10,6 +10,6 @@ Exec={{exec}}
 Icon={{icon}}
 Terminal=false
 StartupNotify=true
-StartupWMClass={{exec}}
+StartupWMClass=@APP_ID@
 Categories=Office;
 Keywords=notes;handwriting;pen;samsung;notlar;kalem;

@@ -194,6 +194,37 @@ jobs:
   # x86_64) disk images `<AppName>-<version>-<arch>.dmg` with a `.sha256`
   # each (docs/MACOS_PORT.md, "Gatekeeper").
   # ---------------------------------------------------------------------------
+  arch:
+    name: Arch package
+    needs: prepare
+    # makepkg in a clean Arch container (rolling release: built against the
+    # current Arch libraries, like an AUR/official package would be).
+    runs-on: ubuntu-26.04
+    container: archlinux:latest
+    steps:
+      - name: Build dependencies
+        run: |
+          pacman -Syu --noconfirm --needed base-devel git rust rust-wasm nodejs npm python \
+            webkit2gtk-4.1 gtk3 libsoup3 openssl sqlite poppler bubblewrap xdg-utils hicolor-icon-theme
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build Arch package
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          # makepkg refuses to run as root.
+          useradd -m builder
+          mkdir -p /out && chown builder /out
+          cp -a "$GITHUB_WORKSPACE" /home/builder/src && chown -R builder /home/builder/src
+          su builder -c "cd /home/builder/src && VERSION='$VERSION' packaging/build-arch.sh /out"
+          ls -l /out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bundle-arch
+          path: /out/*.pkg.tar.zst
+          if-no-files-found: error
+
   macos:
     needs: prepare
     uses: ./.github/workflows/macos.yml
@@ -204,10 +235,10 @@ jobs:
 
   publish:
     name: Checksums and GitHub Release
-    needs: [prepare, linux-bundles, flatpak, macos]
+    needs: [prepare, linux-bundles, flatpak, arch, macos]
     # The macOS dmg is optional until it has been verified on real Macs: a
     # failed macos job leaves the dmg out instead of blocking the Linux release.
-    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.linux-bundles.result == 'success' && needs.flatpak.result == 'success' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.linux-bundles.result == 'success' && needs.flatpak.result == 'success' && needs.arch.result == 'success' }}
     runs-on: ubuntu-26.04
     permissions:
       contents: write

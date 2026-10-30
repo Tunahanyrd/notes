@@ -16,13 +16,21 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out="${1:-$root/dist}"
 case "$out" in /*) ;; *) out="$PWD/$out";; esac
-pkgver="$(sed -n 's/^pkgver=//p' "$root/packaging/arch/PKGBUILD")"
+# VERSION (release tag without v, e.g. 0.0.2-alpha) overrides the PKGBUILD's
+# pkgver; pacman versions cannot contain '-', and "0.0.2alpha" sorts before
+# the final 0.0.2 (vercmp), like rpm's 0.alpha release.
+if [ -n "${VERSION:-}" ]; then
+    case "$VERSION" in *[!0-9A-Za-z.+-]*) echo "bad VERSION: $VERSION" >&2; exit 2;; esac
+    pkgver="${VERSION//-/}"
+else
+    pkgver="$(sed -n 's/^pkgver=//p' "$root/packaging/arch/PKGBUILD")"
+fi
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
 
 python3 "$root/tools/branding.py" sync --check
 mkdir -p "$work/build" "$out"
-cp "$root/packaging/arch/PKGBUILD" "$work/build/"
+sed "s/^pkgver=.*/pkgver=$pkgver/" "$root/packaging/arch/PKGBUILD" > "$work/build/PKGBUILD"
 tar -C "$root/.." --transform "s|^$(basename "$root")|notes-$pkgver|" \
     --exclude-vcs --exclude='*/target' --exclude='*/target-*' --exclude='*/node_modules' \
     --exclude="$(basename "$root")/artifacts" --exclude="$(basename "$root")/references" --exclude="$(basename "$root")/reference" \

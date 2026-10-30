@@ -60,8 +60,9 @@ pub(crate) fn context_builder(extra_roots: &[X509]) -> Result<SslContextBuilder,
     b.set_cipher_list(PYTHON_CIPHERS).map_err(ssl_err)?;
     b.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
     b.set_default_verify_paths().map_err(ssl_err)?;
-    // macOS only (None on Linux): Apple's /etc/ssl/cert.pem for a statically
-    // linked OpenSSL whose OPENSSLDIR may not exist (notes_platform::tools).
+    // The system bundle by its well-known path, for an OpenSSL whose
+    // OPENSSLDIR does not exist here (AppImage on Arch/Fedora, Homebrew-less
+    // macOS); see notes_platform::tools::extra_ca_file.
     if let Some(bundle) = notes_platform::tools::extra_ca_file() {
         b.set_ca_file(&bundle).map_err(ssl_err)?;
     }

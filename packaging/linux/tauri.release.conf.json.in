@@ -6,6 +6,9 @@
   "build": {
     "features": ["packaged"]
   },
+  "app": {
+    "enableGTKAppId": true
+  },
   "bundle": {
     "active": true,
     "targets": ["appimage", "deb", "rpm"],
