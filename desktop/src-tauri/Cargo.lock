@@ -307,6 +307,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86e055fa6e3e40ad6187ba25b6855eeb635d5271f8e0f0e1e9a5826b8d75bea0"
 dependencies = [
  "find-msvc-tools",
+ "jobserver",
+ "libc",
  "shlex",
 ]
 
@@ -1787,6 +1789,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "jobserver"
+version = "0.1.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
+dependencies = [
+ "getrandom 0.4.3",
+ "libc",
+]
+
+[[package]]
 name = "js-sys"
 version = "0.3.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1925,6 +1937,7 @@ dependencies = [
 name = "linux-notes-desktop"
 version = "0.0.1-alpha"
 dependencies = [
+ "gtk",
  "libc",
  "notes-engine",
  "notes-platform",
@@ -2133,6 +2146,7 @@ dependencies = [
 name = "notes-host"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "rs-doc",
  "rs-editor",
  "rs-ink",
@@ -2178,6 +2192,7 @@ version = "0.1.0"
 dependencies = [
  "getrandom 0.4.3",
  "libc",
+ "notes-cloud",
  "notes-host",
  "rs-doc",
  "rs-editor",
@@ -3003,6 +3018,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "getrandom 0.4.3",
+ "libc",
  "roxmltree",
  "rs-doc",
  "rs-ink",
@@ -3041,7 +3057,12 @@ dependencies = [
  "rs-ink",
  "rs-ops",
  "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
  "uuid",
+ "zip",
+ "zstd",
 ]
 
 [[package]]
@@ -4246,6 +4267,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
+name = "typed-path"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54ec2755506471f54baf5e4bb5499d8e510cc1caf271270e778a736bd2d7336c"
+
+[[package]]
 name = "typeid"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5016,6 +5043,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "zip"
+version = "8.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b680f2a0cd479b4cff6e1233c483fdead418106eae419dc60200ae9850f6d004"
+dependencies = [
+ "crc32fast",
+ "flate2",
+ "indexmap 2.14.2",
+ "memchr",
+ "typed-path",
+]
+
+[[package]]
 name = "zlib-rs"
 version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5026,6 +5066,34 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[package]]
+name = "zstd"
+version = "0.14.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db3ae9bf90af6e40197bef767eeefc46ad6397420fe873830bd85e5fbbfb3c70"
+dependencies = [
+ "zstd-safe",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "8.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ded520f16b29e1a9b771c722221b2b0a0398c2316d9bb3c42b458a5414d7434b"
+dependencies = [
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-sys"
+version = "2.1.2+zstd.1.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "481ada9c543b2323cbb7bbdbb5249177fbf0188ed959ed2c15e4b22421c84ed3"
+dependencies = [
+ "cc",
+ "pkg-config",
+]
 
 [[package]]
 name = "zune-core"

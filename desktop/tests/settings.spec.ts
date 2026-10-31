@@ -50,7 +50,7 @@ test('settings persist only working device preferences and call explicit sync',a
   await expect(page.getByLabel('Varsayılan yakınlaştırma',{exact:true})).toHaveAttribute('data-value','125');
   expect(errors).toEqual([]);
   await page.getByRole('dialog',{name:'Ayarlar',exact:true}).evaluate(el=>Promise.all(el.getAnimations().map(animation=>animation.finished)));
-  await page.screenshot({path:'/tmp/notes-settings-desktop.png'});
+  await page.screenshot({path:`${process.env.TMPDIR||'/tmp'}/notes-settings-desktop.png`});
 });
 test('settings narrow layout stays bounded, keyboard close restores focus',async({page})=>{
   await page.setViewportSize({width:390,height:844});
@@ -64,7 +64,7 @@ test('settings narrow layout stays bounded, keyboard close restores focus',async
   const bounds=await dialog.boundingBox();expect(bounds).not.toBeNull();expect(bounds!.x).toBeGreaterThanOrEqual(0);expect(bounds!.x+bounds!.width).toBeLessThanOrEqual(390);expect(bounds!.height).toBeLessThanOrEqual(844);
   expect(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
   await page.getByLabel('Varsayılan yakınlaştırma',{exact:true}).scrollIntoViewIfNeeded();
-  await page.screenshot({path:'/tmp/notes-settings-mobile.png'});
+  await page.screenshot({path:`${process.env.TMPDIR||'/tmp'}/notes-settings-mobile.png`});
   await page.keyboard.press('Escape');
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole('button',{name:'Ayarlar',exact:true})).toBeFocused();

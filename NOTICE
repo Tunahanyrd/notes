@@ -68,4 +68,7 @@ License); see desktop/assets-free/LICENSE.
 
 The UI uses fonts installed on the system (Segoe UI if the user has it,
 otherwise Noto Sans, Cantarell, Ubuntu, DejaVu Sans or the system default).
+The page text editor also bundles unmodified Roboto fonts from
+https://github.com/googlefonts/roboto (Apache License 2.0); the license is in
+desktop/public/page-fonts/Roboto-LICENSE.txt.
 No fonts are bundled.

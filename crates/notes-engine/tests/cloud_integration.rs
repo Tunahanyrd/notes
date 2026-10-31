@@ -12,6 +12,7 @@ use notes_cloud::etree::{self, Element};
 use notes_cloud::transport::{Request, Response, Transport};
 use notes_cloud::{Fail, Kind, Options};
 use notes_engine::cloud_impl::NativeCloud;
+use notes_engine::cloud::CloudFactory;
 use notes_engine::engine::{Engine, Options as EngineOptions};
 use notes_engine::sessions::NoLogin;
 use notes_engine::stub_previews::NoPreviewFactory;
@@ -126,5 +127,59 @@ fn unknown_publish_outcome_is_uncertain_and_never_retried() {
     engine.push(&api).unwrap();
     assert_eq!(server.0.lock().unwrap().publishes, 1);
     assert_eq!(engine.store.get(&id).unwrap().get("syncState"), Some(&Val::s("uncertain")));
+    engine.close();
+}
+
+#[test]
+fn container_backed_factory_publishes_replayable_receipts() {
+    let t = TempDir::new("cloud-container-receipt");
+    let server = Server::default();
+    let app = t.path().join("app");
+    let _store = rs_store::storage::StoreCore::open(&app).unwrap();
+    let transport = server.clone();
+    let factory = NativeCloud { options: Arc::new(move || Options::default().with_transport(transport.clone()).with_clock(|| NOW)) };
+    let api = factory.open_for_library(&session(t.path()), &app.join("cloud"), Some(&app)).unwrap();
+    let op = Val::s("11111111-1111-4111-8111-111111111111");
+    let local = Val::s("22222222-2222-4222-8222-222222222222");
+    let first = api.create(&Val::s("Synthetic"), &Val::s("Text"), &op, &local).unwrap();
+    let receipt_path = app.join("cloud/operations/11111111-1111-4111-8111-111111111111/result.json");
+    let receipt = rs_store::val::loads(&std::fs::read_to_string(receipt_path).unwrap()).unwrap();
+    let snapshot = receipt.get("snapshot").unwrap();
+    assert!(snapshot.get("container_sha256").is_some());
+    assert!(snapshot.get("raw_body").is_none());
+    let replay = api.create(&Val::s("Synthetic"), &Val::s("Text"), &op, &local).unwrap();
+    assert!(rs_store::val::py_eq(&first, &replay));
+    assert_eq!(server.0.lock().unwrap().publishes, 1);
+}
+
+#[test]
+fn schema7_engine_completes_one_post_with_container_receipt() {
+    let t = TempDir::new("cloud-v7-outbox");
+    let app = t.path().join("app");
+    rs_store::storage::private_directory(&app).unwrap();
+    let _lock = notes_engine::launcher::lock_library(&app).ok().unwrap();
+    notes_engine::prepare_schema7(&app).unwrap();
+    let server = Server::default();
+    let engine = engine(t.path(), &server);
+    let note = engine.create(&Val::s("Synthetic"), &Val::s("Text")).unwrap();
+    let id = note.get("id").unwrap().as_str().unwrap();
+    let api = engine.apis.api().unwrap();
+    engine.push(&api).unwrap();
+    engine.push(&api).unwrap();
+    assert_eq!(server.0.lock().unwrap().publishes, 1);
+    use rs_store::db::Sql;
+    let row = engine.store.with_db(|db| db.query(
+        "SELECT n.base_document IS NULL AS base_null,n.container_metadata,j.state,j.snapshot,j.id FROM notes n JOIN jobs j ON j.note_id=n.id WHERE n.id=?",
+        &rs_store::p![id],
+    )).unwrap();
+    let row = row.one().unwrap();
+    assert!(row.truthy("base_null") && row.is_null("snapshot"));
+    assert_eq!(row.text("state"), Some("done"));
+    assert!(rs_store::val::loads(row.text("container_metadata").unwrap()).unwrap().get("container_sha256").is_some());
+    let op = row.text("id").unwrap();
+    let receipt = std::fs::read_to_string(app.join("cloud/operations").join(op).join("result.json")).unwrap();
+    let receipt = rs_store::val::loads(&receipt).unwrap();
+    assert!(receipt.get("snapshot").unwrap().get("container_sha256").is_some());
+    assert!(receipt.get("snapshot").unwrap().get("raw_body").is_none());
     engine.close();
 }

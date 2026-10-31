@@ -98,6 +98,13 @@ and `allowed_url`.
   page is retried (at most every 10 min when connected). A renderer failure on a renderer-only page (sample range,
   output size, text layout) falls back to a forced composite stand-in.
   `INK_INVENTORY_RECIPE` is `ink-inventory-v5:…:page-composite` (inventory items may carry `kind`/`notice`).
+- **Inline body editing.** `variant=notext` uses a revision-bound local composite with body flow omitted and other
+  page objects retained. `variant=fulltext` uses the current saved editor model against the verified source and
+  regenerates the full page, including for a pending offline edit. Both share the bounded image cache; incomplete
+  composites are refused rather than substituted for a complete canvas. A body-only update can leave Samsung's canvas
+  stale, so a note edited locally keeps the full-text local composite on subsequent opens. During editing,
+  `variant=notextbase` and `layer=textink` supply a snapshot-bound base and scaled transparent ink tiles: the editor
+  sits between them. Renderer-supported strokes and the existing approximate stroke fallback both remain above it.
 - **Canvas and PDF stand-ins (intended, 2026-10-28).** A canvas-cache page whose cache cannot be downloaded or
   decoded (or any canvas page while offline) is drawn locally, scaled to the canvas size and cached as
   `<key>.local.png`; offline pages the local renderer cannot draw keep `preview_offline` 503. A PDF page with

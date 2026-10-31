@@ -19,9 +19,13 @@
 //!   cache, renderer/rasterizer) and [`ink::run_child`] for the optional
 //!   self-exec preparation child.
 pub mod codec;
+pub mod container_page;
+pub mod container_input;
 pub mod env;
 pub mod fetch;
 pub mod ink;
+pub mod inventory_worker;
+pub mod ink_tiles;
 pub mod manager;
 pub mod payload;
 pub mod pdf;
@@ -54,6 +58,8 @@ pub const MAX_PIXELS: i64 = 4 * 1024 * 1024;
 pub const MAX_QUEUED: usize = 256;
 /// `previews.INK_INVENTORY_RECIPE`.
 pub const INK_INVENTORY_RECIPE: &str = "ink-inventory-v5:body-flow:calibrated-inkpen2:per-page:stylusless-inkpen2:page-composite:floating-objects";
+/// Static canvas, PDF and ink inventory recipe; bump whenever its semantics change.
+pub const PREVIEW_INVENTORY_RECIPE: &str = "preview-inventory-v4";
 /// `previews.BROKER_HOSTS`.
 pub const BROKER_HOSTS: &[&str] = &["ew1a-api.samsungcloud.com"];
 /// `previews.FILE_HOSTS`.

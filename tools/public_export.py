@@ -165,6 +165,17 @@ SYNTHETIC_DATABASES = {
 }
 
 
+# Free fonts shipped with the UI, pinned by content: Roboto (Apache-2.0, licence
+# beside them) as bundled by the pinned sdocx crate's assets/fonts. Any other
+# font, or a changed file at these paths, stays blocking.
+FREE_FONTS = {
+    'desktop/public/page-fonts/Roboto-Regular.ttf': '56a45233d29f11b4dfb86d248e921939d115778f87325e7ae8cc108383d6664d',
+    'desktop/public/page-fonts/Roboto-Bold.ttf': '61f89f8db49261c2f6106e8dccc35df7b2f7ed909020db40a3fc905e95f99334',
+    'desktop/public/page-fonts/Roboto-Italic.ttf': 'fa0b17bb4aaac4a1b2ee149dd4ca3b55e97d3077aa6ba9bb02541b316e7c46ce',
+    'desktop/public/page-fonts/Roboto-BoldItalic.ttf': '40083ed54338397cf49d2c49f59eddcd963a30fdb301813d4bd3abbb37a13d12',
+}
+
+
 def excluded(relpath: str) -> bool:
     if relpath in SYNTHETIC_DATABASES:
         return False
@@ -303,7 +314,7 @@ def scan(tree: Path, forbid_emails: list[bytes], personal_terms: list[bytes]) ->
                 findings['largeFile'].append({'path': r, 'bytes': len(data)})
             kind = next((k for m, k in MAGIC if data.startswith(m)), None)
             if kind and kind != 'gzip':
-                blocking = kind in BLOCKING_MAGIC and r not in SYNTHETIC_DATABASES
+                blocking = kind in BLOCKING_MAGIC and r not in SYNTHETIC_DATABASES and FREE_FONTS.get(r) != hashlib.sha256(data).hexdigest()
                 (findings['blockingBinary'] if blocking else findings['otherBinary']).append({'path': r, 'type': kind})
                 if blocking or (len(data) > TEXT_LIMIT and r not in SYNTHETIC_DATABASES):
                     continue

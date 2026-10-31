@@ -13,6 +13,9 @@ result was also checked in the official app on a phone or tablet.
 
 ### Fixed
 
+- Keep finished pen strokes aligned with the page while zooming, even when
+  the new raster is still being prepared.
+
 - AppImage on Arch, Fedora and openSUSE: sync failed with "Cloud yanıtı
   alınamadı" because the bundled OpenSSL looked for CA certificates in
   Ubuntu's /usr/lib/ssl; the distribution's CA bundle is now found by its

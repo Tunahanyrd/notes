@@ -13,6 +13,7 @@ name = "notes_preview"
 
 [dependencies]
 notes_host = { path = "../notes-host", package = "notes-host" }
+notes_cloud = { path = "../notes-cloud", package = "notes-cloud" }
 rs_store = { path = "../rs-store", package = "rs-store" }
 rs_doc = { path = "../rs-doc", package = "rs-doc" }
 rs_ink = { path = "../rs-ink", package = "rs-ink" }
@@ -22,3 +23,6 @@ rs_render = { path = "../rs-render", package = "rs-render" }
 sha2 = { workspace = true }
 getrandom = { workspace = true }
 libc = "=0.2.191"
+
+[dev-dependencies]
+rs_store = { path = "../rs-store", package = "rs-store", features = ["read-tracing"] }

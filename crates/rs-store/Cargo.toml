@@ -21,9 +21,18 @@ rs-ops = { path = "../rs-ops" }
 rs_ink = { path = "../rs-ink", package = "rs-ink" }
 rs_doc = { path = "../rs-doc", package = "rs-doc" }
 rusqlite = "=0.41.0"
+sha2 = { workspace = true, features = ["std"] }
+serde.workspace = true
+serde_json.workspace = true
+zip = { version = "=8.2.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zstd = { version = "=0.14.3", default-features = false }
 uuid = { version = "=1.29.0", features = ["v4"] }
 
+[dev-dependencies]
+notes-host = { path = "../notes-host" }
+
 [features]
+read-tracing = []
 # PyO3 bindings (the historical Python extension `_store`, see reference/python).
 # Off by default: the pure engine and the desktop app never compile pyo3.
 python = ["dep:pyo3", "dep:rs-common", "rs-common/python", "rs-editor/python", "rs-ops/python", "rs_ink/python", "rs_doc/python"]

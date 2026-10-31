@@ -8,10 +8,26 @@ use notes_host::Val;
 use crate::util::R;
 
 pub trait Previews: Send + Sync {
+    /// Schedule derived preview metadata after a snapshot is committed.
+    fn snapshot_changed(&self) -> R<()> { Ok(()) }
     /// `previews.manifest(identity)`
     fn manifest(&self, identity: &str) -> R<Val>;
+    /// Retry a terminal, local-only preview inventory failure.
+    fn retry_inventory(&self, identity: &str) -> R<Val> { self.manifest(identity) }
     /// `previews.request(identity, page, priority=, wait=)`
     fn request(&self, identity: &str, page: i64, priority: i64, wait: f64) -> R<Option<Vec<u8>>>;
+    fn notext(&self, _identity: &str, _page: i64, _revision: i64) -> R<Option<Vec<u8>>> {
+        Err(notes_host::Fail::store("preview_unavailable", "Bu sayfanın metinsiz görüntüsü kullanılamıyor.", 404))
+    }
+    fn fulltext(&self, _identity: &str, _page: i64, _revision: i64) -> R<Option<Vec<u8>>> {
+        Err(notes_host::Fail::store("preview_unavailable", "Bu sayfanın görüntüsü kullanılamıyor.", 404))
+    }
+    fn text_ink_layer(&self, _identity:&str, _page:i64, _revision:i64, _tile:Option<(u8,u32,u32)>, _expected:Option<&str>) -> R<Option<(Vec<u8>,String)>> {
+        Err(notes_host::Fail::store("preview_unavailable", "Bu sayfanın çizim katmanı kullanılamıyor.", 404))
+    }
+    fn ink_layer(&self, _identity: &str, _page: i64, _revision: i64, _tile: Option<(u8,u32,u32)>, _expected: Option<&str>) -> R<Option<(Vec<u8>,String)>> {
+        Err(notes_host::Fail::store("preview_unavailable", "Bu sayfanın çizim katmanı kullanılamıyor.", 404))
+    }
     /// `previews.prefetch()`
     fn prefetch(&self) -> R<usize>;
     fn close(&self);

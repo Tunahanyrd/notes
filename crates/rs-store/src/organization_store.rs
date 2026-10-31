@@ -183,6 +183,18 @@ pub fn migrate(db: &dyn Sql) -> Result<()> {
         }
         Some("4" | "5") => set_version(db)?,
         Some("6") => {}
+        Some("7") => {
+            db.exec(crate::preview_inventory::SCHEMA, &[])?;
+            if !table_columns(db, "preview_inventories")?.contains("render_blob") {
+                db.exec("ALTER TABLE preview_inventories ADD COLUMN render_blob TEXT", &[])?;
+            }
+            if !table_columns(db, "preview_inventories")?.contains("render_blob_sha256") {
+                db.exec("ALTER TABLE preview_inventories ADD COLUMN render_blob_sha256 TEXT", &[])?;
+            }
+            if db.one("SELECT 1 FROM metadata WHERE key='schema7_vacuum_pending' AND value='true'", &[])?.is_some() {
+                return Err(Error::Value("schema 7 migration requires recovery before opening".into()));
+            }
+        }
         _ => return Err(Error::Value("unsupported library schema version".into())),
     }
     for statement in SCHEMA.split(';') {
@@ -480,7 +492,7 @@ impl StoreCore {
                     text(identity),
                     text(&dumps_ascii(&wire)?),
                     node.map(|n| n[0].clone()).unwrap_or(SqlVal::Null),
-                    row.raw("base_document").clone(),
+                    Self::base_ref(&row).clone(),
                     int(row.int("revision") + 1),
                     text("queued"),
                     null(),
@@ -526,7 +538,7 @@ impl StoreCore {
                     id.clone(),
                     text("{\"folder_id\":\"root\"}"),
                     null(),
-                    row.raw("base_document").clone(),
+                    Self::base_ref(&row).clone(),
                     row.raw("revision").clone(),
                     text("queued"),
                     null(),
@@ -539,10 +551,15 @@ impl StoreCore {
     }
 
     pub fn next_organization_job(&self) -> Result<Option<Val>> {
+        self.with_container_read(|| {
         let cur = self.with_db(|db| {
             db.query("SELECT * FROM organization_jobs WHERE state IN ('queued','running') ORDER BY created_ms,id LIMIT 1", &[])
         })?;
-        Ok(cur.one().map(|r| r.to_dict()))
+        let Some(row) = cur.one() else { return Ok(None) };
+        let mut job = row.to_dict();
+        self.hydrate_snapshot_field(&mut job, "snapshot")?;
+        Ok(Some(job))
+        })
     }
 
     fn public_state(state: &Val) -> Result<&'static str> {
@@ -584,7 +601,11 @@ impl StoreCore {
                 Some(SqlVal::Text(s)) if s == "queued" || s == "running" => {}
                 _ => return Ok(()),
             }
-            db.exec("UPDATE organization_jobs SET state='done',error=NULL WHERE id=?", &[id])?;
+            if Self::schema7(db)? {
+                db.exec("UPDATE organization_jobs SET state='done',error=NULL,snapshot='{}' WHERE id=?", &[id])?;
+            } else {
+                db.exec("UPDATE organization_jobs SET state='done',error=NULL WHERE id=?", &[id])?;
+            }
             db.exec(
                 "UPDATE notes SET org_state='synced',org_error=NULL,favorite=cloud_favorite,trashed=cloud_trashed,folder_id=cloud_folder_id WHERE id=?",
                 &[note],
@@ -809,6 +830,9 @@ impl StoreCore {
     pub fn accept_remote_organization(&self, identity: &str) -> Result<Val> {
         self.with_db(|db| {
             db.exec("UPDATE organization_jobs SET state='cancelled' WHERE note_id=? AND state!='done'", &p![identity])?;
+            if Self::schema7(db)? {
+                db.exec("UPDATE organization_jobs SET snapshot='{}' WHERE note_id=? AND state IN ('done','cancelled')", &p![identity])?;
+            }
             db.exec(
                 "UPDATE notes SET org_state='synced',org_error=NULL,favorite=cloud_favorite,trashed=cloud_trashed,folder_id=cloud_folder_id,revision=revision+1 WHERE id=?",
                 &p![identity],

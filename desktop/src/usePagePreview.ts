@@ -1,5 +1,6 @@
 import {useEffect, useState} from 'react';
-import {api, notePath, request} from './api';
+import {notePath, request} from './api';
+import {loadPageManifest} from './pageManifest';
 export type PreviewPage={index:number;width:number|null;height:number|null;available:boolean;darkMode?:boolean;previewKind?:'pdf-background'|'pdf-with-notes'|'ink-reconstructed'|'page-reconstructed'|'blank'|string;complete?:boolean;previewNotice?:string|null};
 type PreviewState={noteId:string;pages:PreviewPage[];phase:'loading'|'ready'|'unavailable';url:string|null;activeIndex:number};
 const empty:PreviewState={noteId:'',pages:[],phase:'unavailable',url:null,activeIndex:0};
@@ -15,7 +16,7 @@ export function usePagePreview(noteId:string|null,revision:number|undefined,enab
     const update=(patch:Partial<PreviewState>)=>{if(!controller.signal.aborted)setState(previous=>({...previous,...patch}));};
     setState({noteId,pages:[],phase:'loading',url:null,activeIndex:pageIndex});
     const run=async()=>{
-      const result=await api<{pages:PreviewPage[];providerAvailable:boolean}>(notePath(noteId)+'/pages','GET',undefined,controller.signal);
+      const result=await loadPageManifest(noteId,controller.signal);
       if(!result.providerAvailable||!Array.isArray(result.pages)||!result.pages.length||result.pages.length>2000)throw Error('preview_unavailable');
       const pages=result.pages.filter(p=>Number.isInteger(p.index)&&p.index>=0&&p.index<10000).map(p=>({...p,available:p.available===true&&typeof p.width==='number'&&typeof p.height==='number'&&Number.isFinite(p.width)&&Number.isFinite(p.height)&&p.width>0&&p.height>0}));
       if(!pages.length)throw Error('preview_unavailable');

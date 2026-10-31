@@ -15,6 +15,60 @@ fn cases() -> Vec<(String, Val)> {
     items
 }
 
+#[test]
+fn notext_removes_body_flow_but_keeps_saved_strokes() {
+    let (_, case) = cases().into_iter().find(|(name, _)| name == "rich_flow").unwrap();
+    let snapshot = case.get("snapshot").unwrap();
+    let normal = prepare::forced_composite(snapshot, 0);
+    let normal = rs_store::val::loads(std::str::from_utf8(&normal).unwrap()).unwrap();
+    let page = prepare::notext_snapshot_page(snapshot, 0).unwrap().unwrap();
+    let without = rs_store::val::loads(std::str::from_utf8(&page.body).unwrap()).unwrap();
+    let before = normal.get("renderer").and_then(Val::as_str).unwrap();
+    let before = rs_store::val::loads(before).unwrap();
+    assert!(before.get("flow").is_some());
+    let after = without.get("renderer").and_then(Val::as_str).map(|s| rs_store::val::loads(s).unwrap());
+    if let Some(after) = after {
+        assert!(after.get("flow").is_none());
+        assert_eq!(after.get("strokes"), before.get("strokes"));
+    } else {
+        assert_eq!(before.get("strokes"), Some(&Val::List(vec![])));
+    }
+}
+
+#[test]
+fn text_edit_split_renders_other_text_boxes_in_the_base_and_saved_ink_above() {
+    let native=notes_preview::NativeInk::new(notes_preview::env::default_project_root(),None);
+    if !native.provider_available() {return;}
+    let (_,case)=cases().into_iter().find(|(name,_)|name=="fountain18").unwrap();
+    let mut page=prepare::notext_snapshot_page(case.get("snapshot").unwrap(),0).unwrap().unwrap();
+    let mut outer=rs_store::val::loads(std::str::from_utf8(&page.body).unwrap()).unwrap();
+    let mut renderer=rs_store::val::loads(outer.get("renderer").and_then(Val::as_str).unwrap()).unwrap();
+    renderer.set("textBoxes",Val::List(vec![Val::dict(vec![
+        ("at",Val::Int(0)),("bbox",Val::List(vec![Val::Int(100),Val::Int(100),Val::Int(700),Val::Int(300)])),
+        ("text",Val::s("Synthetic box")),("spans",Val::List(vec![])),("paragraphs",Val::List(vec![])),
+        ("margins",Val::List(vec![Val::Int(0);4])),("gravity",Val::Int(0)),
+    ])]));
+    outer.set("renderer",Val::s(rs_store::val::dumps_utf8(&renderer).unwrap()));
+    page.body=rs_store::val::dumps_utf8(&outer).unwrap().into_bytes();
+    let (base,svg,complete)=native.split_text_prepared(&page,&|_|None).unwrap().unwrap();
+    assert!(complete);
+    let pixels=rs_render::pixels::rgba(&base,page.width,page.height).ok().expect("base decodes");
+    assert!(pixels.chunks_exact(4).any(|pixel|pixel[..3]!=[252,252,252]),"other text box is painted in the base");
+    let ink=rs_render::raster::rasterize(&svg,page.width as u32,page.height as u32).unwrap();
+    assert!(ink.chunks_exact(4).any(|pixel|pixel[3]!=0),"saved ink is retained in the upper layer");
+}
+
+#[test]
+fn text_edit_split_keeps_approximated_saved_pen_in_upper_layer() {
+    let native=notes_preview::NativeInk::new(notes_preview::env::default_project_root(),None);
+    let (_,case)=cases().into_iter().find(|(name,_)|name=="unsupported_pen").unwrap();
+    let page=prepare::text_ink_snapshot_page(case.get("snapshot").unwrap(),0).unwrap().unwrap();
+    let (base,svg,complete)=native.split_text_prepared(&page,&|_|None).unwrap().unwrap();
+    assert!(complete);assert!(notes_preview::png_valid(&base,page.width,page.height));
+    let ink=rs_render::raster::rasterize(&svg,page.width as u32,page.height as u32).unwrap();
+    assert!(ink.chunks_exact(4).any(|pixel|pixel[3]!=0));
+}
+
 /// Oracle cases whose pages the renderer refused (whole note or page) and
 /// that are now drawn by the local page composite (intended, 2026-10-28):
 /// an unadmitted pen is approximated, unsupported body formatting is dropped.
@@ -102,6 +156,139 @@ fn native_inventory_and_render_when_the_renderer_is_built() {
     // A second page request reuses the per-note body cache.
     assert_eq!(native.render_ink_page(snapshot, 0).unwrap(), png);
     assert!(native.render_ink_page(snapshot, 3).is_err());
+}
+
+#[test]
+fn split_renderer_only_page_retains_strokes_in_transparent_layer_and_not_base() {
+    let native = notes_preview::NativeInk::new(notes_preview::env::default_project_root(), None);
+    if !native.provider_available() { eprintln!("ink renderer not built; skipping split render"); return; }
+    let (_, case) = cases().into_iter().find(|(name, _)| name == "fountain18").unwrap();
+    let snapshot = case.get("snapshot").unwrap();
+    let page = native.inspect_render_pages(snapshot).into_iter().next().unwrap();
+    let (base, svg, complete) = native.split_ink_page(snapshot, page.index, &|_| None).unwrap();
+    assert!(complete);
+    let pixels = rs_render::pixels::rgba(&base, page.width, page.height).ok().expect("base PNG decodes");
+    assert!(pixels.chunks_exact(4).all(|p| p == &pixels[..4]), "base must contain only the page background");
+    let layer = rs_render::raster::rasterize(&svg, page.width as u32, page.height as u32).unwrap();
+    assert!(layer.chunks_exact(4).any(|p| p[3] != 0), "stroke must be present in the transparent layer");
+    assert_eq!(layer[3], 0, "page background must not be in the ink layer");
+    let scale = rs_render::raster::InkTileScale::from_half_units(3).unwrap();
+    let tile = rs_render::raster::InkTile::new(page.width as u32, page.height as u32, scale, 0, 0).unwrap();
+    let rgba = rs_render::raster::rasterize_ink_tile(&svg, tile).unwrap();
+    assert_eq!(rgba.len(), 512 * 512 * 4);
+    assert_eq!(rgba[3], 0);
+    assert!(rgba.chunks_exact(4).any(|p| p[3] != 0));
+    assert!(native.split_ink_page(snapshot, 99, &|_| None).is_err());
+}
+
+#[test]
+fn split_rejects_unprovided_pdf_underlay() {
+    let native = notes_preview::NativeInk::new(notes_preview::env::default_project_root(), None);
+    let (_, case) = cases().into_iter().find(|(name, _)| name == "pdf_list").unwrap();
+    let snapshot = case.get("snapshot").unwrap();
+    let pages = prepare::prepare_pages(snapshot, None, false).unwrap();
+    assert!(pages.iter().any(|page| page.over_pdf));
+    assert!(native.split_ink_page(snapshot, pages[0].index, &|_| None).is_err());
+}
+
+#[test]
+fn manager_ink_layer_is_revision_and_snapshot_bound() {
+    let dir = TempDir::new();
+    let s = store(dir.path());
+    let (_, case) = cases().into_iter().find(|(name, _)| name == "fountain18").unwrap();
+    let id = note_with_document(&s, case.get("snapshot").unwrap());
+    let revision = s.raw(&id).unwrap().get("revision").unwrap().as_i64().unwrap();
+    let manager = PreviewManager::new(s, TestEnv::new(None, true)).unwrap();
+    let Some((base, token)) = manager.ink_layer(&id, 0, revision, None, None).unwrap() else { panic!("layer unexpectedly busy") };
+    assert!(notes_preview::png_valid(&base, 1080, 1527));
+    let Some((tile, same)) = manager.ink_layer(&id, 0, revision, Some((3,0,0)), Some(&token)).unwrap() else { panic!("tile unexpectedly busy") };
+    assert_eq!(token, same);
+    assert!(notes_preview::png_valid(&tile, 512, 512));
+    assert_eq!(manager.ink_layer(&id, 0, revision+1, None, None).unwrap_err().status, 409);
+    assert_eq!(manager.ink_layer(&id, 0, revision, Some((3,0,0)), Some(&"a".repeat(64))).unwrap_err().status, 409);
+    assert_eq!(manager.ink_layer(&id, 0, revision, Some((3,999,0)), Some(&token)).unwrap_err().status, 404);
+    assert_eq!(manager.ink_layer(&id, 0, revision, Some((3,0,0)), Some(&token)).unwrap().unwrap().0, tile);
+    manager.close();manager.join(Duration::from_secs(2));
+}
+
+#[test]
+fn text_composites_are_bound_to_revision_and_render_the_saved_pending_model() {
+    let native = notes_preview::NativeInk::new(notes_preview::env::default_project_root(), None);
+    if !native.provider_available() { return; }
+    let (_, case) = cases().into_iter().find(|(name, _)| name == "fountain18").unwrap();
+    let snapshot = case.get("snapshot").unwrap();
+    let dir = TempDir::new();
+    let store = store(dir.path());
+    let id = note_with_document(&store, snapshot);
+    store.with_db(|db| {
+        use rs_store::db::Sql;
+        db.exec("UPDATE notes SET sync_state='synced' WHERE id=?", &rs_store::p![&id])?;
+        Ok(())
+    }).unwrap();
+    let revision = store.raw(&id).unwrap().get("revision").unwrap().as_i64().unwrap();
+    let source = notes_host::snapshot::from_dict(snapshot).unwrap();
+    let projection = notes_host::areas::editor_projection(&source).unwrap();
+    store.cache_editor(&id, &Val::Int(revision), &projection).unwrap();
+    let manager = PreviewManager::new(store.clone(), TestEnv::new(None,true)).unwrap();
+    let no_text = manager.notext(&id, 0, revision).unwrap().unwrap();
+    assert!(notes_preview::png_valid(&no_text,1080,1527));
+    assert_eq!(manager.notext(&id, 0, revision).unwrap().unwrap(), no_text);
+    assert_eq!(manager.notext(&id, 0, revision+1).unwrap_err().status,409);
+    let (base,token)=manager.text_ink_layer(&id,0,revision,None,None).unwrap().unwrap();
+    assert!(notes_preview::png_valid(&base,1080,1527));
+    let (tile,same)=manager.text_ink_layer(&id,0,revision,Some((2,0,0)),Some(&token)).unwrap().unwrap();
+    assert_eq!(same,token);assert!(notes_preview::png_valid(&tile,512,512));
+    assert_eq!(manager.text_ink_layer(&id,0,revision+1,None,None).unwrap_err().status,409);
+    assert!(manager.fulltext(&id, 0, revision).unwrap().is_some());
+    let mut edited = projection.clone();
+    edited.set("model",Val::dict(vec![("schemaVersion",Val::Int(1)),("text",Val::s("Yeni metin")),("spans",Val::List(vec![])),("paragraphs",Val::List(vec![]))]));
+    let edited_json=rs_store::val::dumps_utf8(&edited).unwrap();
+    store.with_db(|db| {
+        use rs_store::db::Sql;
+        db.exec("UPDATE notes SET sync_state='pending' WHERE id=?", &rs_store::p![&id])?;
+        db.exec("UPDATE editor_documents SET projection=? WHERE note_id=?", &rs_store::p![edited_json, &id])?;
+        Ok(())
+    }).unwrap();
+    // Different model at the same revision is forbidden by the store; use a
+    // new revision to represent an accepted editor save and its cache key.
+    store.with_db(|db| {
+        use rs_store::db::Sql;
+        db.exec("UPDATE notes SET revision=revision+1 WHERE id=?", &rs_store::p![&id])?;
+        db.exec("UPDATE editor_documents SET revision=revision+1 WHERE note_id=?", &rs_store::p![&id])?;
+        Ok(())
+    }).unwrap();
+    let full=manager.fulltext(&id,0,revision+1).unwrap().unwrap();
+    assert_ne!(full,no_text,"the accepted pending model must be painted");
+    manager.close();manager.join(Duration::from_secs(2));
+}
+
+#[test]
+fn concurrent_tile_requests_return_pending_while_one_layer_is_prepared() {
+    use std::sync::{Barrier,mpsc};
+    struct BlockingInk { native: notes_preview::NativeInk, entered: Mutex<Option<mpsc::Sender<()>>>, release: Arc<Barrier> }
+    impl InkBackend for BlockingInk {
+        fn provider_available(&self) -> bool { self.native.provider_available() }
+        fn inspect_render_pages(&self, snapshot:&Val) -> Vec<InkPage> { self.native.inspect_render_pages(snapshot) }
+        fn render_ink_page(&self, snapshot:&Val, page:i64) -> Result<Vec<u8>,Fail> { self.native.render_ink_page(snapshot,page) }
+        fn split_page(&self, snapshot:&Val, page:i64, media:&dyn Fn(&str)->Option<Vec<u8>>) -> Option<Result<(Vec<u8>,Vec<u8>,bool),Fail>> {
+            if let Some(sender)=self.entered.lock().unwrap().take() { sender.send(()).unwrap(); self.release.wait(); }
+            Some(self.native.split_ink_page(snapshot,page,media))
+        }
+    }
+    let dir=TempDir::new();let store=store(dir.path());
+    let (_,case)=cases().into_iter().find(|(name,_)|name=="fountain18").unwrap();
+    let id=note_with_document(&store,case.get("snapshot").unwrap());
+    let revision=store.raw(&id).unwrap().get("revision").unwrap().as_i64().unwrap();
+    let (sender,receiver)=mpsc::channel();let barrier=Arc::new(Barrier::new(2));
+    let ink=BlockingInk{native:notes_preview::NativeInk::new(notes_preview::env::default_project_root(),None),entered:Mutex::new(Some(sender)),release:barrier.clone()};
+    if !ink.provider_available(){return;}
+    let manager=Arc::new(PreviewManager::with_options(store,TestEnv::new(None,true),PreviewOptions{ink:Some(Arc::new(ink)),..Default::default()}).unwrap());
+    let worker=manager.clone();let note=id.clone();
+    let running=std::thread::spawn(move||worker.ink_layer(&note,0,revision,None,None));
+    receiver.recv_timeout(Duration::from_secs(20)).unwrap();
+    assert!(manager.ink_layer(&id,0,revision,None,None).unwrap().is_none());
+    barrier.wait();assert!(running.join().unwrap().unwrap().is_some());
+    manager.close();manager.join(Duration::from_secs(2));
 }
 
 struct FakeInk {

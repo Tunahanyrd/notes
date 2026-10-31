@@ -3,7 +3,7 @@
 //! `_api()` as the preview environment.
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use notes_host::Val;
@@ -22,6 +22,7 @@ pub static SELF_EXEC_INK_CHILD: AtomicBool = AtomicBool::new(false);
 
 struct Env {
     api: Arc<ApiCache>,
+    manager: Mutex<Weak<PreviewManager>>,
 }
 
 impl PreviewEnv for Env {
@@ -46,6 +47,11 @@ impl PreviewEnv for Env {
         let server_id = crate::util::key(&row, "server_id")?.clone();
         let fresh = notes_host::snapshot::to_dict(&self.api.api()?.get_note(&server_id)?);
         store.apply_document(&notes_host::host::PureHost::new(), &server_id, &fresh, None)?;
+        if let Some(manager) = self.manager.lock().unwrap().upgrade() {
+            if let Err(error) = manager.wake_inventory() {
+                eprintln!("notes-engine: preview inventory scheduling failed: {error}");
+            }
+        }
         Ok(fresh)
     }
     fn ink_child_executable(&self) -> Option<PathBuf> {
@@ -60,11 +66,29 @@ impl PreviewEnv for Env {
 struct Native(Arc<PreviewManager>);
 
 impl Previews for Native {
+    fn snapshot_changed(&self) -> R<()> {
+        self.0.wake_inventory()
+    }
+    fn retry_inventory(&self, identity: &str) -> R<Val> {
+        self.0.retry_inventory(identity)
+    }
     fn manifest(&self, identity: &str) -> R<Val> {
         self.0.manifest(identity)
     }
     fn request(&self, identity: &str, page: i64, priority: i64, wait: f64) -> R<Option<Vec<u8>>> {
         self.0.request(identity, page, priority, wait)
+    }
+    fn notext(&self, identity: &str, page: i64, revision: i64) -> R<Option<Vec<u8>>> {
+        self.0.notext(identity, page, revision)
+    }
+    fn fulltext(&self, identity: &str, page: i64, revision: i64) -> R<Option<Vec<u8>>> {
+        self.0.fulltext(identity, page, revision)
+    }
+    fn text_ink_layer(&self, identity:&str, page:i64, revision:i64, tile:Option<(u8,u32,u32)>, expected:Option<&str>) -> R<Option<(Vec<u8>,String)>> {
+        self.0.text_ink_layer(identity,page,revision,tile,expected)
+    }
+    fn ink_layer(&self, identity: &str, page: i64, revision: i64, tile: Option<(u8,u32,u32)>, expected: Option<&str>) -> R<Option<(Vec<u8>,String)>> {
+        self.0.ink_layer(identity, page, revision, tile, expected)
     }
     fn prefetch(&self) -> R<usize> {
         self.0.prefetch(notes_preview::MAX_QUEUED / 2)
@@ -95,7 +119,9 @@ pub struct NativePreviews;
 
 impl PreviewFactory for NativePreviews {
     fn build(&self, store: &Arc<StoreCore>, api: &Arc<ApiCache>) -> R<(Arc<dyn Previews>, Arc<dyn Thumbnails>)> {
-        let manager = Arc::new(PreviewManager::new(Arc::clone(store), Arc::new(Env { api: Arc::clone(api) }))?);
+        let env = Arc::new(Env { api: Arc::clone(api), manager: Mutex::new(Weak::new()) });
+        let manager = Arc::new(PreviewManager::new(Arc::clone(store), env.clone())?);
+        *env.manager.lock().unwrap() = Arc::downgrade(&manager);
         let thumbnails = ThumbnailManager::new(Arc::clone(store), manager.clone())?;
         Ok((Arc::new(Native(manager)), Arc::new(Thumbs(thumbnails))))
     }

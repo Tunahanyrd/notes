@@ -75,7 +75,7 @@ test('remapped create and search persist after reload and original shortcut no l
   await expect(page.getByLabel('Yeni not oluştur kısayolu')).toHaveValue(shown('Ctrl+Shift+F'));
   await page.locator('.settings-page-scroll').evaluate(e=>{e.scrollTop=e.scrollHeight;});
   await page.locator('.settings-page').evaluate(e=>Promise.all(e.getAnimations().map(a=>a.finished)));
-  await page.screenshot({path:'/tmp/samsung-shortcuts-synthetic.png'});
+  await page.screenshot({path:`${process.env.TMPDIR||'/tmp'}/samsung-shortcuts-synthetic.png`});
   await page.getByRole('button',{name:'Ayarları kapat'}).click();
   await page.evaluate(mac=>window.dispatchEvent(new KeyboardEvent('keydown',{key:'n',code:'KeyN',ctrlKey:!mac,metaKey:mac,bubbles:true,cancelable:true})),MAC);
   expect(fixture.counts().creates).toBe(0);

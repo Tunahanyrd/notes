@@ -1,5 +1,46 @@
 # rs-store — Rust port of the SQLite library/outbox
 
+## Schema 7 deployment and recovery
+
+Before starting a schema 7 engine on an existing schema 6 library, the deploy
+operator must stop the engine, hold its exclusive `engine.lock`, and confirm no
+job is `running`. Do not retry ambiguous operations. Check that free disk space
+is at least 1.2 times the database size. Take a SQLite **online backup**, including
+the WAL state, to a private `backups/before-v7-<timestamp>.sqlite3` file; run
+`PRAGMA integrity_check` on that backup and record the pre-migration draft count.
+Keep the backup until the migrated library and its projections have been
+verified. Copying only the main SQLite file is not a valid backup of a live WAL
+database. The migration does not create this backup; deployment owns it.
+After the backup is checked, engine startup retains `engine.lock` and starts
+the loopback server before storage preparation. During migration, authorized
+`/api/status` requests return `migration.state`, `completed` and `total`; other
+API operations return 503. The desktop shows progress and starts normal work
+only after the ordinary status returns. Startup does not create the backup;
+deployment must complete it first.
+
+For each note and active-job snapshot, migration checks the source digest and
+that its resource XML is exactly the parser output for the original multipart,
+then verifies byte-for-byte reconstruction before publication. It stores a
+versioned hash of all remaining snapshot metadata and of each note's page index
+in the schema transaction. After commit it reopens the containers and verifies
+the reconstructed raw digest, metadata and page indexes before VACUUM. Exact
+raw identity and the pinned parser recipe imply the same resource and editor/
+ink projections without recomputing those expensive projections twice. Older
+pending migrations retain their original projection-hash verification. A
+mismatch, missing baseline, or incompatible recipe leaves the pending marker
+in place and blocks completion; restore the backup or rerun with the same
+verifier after correcting the cause.
+
+Container publication precedes the SQLite commit, so interrupted work may
+leave unreferenced files. Retrying from schema 6 preserves every snapshot;
+collection may later remove orphans after the grace period. The migration then
+checkpoints WAL, runs `VACUUM INTO` a private file, verifies the copy, and
+atomically replaces the database. A durable pending marker makes a rerun
+finish reclamation if interrupted after the schema commit or replacement. Keep the
+verified pre-migration backup until the new library and its projections have
+been validated. Roll back by restoring that backup with the engine stopped; do
+not use an old engine on a schema 7 database.
+
 > Historical port log, written while the Python reference implementation was the test oracle (`NOTES_IMPL`, `tests/…`, `samsung_notes/…`). That reference has been retired and is not part of this repository; the engine is now gated by `cargo test` and the golden replay in `crates/notes-engine/conformance/golden`.
 
 Python modules replaced (all public names exported, strict-import OK):
@@ -82,3 +123,34 @@ which runs the rs-ops `prepare_first_stroke` dry run. save_ink accepts that batc
 ## Perf
 fsync-dominated (synchronous=FULL): get+list x300 0.57s vs 0.91s Python;
 apply_document (200 KB body) x100 0.46s vs 0.48s.
+
+## Standalone document store
+
+`document_store` is a reusable component and is **not connected to the notes
+database or outbox**. The engine still uses schema 6. `DocumentStore::open`
+creates a private `documents` directory under the supplied private directory.
+`DocumentRef` contains source and stored SHA-256 digests and byte sizes; the
+source digest names the file at `documents/ab/cd/<source_sha256>`. Files are
+zstd frames. `DocumentStore::read` verifies the stored and decompressed bytes
+and sizes. Streaming decoding caps its window at 8 MiB; accepted decoded and
+stored sizes are capped at 256 MiB and 260 MiB respectively. Reads return a
+buffer, so the decoded-size limit is also an upper bound on returned bytes;
+the zstd library's total allocator usage is not independently capped.
+
+Call `with_write` and use its `DocumentWriter::put` or `put_reader` to publish
+a file. The callback **must include the entire transaction that publishes or
+removes its references**, and all cooperating processes must use the same
+store lock for such transactions. A successful put has synced its file and
+directory entries before it returns. A failed reference transaction may leave
+an orphan. Never nest lock-taking methods for the same store.
+
+`doctor` and `collect` take a callback that enumerates every live reference;
+the callback runs only after they acquire the same cross-process lock. It must
+query the authoritative current reference set inside that callback, not use a
+snapshot taken before lock acquisition. Doctor verifies both hashes and reports
+counts only. Collection aborts on an enumeration error or malformed source hash,
+and removes only unreferenced canonical files and interrupted temporary files
+older than the caller's grace period. It never follows symlinks or removes
+unrecognized names. These guarantees require every writer and collector to
+honor the lock. `read` alone does not hold the lock; use the writer guard's
+`read` when a reference lookup and subsequent read must be protected together.

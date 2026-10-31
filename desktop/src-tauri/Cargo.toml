@@ -20,6 +20,11 @@ notes-engine = { path = "../../crates/notes-engine", optional = true }
 notes-platform = { path = "../../crates/notes-platform" }
 # macOS: the pure engine always runs in-process (no Python child, no
 # sidecar), with SQLite statically linked. See docs/MACOS_PORT.md.
+# Wayland app id: GTK3 takes it from the program name for a window that is not a
+# GtkApplicationWindow (tao's), so main() sets it to the bundle identifier.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 notes-engine = { path = "../../crates/notes-engine", features = ["bundled-sqlite"] }
 [features]

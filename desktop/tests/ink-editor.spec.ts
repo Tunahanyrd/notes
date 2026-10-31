@@ -3,7 +3,7 @@ import {test,expect,type Page} from '@playwright/test';
 import {DEFAULT_SHORTCUTS} from '../src/useShortcuts';
 const TOKEN='synthetic_local_session_1234567890';
 const PNG=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lfoAAAAASUVORK5CYII=','base64');
-async function fixture(page:Page,options:{complete?:boolean|null;append?:boolean;failSave?:boolean;styles?:boolean;control?:{hold:boolean};preview?:(index:number)=>number;initialPending?:boolean;inkGetDelay?:number;saveBarrier?:Promise<void>;failAfterCommit?:boolean;draftGetBarrier?:Promise<void>;initialDraft?:any}={}){
+async function fixture(page:Page,options:{syncPendingTimes?:number;complete?:boolean|null;append?:boolean;failSave?:boolean;styles?:boolean;control?:{hold:boolean};preview?:(index:number)=>number;initialPending?:boolean;inkGetDelay?:number;saveBarrier?:Promise<void>;failAfterCommit?:boolean;draftGetBarrier?:Promise<void>;initialDraft?:any}={}){
   const requests:{path:string;method:string;data:any}[]=[];let pending:any[]=[];
   const base={folderId:null,metadataSync:{state:'synced',error:null},createdAt:1777000000000,modifiedAt:1777000000000,revision:1,syncState:'synced',editable:false,titleEditable:true,readOnlyReason:'Çizim notu.',favorite:false,trashed:false,contentLoaded:true,source:'cloud',error:null,body:'',preview:''};
   const notes=[{...base,id:'ink-one',title:'Çizim denemesi'},{...base,id:'ink-two',title:'İkinci çizim'}];
@@ -31,6 +31,7 @@ async function fixture(page:Page,options:{complete?:boolean|null;append?:boolean
     if(path.endsWith('/ink')&&method==='GET')return send({schemaVersion:1,revision:note.revision,pages,capabilities:{appendInk:options.append!==false&&note.syncState==='synced'},reason:null,rendering:{nativeEquivalent:false,mode:'geometry-only'},pendingStrokes:note.id==='ink-one'?pending:[]});
     if(path.endsWith('/ink')&&method==='PUT'){
       if(options.failSave||options.control?.hold)return send({error:{code:'revision_conflict',message:'Sürüm değişti'}},409);
+      if(options.syncPendingTimes){options.syncPendingTimes--;return send({error:{code:'sync_pending',message:'Önce bu notun eşitlenmesini bekleyin.'}},409);}
       expect(data.expectedRevision).toBe(note.revision);pending=data.strokes.map((stroke:any,index:number)=>({...stroke,id:`pending-${index}`,kind:'fountain',size:4,colorARGB:0xff2462a0}));note.revision++;note.syncState='pending';
       const draft=deviceDrafts.get(note.id);if(draft&&data.draftStrokeIds){const rest=draft.strokes.filter((stroke:any)=>!data.draftStrokeIds.includes(stroke.id));if(rest.length)deviceDrafts.set(note.id,{...draft,strokes:rest});else deviceDrafts.delete(note.id);}
       if(options.saveBarrier)await options.saveBarrier;if(options.failAfterCommit)return route.abort('failed');return send({note});
@@ -284,4 +285,13 @@ test('a refresh during a held pen gesture waits until the stroke ends',async({pa
   await page.mouse.move(box.x+box.width*.5,box.y+box.height*.35,{steps:3});await page.mouse.up();
   await expect(page.locator('.editor-footer')).toHaveAttribute('data-ink-draft-count','1');
   await expect.poll(()=>requests.filter(r=>r.path.endsWith('/ink')&&r.method==='PUT'&&r.data.expectedRevision===2).length,{timeout:15000}).toBe(1);
+});
+
+test('a save refused because our previous batch still syncs waits quietly and saves by itself',async({page})=>{
+  // Before: the 409 sync_pending showed "Çizimler kaydedilemedi" and the draft
+  // stayed until the person drew again.
+  const {requests}=await fixture(page,{syncPendingTimes:2});await draw(page);
+  await expect.poll(()=>requests.filter(request=>request.method==='PUT'&&request.path.endsWith('/ink')).length,{timeout:15000}).toBe(3);
+  await expect(page.getByText(/kaydedilemedi/)).toHaveCount(0);
+  await expect(page.locator('.editor-footer')).toHaveAttribute('data-ink-draft-count','0');
 });

@@ -17,6 +17,7 @@ rs_doc = { path = "../rs-doc", package = "rs-doc" }
 rs_ink = { path = "../rs-ink", package = "rs-ink" }
 rs_ops = { path = "../rs-ops", package = "rs-ops" }
 rs_editor = { path = "../rs-editor", package = "rs-editor" }
+libc = "=0.2.191"
 
 [dev-dependencies]
 # editor_survey example only (read-only private library copy).

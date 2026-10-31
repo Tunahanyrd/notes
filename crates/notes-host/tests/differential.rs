@@ -82,6 +82,15 @@ impl Tally {
                 let want = want.as_str().map(String::from);
                 if want == got {
                     self.ok_match += 1;
+                } else if (label.starts_with("editor_projection") || label.starts_with("store [\"cache_editor\""))
+                    && got.as_deref().and_then(|raw| loads(raw).ok()).is_some_and(|mut value| {
+                        let Some(Val::List(areas)) = value.remove("bodyTextAreas") else { return false };
+                        !areas.is_empty() && areas.iter().all(|area| area.get("rect").is_some() && area.get("pageIndex").is_some())
+                            && Some(js(&value)) == want
+                    }) {
+                    // v5 adds geometry; compare every original oracle field.
+                    self.ok_match += 1;
+                    self.intended += 1;
                 } else {
                     self.mismatches.push(format!("{label}: value\n  py:   {:?}\n  rust: {:?}", want.map(trunc), got.map(trunc)));
                 }

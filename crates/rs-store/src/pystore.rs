@@ -169,10 +169,13 @@ impl Host for PyHost {
     type Snapshot = Py<PyAny>;
 
     #[cfg(feature = "python")]
-    fn apply_document_tx(&self, store: &StoreCore, db: &dyn Sql, identity: &str, document: &Val, expected_job: Option<&Val>) -> R<bool> {
+    fn apply_document_tx(&self, store: &StoreCore, db: &dyn Sql, identity: &str, document: &Val, expected_job: Option<&Val>, prepared: Option<&crate::storage::PreparedSnapshot>) -> R<bool> {
         let dispatch = Python::attach(|py| self.overridden(py, "_apply_document_tx"));
         if !dispatch {
-            return store.apply_document_tx(self, db, identity, document, expected_job);
+            return store.apply_document_tx(self, db, identity, document, expected_job, prepared);
+        }
+        if prepared.is_some() {
+            return Err(Error::Value("overridden snapshot transaction is unsupported for schema 7".into()));
         }
         Python::attach(|py| {
             let kw = PyDict::new(py);
@@ -930,7 +933,7 @@ impl Store {
             _ => None,
         };
         let d = v(document)?;
-        ok(slf.py(), slf.borrow().core.apply_document_tx(&host(slf), db.sql(), identity, &d, job.as_ref()))
+        ok(slf.py(), slf.borrow().core.apply_document_tx(&host(slf), db.sql(), identity, &d, job.as_ref(), None))
     }
 
     #[cfg(feature = "python")]

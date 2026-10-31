@@ -171,6 +171,20 @@ pub fn renderer_layer(svg: &str, width: i64, height: i64) -> Result<(String, Str
     Ok((inner, view))
 }
 
+/// Convert a stroke-only renderer SVG into a transparent, page-sized SVG.
+/// A caller must construct the renderer input without text or other objects;
+/// this function removes only the validated full-page background.
+pub fn transparent_ink_svg(svg: &str, width: i64, height: i64) -> Result<String, &'static str> {
+    if width <= 0 || height <= 0 || width > 32768 || height > 32768 || width * height > crate::pixels::MAX_PIXELS {
+        return Err("size");
+    }
+    let (inner, view) = renderer_layer(svg, width, height)?;
+    let numbers: Vec<f64> = view.split(|c: char| c.is_ascii_whitespace() || c == ',')
+        .filter(|s| !s.is_empty()).map(str::parse).collect::<Result<_, _>>().map_err(|_| "viewbox")?;
+    if numbers.as_slice() != [0.0, 0.0, width as f64, height as f64] { return Err("viewbox"); }
+    Ok(format!("<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">{inner}</svg>"))
+}
+
 fn root_content_start(svg: &str, root: &roxmltree::Node) -> Result<usize, &'static str> {
     let start = root.range().start;
     svg[start..].find('>').map(|i| start + i + 1).ok_or("renderer svg")

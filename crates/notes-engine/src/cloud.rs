@@ -127,6 +127,10 @@ pub trait Metadata: Send + Sync {
 /// `api_factory(session_path, work_dir)` and `metadata_factory(api)`.
 pub trait CloudFactory: Send + Sync {
     fn open(&self, session: &Path, work_dir: &Path) -> R<Arc<dyn Cloud>>;
+    /// Schema 7 supplies its private directory for container-backed receipts.
+    fn open_for_library(&self, session: &Path, work_dir: &Path, _container_directory: Option<&Path>) -> R<Arc<dyn Cloud>> {
+        self.open(session, work_dir)
+    }
     /// `None` = no metadata sync (Python `metadata_factory=None`).
     fn metadata(&self, api: &Arc<dyn Cloud>) -> Option<Arc<dyn Metadata>>;
 }

@@ -11,8 +11,14 @@ pub struct TempDir(pub PathBuf);
 impl TempDir {
     pub fn new() -> TempDir {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let base = std::env::var_os("NOTES_PREVIEW_TEST_TMP").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-        let path = base.join(format!("notes-preview-test-{}-{}", std::process::id(), COUNTER.fetch_add(1, Ordering::SeqCst)));
+        let base = std::env::var_os("NOTES_PREVIEW_TEST_TMP")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let path = base.join(format!(
+            "notes-preview-test-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).unwrap();
         use std::os::unix::fs::PermissionsExt;
@@ -30,8 +36,20 @@ impl Drop for TempDir {
     }
 }
 
-pub type Http = Box<dyn Fn(&str, &[(String, String)]) -> Result<(u16, Vec<u8>, Option<String>), Fail> + Send + Sync>;
-pub type Download = Box<dyn Fn(&str, &[(String, String)], &Path, u64, &dyn Fn() -> Result<(), Fail>) -> Result<(u16, Option<String>), Fail> + Send + Sync>;
+pub type Http = Box<
+    dyn Fn(&str, &[(String, String)]) -> Result<(u16, Vec<u8>, Option<String>), Fail> + Send + Sync,
+>;
+pub type Download = Box<
+    dyn Fn(
+            &str,
+            &[(String, String)],
+            &Path,
+            u64,
+            &dyn Fn() -> Result<(), Fail>,
+        ) -> Result<(u16, Option<String>), Fail>
+        + Send
+        + Sync,
+>;
 
 /// `SimpleNamespace(sessions=..., _api=...)`
 pub struct TestEnv {
@@ -49,7 +67,10 @@ impl TestEnv {
         Arc::new(TestEnv {
             session: Mutex::new(session.map(Path::to_path_buf)),
             offline: AtomicBool::new(offline),
-            headers: Mutex::new(Ok(vec![("Authorization".into(), "Bearer synthetic".into())])),
+            headers: Mutex::new(Ok(vec![(
+                "Authorization".into(),
+                "Bearer synthetic".into(),
+            )])),
             http: Mutex::new(None),
             download: Mutex::new(None),
             refresh: Mutex::new(None),
@@ -70,7 +91,11 @@ impl PreviewEnv for TestEnv {
     fn headers(&self) -> Result<Vec<(String, String)>, Fail> {
         self.headers.lock().unwrap().clone()
     }
-    fn http(&self, url: &str, headers: &[(String, String)]) -> Result<(u16, Vec<u8>, Option<String>), Fail> {
+    fn http(
+        &self,
+        url: &str,
+        headers: &[(String, String)],
+    ) -> Result<(u16, Vec<u8>, Option<String>), Fail> {
         match &*self.http.lock().unwrap() {
             Some(f) => f(url, headers),
             None => panic!("unexpected network"),
@@ -82,8 +107,14 @@ impl PreviewEnv for TestEnv {
             None => panic!("unexpected note refresh"),
         }
     }
-    fn download(&self, url: &str, headers: &[(String, String)], dest: &Path, max: u64,
-                check: &dyn Fn() -> Result<(), Fail>) -> Result<(u16, Option<String>), Fail> {
+    fn download(
+        &self,
+        url: &str,
+        headers: &[(String, String)],
+        dest: &Path,
+        max: u64,
+        check: &dyn Fn() -> Result<(), Fail>,
+    ) -> Result<(u16, Option<String>), Fail> {
         match &*self.download.lock().unwrap() {
             Some(f) => f(url, headers, dest, max, check),
             None => panic!("unexpected network"),
@@ -93,14 +124,23 @@ impl PreviewEnv for TestEnv {
 
 pub fn sha256_hex(data: &[u8]) -> String {
     use sha2::{Digest, Sha256};
-    Sha256::digest(data).iter().map(|b| format!("{b:02x}")).collect()
+    Sha256::digest(data)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// `tests.test_previews.candidate(raw)`
 pub fn candidate(raw: &[u8]) -> CanvasPreviewCandidate {
     CanvasPreviewCandidate {
-        page_index: 0, key: 0, width: 1, height: 1, is_dark_mode: false, bind_number: "7".into(),
-        sha256: sha256_hex(raw), download_url: Some("https://ew1a-api.samsungcloud.com/file?signature=synthetic".into()),
+        page_index: 0,
+        key: 0,
+        width: 1,
+        height: 1,
+        is_dark_mode: false,
+        bind_number: "7".into(),
+        sha256: sha256_hex(raw),
+        download_url: Some("https://ew1a-api.samsungcloud.com/file?signature=synthetic".into()),
     }
 }
 
@@ -117,11 +157,16 @@ pub fn note_with_document(store: &StoreCore, snapshot: &Val) -> String {
     let note = store.create(&Val::s("Synthetic"), &Val::s("")).unwrap();
     let id = note.get("id").unwrap().as_str().unwrap().to_string();
     let text = rs_store::val::dumps(snapshot, true, true).unwrap();
-    store.with_db(|db| {
-        use rs_store::db::Sql;
-        db.exec("UPDATE notes SET base_document=?, loaded=1, deleted_remote=0 WHERE id=?", &rs_store::p![text, id.as_str()])?;
-        Ok(())
-    }).unwrap();
+    store
+        .with_db(|db| {
+            use rs_store::db::Sql;
+            db.exec(
+                "UPDATE notes SET base_document=?, loaded=1, deleted_remote=0 WHERE id=?",
+                &rs_store::p![text, id.as_str()],
+            )?;
+            Ok(())
+        })
+        .unwrap();
     id
 }
 
@@ -131,21 +176,34 @@ pub fn b64(data: &[u8]) -> String {
 
 /// `{'schemaVersion':1,'raw_body':...,'raw_sha256':...,'content_type':...}`
 pub fn snapshot(raw: &[u8], content_type: &str) -> Val {
-    Val::dict(vec![("schemaVersion", Val::Int(1)), ("raw_body", Val::s(b64(raw))), ("raw_sha256", Val::s(sha256_hex(raw))),
-                   ("content_type", Val::s(content_type))])
+    Val::dict(vec![
+        ("schemaVersion", Val::Int(1)),
+        ("raw_body", Val::s(b64(raw))),
+        ("raw_sha256", Val::s(sha256_hex(raw))),
+        ("content_type", Val::s(content_type)),
+    ])
 }
 
 /// `tests.test_pdf_background.pdf_fixture()`
 pub fn pdf_fixture() -> Vec<u8> {
     let red = b"1 0 0 rg 0 0 20 10 re f\n".to_vec();
     let green = b"0 1 0 rg 0 0 20 10 re f\n".to_vec();
-    let stream = |c: &[u8]| { let mut v = format!("<< /Length {} >>\nstream\n", c.len()).into_bytes(); v.extend_from_slice(c); v.extend_from_slice(b"endstream"); v };
+    let stream = |c: &[u8]| {
+        let mut v = format!("<< /Length {} >>\nstream\n", c.len()).into_bytes();
+        v.extend_from_slice(c);
+        v.extend_from_slice(b"endstream");
+        v
+    };
     let objects: Vec<Vec<u8>> = vec![
         b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
         b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_vec(),
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 10] /Resources << >> /Contents 5 0 R >>".to_vec(),
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 10] /Resources << >> /Contents 6 0 R >>".to_vec(),
-        stream(&red), stream(&green)];
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 10] /Resources << >> /Contents 5 0 R >>"
+            .to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 20 10] /Resources << >> /Contents 6 0 R >>"
+            .to_vec(),
+        stream(&red),
+        stream(&green),
+    ];
     let mut data = b"%PDF-1.4\n".to_vec();
     let mut offsets = Vec::new();
     for (i, obj) in objects.iter().enumerate() {
@@ -159,7 +217,9 @@ pub fn pdf_fixture() -> Vec<u8> {
     for o in offsets {
         data.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
     }
-    data.extend_from_slice(format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
+    data.extend_from_slice(
+        format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+    );
     data
 }
 

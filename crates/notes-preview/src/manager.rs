@@ -3,6 +3,7 @@
 use crate::codec;
 use crate::env::PreviewEnv;
 use crate::ink::{InkBackend, InkPage, NativeInk};
+use crate::ink_tiles::{InkLayerCache, InkLayerCacheKey, InkLayerPageKey};
 use crate::payload::{inspect_ink_payload, payload_from_snapshot};
 use crate::pdf::{self, PdfBackground};
 use crate::util::{self, preview, private_directory, read_cached, store_fail, J};
@@ -19,6 +20,8 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 const GENERIC_FAILURE: &str = "Sayfa görüntüsü hazırlanamadı. Metin önizlemesi korunuyor.";
+// Internal marker: actual short-lived links are read only when needed.
+const INDEXED_URL: &str = "indexed-url";
 const PDF_PARTIAL: &str = "PDF zemini gösteriliyor. Bu sayfadaki not ve çizimler henüz bu görüntüye eklenmiyor.";
 const PDF_UNSUPPORTED: &str = "Bu sayfanın PDF yerleşimi henüz tam görüntülenemiyor.";
 
@@ -324,6 +327,8 @@ impl State {
 
 struct Inner {
     store: Arc<StoreCore>,
+    schema7: bool,
+    inventory_worker: Option<crate::inventory_worker::InventoryWorker>,
     db_monitor: rs_store::db::Db,
     env: Arc<dyn PreviewEnv>,
     directory: PathBuf,
@@ -336,6 +341,7 @@ struct Inner {
     entry_hook: Option<EntryHook>,
     source_hook: Option<SourceHook>,
     state: Mutex<State>,
+    ink_layers: Mutex<InkLayerCache>,
     finished: Condvar,
     queue: Queue,
     sequence: AtomicU64,
@@ -374,6 +380,10 @@ impl PreviewManager {
     /// `PreviewManager(engine, decoder=..., fetcher=...)` plus test hooks.
     pub fn with_options(store: Arc<StoreCore>, env: Arc<dyn PreviewEnv>, options: PreviewOptions) -> Result<PreviewManager, Fail> {
         let directory = private_directory(&store.directory.join("page-previews"))?;
+        let schema7 = store.meta("schema_version").map_err(store_fail)?.as_ref().and_then(Val::as_i64) == Some(7);
+        let use_static = schema7 && options.ink.is_none() && options.entry_hook.is_none() && options.source_hook.is_none();
+        let inventory_worker = if use_static { Some(crate::inventory_worker::InventoryWorker::start(store.clone())?) } else { None };
+        if let Some(worker) = &inventory_worker { worker.wake(); }
         let db_monitor = rs_store::db::Db::open(&store.path).map_err(store_fail)?;
         let root = env.project_root();
         let decoder = options.decoder.unwrap_or_else(|| {
@@ -385,10 +395,10 @@ impl PreviewManager {
         let ink = options.ink.unwrap_or_else(|| Arc::new(NativeInk::new(root.clone(), env.ink_child_executable())));
         Ok(PreviewManager {
             inner: Arc::new(Inner {
-                store, db_monitor, env, directory, root, decoder, fetcher, media_fetcher, ink,
+                store, schema7, inventory_worker, db_monitor, env, directory, root, decoder, fetcher, media_fetcher, ink,
                 workers: options.workers.unwrap_or_else(crate::default_workers).max(1),
                 entry_hook: options.entry_hook, source_hook: options.source_hook,
-                state: Mutex::new(State::default()), finished: Condvar::new(),
+                state: Mutex::new(State::default()), ink_layers: Mutex::new(InkLayerCache::new(64 * 1024 * 1024, 512)), finished: Condvar::new(),
                 queue: Queue { heap: Mutex::new((BinaryHeap::new(), 0)), ready: Condvar::new(), idle: Condvar::new() },
                 sequence: AtomicU64::new(0), stop: AtomicBool::new(false), running: AtomicUsize::new(0),
                 exited: (Mutex::new(()), Condvar::new()),
@@ -399,6 +409,19 @@ impl PreviewManager {
     /// `self.directory` (`<store>/page-previews`, private).
     pub fn directory(&self) -> &Path {
         &self.inner.directory
+    }
+
+    /// Notify the background producer after a committed container pointer changes.
+    pub fn wake_inventory(&self) -> Result<(), Fail> {
+        if let Some(worker) = &self.inner.inventory_worker {
+            if !worker.wake() { return Err(Fail::os("Preview inventory worker unavailable")); }
+        }
+        Ok(())
+    }
+
+    /// Explicitly retry a terminal inventory failure without changing note data.
+    pub fn retry_inventory(&self, identity: &str) -> Result<Val, Fail> {
+        self.inner.retry_inventory(identity)
     }
 
     /// `manifest(identity)` -> `{'pages': [...], 'providerAvailable': bool}`.
@@ -412,6 +435,33 @@ impl PreviewManager {
         Inner::request(&self.inner, identity, page_index, priority, wait)
     }
 
+    pub fn notext(&self, identity: &str, page_index: i64, revision: i64) -> Result<Option<Vec<u8>>, Fail> {
+        self.inner.text_composite(identity, page_index, revision, false)
+    }
+
+    pub fn fulltext(&self, identity: &str, page_index: i64, revision: i64) -> Result<Option<Vec<u8>>, Fail> {
+        self.inner.text_composite(identity, page_index, revision, true)
+    }
+
+    pub fn text_ink_layer(&self, identity: &str, page_index: i64, revision: i64, tile: Option<(u8,u32,u32)>, expected: Option<&str>) -> Result<Option<(Vec<u8>,String)>, Fail> {
+        self.inner.text_ink_layer(identity,page_index,revision,tile,expected)
+    }
+
+    /// A no-ink base (tile=None), or one transparent ink tile, together with
+    /// an opaque snapshot token. Busy work returns None for the caller to poll.
+    pub fn ink_layer(&self, identity: &str, page_index: i64, revision: i64, tile: Option<(u8,u32,u32)>, expected: Option<&str>) -> Result<Option<(Vec<u8>,String)>, Fail> {
+        let started = Instant::now();
+        let result = self.inner.ink_layer(identity, page_index, revision, tile, expected);
+        if let Some(path) = std::env::var_os("NOTES_PREVIEW_TIMING") {
+            use std::io::Write;
+            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                let outcome = match &result { Ok(Some(_)) => "ready", Ok(None) => "busy", Err(_) => "error" };
+                let _ = writeln!(file, "{{\"kind\":\"ink-tile\",\"workMs\":{},\"outcome\":\"{}\"}}", started.elapsed().as_millis(), outcome);
+            }
+        }
+        result
+    }
+
     /// `prefetch(limit=MAX_QUEUED // 2)`: warm first pages at priority 2.
     pub fn prefetch(&self, limit: usize) -> Result<usize, Fail> {
         Inner::prefetch(&self.inner, limit)
@@ -420,6 +470,7 @@ impl PreviewManager {
     /// `close()`
     pub fn close(&self) {
         self.inner.stop.store(true, AtomicOrdering::SeqCst);
+        if let Some(worker) = &self.inner.inventory_worker { worker.stop(); }
         self.inner.queue.ready.notify_all();
     }
 
@@ -435,11 +486,22 @@ impl PreviewManager {
             }
             guard = wake.wait_timeout(guard, deadline - now).unwrap().0;
         }
+        drop(guard);
+        if self.inner.stop.load(AtomicOrdering::SeqCst) {
+            if let Some(worker) = &self.inner.inventory_worker {
+                let _ = worker.join_for(deadline.saturating_duration_since(Instant::now()));
+            }
+        }
     }
 
     /// `_source(identity)`
     pub fn source(&self, identity: &str) -> Result<Source, Fail> {
         self.inner.source(identity)
+    }
+
+    /// Read a current page by index without reconstructing the Cloud snapshot.
+    pub fn container_page(&self, identity: &str, page_index: i64, raw_sha256: &str) -> Result<Option<crate::container_page::IndexedPage>, Fail> {
+        crate::container_page::read(&self.inner.store, identity, page_index, raw_sha256)
     }
 
     /// `_entry(identity)`
@@ -469,13 +531,14 @@ impl PreviewManager {
         };
         let Some(candidate) = candidates.into_iter().find(|c| c.sha256 == sha256) else { return Err(unavailable()) };
         let directory = self.inner.directory.join("pdf-files");
-        if let Some(path) = pdf::cached_pdf(&candidate, &directory, account)? {
+        let media = rs_store::media_store::MediaStore::open(&self.inner.store.directory).map_err(store_fail)?;
+        if let Some(path) = pdf::cached_pdf_shared(&candidate, &directory, account, &media)? {
             return Ok(Some(path));
         }
         if !fetch {
             return Ok(None);
         }
-        match pdf::fetch_pdf(&candidate, self.inner.env.as_ref(), &directory, account, None) {
+        match pdf::fetch_pdf_shared(&candidate, self.inner.env.as_ref(), &directory, account, None, &media) {
             Ok(path) => Ok(Some(path)),
             Err(e) if e.kind == Kind::PdfBackground => Err(Fail::store("template_unavailable", &e.message, 503)),
             Err(e) => Err(e),
@@ -494,6 +557,227 @@ impl PreviewManager {
 }
 
 impl Inner {
+    fn text_ink_layer(&self, identity:&str,index:i64,revision:i64,requested:Option<(u8,u32,u32)>,expected:Option<&str>) -> Result<Option<(Vec<u8>,String)>,Fail> {
+        use rs_render::raster::{InkTile,InkTileScale};
+        let unavailable=||Fail::store("preview_unavailable","Bu sayfanın çizim katmanı kullanılamıyor.",404);
+        let changed=||Fail::store("preview_source_changed","Not değişti.",409);
+        let source=self.source(identity)?;
+        let actual=source.0.get(4).and_then(Val::as_i64).ok_or_else(unavailable)?;
+        let revision=if revision == -1 { actual } else { revision };
+        if revision!=actual { return Err(changed()); }
+        let epoch=self.refresh_snapshot_epoch()?;
+        let snapshot=self.snapshot(identity)?;
+        let digest=snapshot.get("raw_sha256").and_then(Val::as_str).ok_or_else(unavailable)?;
+        let token=util::sha256_hex(format!("{}:{identity}:{revision}:{index}:{digest}:text-ink-v1",account_of(&self.store)?).as_bytes());
+        if expected.is_some_and(|value| value!=token) { return Err(changed()); }
+        let key=InkLayerPageKey{note_id:identity.into(),revision,page_index:index,snapshot_digest:util::sha256(token.as_bytes())};
+        let mut cache=match self.ink_layers.try_lock() { Ok(value)=>value,Err(std::sync::TryLockError::WouldBlock)=>return Ok(None),Err(std::sync::TryLockError::Poisoned(error))=>error.into_inner() };
+        let base_key=InkLayerCacheKey::TextBase(key.clone());let svg_key=InkLayerCacheKey::TextSvg(key.clone());
+        let size_key=InkLayerCacheKey::TextSize(key.clone());
+        let guard=||if self.source(identity)?==source&&self.snapshot_epoch()?==epoch {Ok(())} else {Err(changed())};
+        let mut prepared=None;
+        if cache.get(&base_key).is_none()||cache.get(&svg_key).is_none()||cache.get(&size_key).is_none() {
+            let page=crate::ink::prepare::text_ink_snapshot_page(&snapshot,index).map_err(|_|unavailable())?.ok_or_else(unavailable)?;
+            let mut found=BTreeMap::new();
+            if page.over_pdf {
+                let payload=payload_from_snapshot(&snapshot)?;
+                let pdf=pdf::inspect_pdf_backgrounds(&payload)?.into_iter().find(|p|p.page_index==index).ok_or_else(unavailable)?;
+                let media=rs_store::media_store::MediaStore::open(&self.store.directory).map_err(store_fail)?;
+                let directory=self.directory.join("pdf-files");let account=account_of(&self.store)?;
+                let file=match pdf::cached_pdf_shared(&pdf,&directory,&account,&media)? {
+                    Some(file)=>file,None if self.connected()=>pdf::fetch_pdf_shared(&pdf,self.env.as_ref(),&directory,&account,Some(&guard),&media)?,None=>return Err(unavailable()),
+                };
+                found.insert(crate::ink::prepare::PDF_UNDERLAY.into(),pdf::render_pdf_background(&file,&pdf)?);
+            }
+            let mut urls=None;
+            for sha in crate::ink::composite_media(&page.body) {
+                if found.contains_key(&sha) {continue;}
+                if let Some(bytes)=self.media_cached(&sha)? {found.insert(sha,bytes);continue;}
+                if !self.connected() {continue;}
+                let urls=urls.get_or_insert_with(||self.media_urls(&snapshot));
+                if let Some(url)=urls.get(&sha) {if let Ok(bytes)=self.fetch_media(identity,&sha,url,&guard) {if util::sha256_hex(&bytes)==sha {let _=self.store_media(&sha,&bytes,&guard);found.insert(sha,bytes);}}}
+            }
+            let (base,svg,complete)=self.ink.split_text_prepared(&page,&|sha|found.get(sha).cloned()).ok_or_else(unavailable)??;
+            if !complete {return Err(unavailable());} guard()?;
+            let mut size=Vec::with_capacity(8);size.extend_from_slice(&(page.width as u32).to_le_bytes());size.extend_from_slice(&(page.height as u32).to_le_bytes());
+            if !cache.insert(base_key.clone(),Arc::from(base))||!cache.insert(svg_key.clone(),Arc::from(svg))||!cache.insert(size_key.clone(),Arc::from(size)) {return Err(unavailable());}
+            prepared=Some((page.width as u32,page.height as u32));
+        }
+        let (width,height)=match prepared {Some(size)=>size,None=>{let bytes=cache.get(&size_key).ok_or_else(unavailable)?;if bytes.len()!=8{return Err(unavailable());}(u32::from_le_bytes(bytes[0..4].try_into().map_err(|_|unavailable())?),u32::from_le_bytes(bytes[4..8].try_into().map_err(|_|unavailable())?))}};
+        let tile=match requested {Some((half,x,y))=>Some(InkTile::new(width,height,InkTileScale::from_half_units(half).ok_or_else(unavailable)?,x,y).ok_or_else(unavailable)?),None=>None};
+        let bytes=if let Some(tile)=tile {
+            let tile_key=InkLayerCacheKey::TextTile{page:key,tile};
+            if let Some(value)=cache.get(&tile_key) {value.to_vec()} else {
+                let svg=cache.get(&svg_key).ok_or_else(unavailable)?;
+                let pixels=rs_render::raster::rasterize_ink_tile(&svg,tile).map_err(|_|unavailable())?;
+                let png=rs_render::pixels::rgba_png(512,512,&pixels).map_err(|_|unavailable())?;
+                if !cache.insert(tile_key,Arc::from(png.clone())) {return Err(unavailable());} png
+            }
+        } else {cache.get(&base_key).ok_or_else(unavailable)?.to_vec()};
+        guard()?;Ok(Some((bytes,token)))
+    }
+
+    fn text_composite(&self, identity: &str, index: i64, revision: i64, fulltext: bool) -> Result<Option<Vec<u8>>, Fail> {
+        let unavailable = || Fail::store("preview_unavailable", "Bu sayfanın metinsiz görüntüsü kullanılamıyor.", 404);
+        let changed = || Fail::store("preview_source_changed", "Not değişti.", 409);
+        let source = self.source(identity)?;
+        let actual = source.0.get(4).and_then(Val::as_i64).ok_or_else(unavailable)?;
+        let revision = if revision == -1 { actual } else { revision };
+        if actual != revision { return Err(changed()); }
+        let epoch = self.refresh_snapshot_epoch()?;
+        let snapshot = self.snapshot(identity)?;
+        let model = if fulltext {
+            let current = self.store.cached_editor(identity, Some(&Val::Int(revision))).map_err(store_fail)?.ok_or_else(changed)?;
+            Some(current.get("model").cloned().filter(|m| !m.is_null()).ok_or_else(changed)?)
+        } else { None };
+        let digest = snapshot.get("raw_sha256").and_then(Val::as_str).ok_or_else(unavailable)?;
+        let token = util::sha256(format!("{}:{identity}:{revision}:{index}:{digest}:text-composite-v1", account_of(&self.store)?).as_bytes());
+        let key_page = InkLayerPageKey { note_id: identity.into(), revision, page_index: index, snapshot_digest: token };
+        let key = if fulltext { InkLayerCacheKey::FullText(key_page) } else { InkLayerCacheKey::NoText(key_page) };
+        let mut cache = match self.ink_layers.try_lock() {
+            Ok(cache) => cache,
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(None),
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+        };
+        if let Some(hit) = cache.get(&key) { return Ok(Some(hit.to_vec())); }
+        let page = (if let Some(model) = &model { crate::ink::prepare::fulltext_snapshot_page(&snapshot, index, model) } else { crate::ink::prepare::notext_snapshot_page(&snapshot, index) }).map_err(|_| unavailable())?.ok_or_else(unavailable)?;
+        // A partial composite must never silently hide saved page objects
+        // while the editor substitutes it for Samsung's complete canvas.
+        let body = rs_store::val::loads(std::str::from_utf8(&page.body).map_err(|_| unavailable())?).map_err(|_| unavailable())?;
+        if matches!(body.get("notices"), Some(Val::List(notices)) if notices.iter().any(|notice| notice.as_str() == Some(crate::ink::objects::NOTICE_HIDDEN))) {
+            return Err(unavailable());
+        }
+        let mut found = BTreeMap::new();
+        let guard = || if self.source(identity)? == source && self.snapshot_epoch()? == epoch { Ok(()) } else { Err(changed()) };
+        if page.over_pdf {
+            let payload = payload_from_snapshot(&snapshot)?;
+            let pdf = pdf::inspect_pdf_backgrounds(&payload)?.into_iter().find(|p| p.page_index == index).ok_or_else(unavailable)?;
+            let media = rs_store::media_store::MediaStore::open(&self.store.directory).map_err(store_fail)?;
+            let directory = self.directory.join("pdf-files");
+            let account = account_of(&self.store)?;
+            let file = match pdf::cached_pdf_shared(&pdf, &directory, &account, &media)? {
+                Some(file) => file,
+                None if self.connected() => pdf::fetch_pdf_shared(&pdf, self.env.as_ref(), &directory, &account, Some(&guard), &media)?,
+                None => return Err(unavailable()),
+            };
+            found.insert(crate::ink::prepare::PDF_UNDERLAY.to_string(), pdf::render_pdf_background(&file, &pdf)?);
+        }
+        let mut urls = None;
+        for sha in crate::ink::composite_media(&page.body) {
+            if found.contains_key(&sha) { continue; }
+            if let Some(bytes) = self.media_cached(&sha)? { found.insert(sha, bytes); continue; }
+            if !self.connected() { continue; }
+            let urls = urls.get_or_insert_with(|| self.media_urls(&snapshot));
+            if let Some(url) = urls.get(&sha) {
+                if let Ok(bytes) = self.fetch_media(identity, &sha, url, &guard) {
+                    if util::sha256_hex(&bytes) == sha {
+                        let _ = self.store_media(&sha, &bytes, &guard);
+                        found.insert(sha, bytes);
+                    }
+                }
+            }
+        }
+        let (png, complete) = self.ink.render_prepared(&page, &|| page.body.clone(), &|sha| found.get(sha).cloned()).ok_or_else(unavailable)??;
+        if !complete { return Err(unavailable()); }
+        if self.source(identity)? != source || self.snapshot_epoch()? != epoch { return Err(changed()); }
+        if !cache.insert(key, Arc::from(png.clone())) { return Err(unavailable()); }
+        Ok(Some(png))
+    }
+
+    fn ink_layer(&self, identity: &str, page_index: i64, revision: i64, requested: Option<(u8,u32,u32)>, expected: Option<&str>) -> Result<Option<(Vec<u8>,String)>, Fail> {
+        use rs_render::raster::{InkTile, InkTileScale};
+        let unavailable = || Fail::store("preview_unavailable", "Bu sayfanın çizim katmanı kullanılamıyor.", 404);
+        let changed = || Fail::store("preview_source_changed", "Not değişti.", 409);
+        let entry = self.entry(identity)?;
+        let epoch = self.snapshot_epoch()?;
+        let actual_revision = entry.source.0.get(4).and_then(Val::as_i64).ok_or_else(unavailable)?;
+        let revision = if revision == -1 { actual_revision } else { revision };
+        if actual_revision != revision { return Err(changed()); }
+        let candidate = entry.candidates.get(&page_index).ok_or_else(unavailable)?;
+        let (local, pdf) = match candidate {
+            Candidate::Ink(c) => (c, None),
+            Candidate::Pdf(c) if c.overlay.is_none() => (c.local_ink.as_ref().ok_or_else(unavailable)?, Some(c)),
+            _ => return Err(unavailable()),
+        };
+        let tile = match requested {
+            Some((half, x, y)) => {
+                let scale = InkTileScale::from_half_units(half).ok_or_else(unavailable)?;
+                Some(InkTile::new(local.width.try_into().map_err(|_| unavailable())?, local.height.try_into().map_err(|_| unavailable())?, scale, x, y).ok_or_else(unavailable)?)
+            }
+            None => None,
+        };
+        let digest = local.sha256.as_str();
+        if self.inventory_worker.is_some() && entry.source.0.get(6).and_then(Val::as_str) != Some(digest) { return Err(changed()); }
+        let legacy_snapshot = if self.inventory_worker.is_none() {
+            let snapshot = self.snapshot(identity)?;
+            if snapshot.get("raw_sha256").and_then(Val::as_str) != Some(digest) { return Err(changed()); }
+            Some(snapshot)
+        } else { None };
+        let token = util::sha256_hex(format!("{}:{identity}:{revision}:{page_index}:{digest}", account_of(&self.store)?).as_bytes());
+        if expected.is_some_and(|value| value != token) { return Err(changed()); }
+        let page = InkLayerPageKey { note_id: identity.to_string(), revision, page_index, snapshot_digest: util::sha256(token.as_bytes()) };
+        let mut cache = match self.ink_layers.try_lock() {
+            Ok(cache) => cache,
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(None),
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+        };
+        let base_key = InkLayerCacheKey::Base(page.clone());
+        let svg_key = InkLayerCacheKey::Svg(page.clone());
+        if cache.get(&base_key).is_none() || cache.get(&svg_key).is_none() {
+            let mut found = BTreeMap::new();
+            if let Some(pdf) = pdf {
+                let media = rs_store::media_store::MediaStore::open(&self.store.directory).map_err(store_fail)?;
+                let file = pdf::cached_pdf_shared(pdf, &self.directory.join("pdf-files"), &account_of(&self.store)?, &media)?.ok_or_else(unavailable)?;
+                found.insert(crate::ink::prepare::PDF_UNDERLAY.to_string(), pdf::render_pdf_background(&file, pdf)?);
+            }
+            let mut prepared = None;
+            if self.inventory_worker.is_some() && self.ink.supports_prepared() {
+                let material = crate::container_input::read_material(&self.store, identity, page_index, digest).map_err(|error| {
+                    if error.code == "preview_source_changed" { error } else { Fail::store("preview_storage_corrupt", "Sayfa verisi doğrulanamadı.", 422) }
+                })?;
+                if let Some(material) = material {
+                    if let Ok(mut pages) = crate::ink::prepare::prepare_container_page(&material, true) {
+                        if pages.len() == 1 {
+                            let page = pages.remove(0);
+                            if (page.index,page.width,page.height,page.composite,page.notice.as_ref(),page.over_pdf)
+                                == (local.page_index,local.width,local.height,local.composite,local.notice.as_ref(),pdf.is_some()) {
+                                prepared = Some(page);
+                            }
+                        }
+                    }
+                }
+            }
+            let (base, svg, complete) = if let Some(page) = prepared {
+                for sha in crate::ink::composite_media(&page.body) {
+                    if let Some(bytes) = self.media_cached(&sha)? { found.insert(sha, bytes); }
+                }
+                self.ink.split_prepared(&page, &|sha| found.get(sha).cloned()).ok_or_else(unavailable)?.map_err(|_| unavailable())?
+            } else {
+                let snapshot = match legacy_snapshot { Some(snapshot) => snapshot, None => self.snapshot(identity)? };
+                if snapshot.get("raw_sha256").and_then(Val::as_str) != Some(digest) { return Err(changed()); }
+                for sha in self.ink.page_media(&snapshot, page_index) {
+                    if let Some(bytes) = self.media_cached(&sha)? { found.insert(sha, bytes); }
+                }
+                self.ink.split_page(&snapshot, page_index, &|sha| found.get(sha).cloned()).ok_or_else(unavailable)?.map_err(|_| unavailable())?
+            };
+            if !complete { return Err(unavailable()); }
+            if self.source(identity)? != entry.source || self.snapshot_epoch()? != epoch { return Err(changed()); }
+            if !cache.insert(base_key.clone(), Arc::from(base)) || !cache.insert(svg_key.clone(), Arc::from(svg)) { return Err(unavailable()); }
+        }
+        let result = if let Some(tile) = tile {
+            let key = InkLayerCacheKey::Tile { page, tile };
+            if let Some(bytes) = cache.get(&key) { bytes.to_vec() } else {
+                let svg = cache.get(&svg_key).ok_or_else(unavailable)?;
+                let pixels = rs_render::raster::rasterize_ink_tile(&svg, tile).map_err(|_| unavailable())?;
+                let png = rs_render::pixels::rgba_png(512, 512, &pixels).map_err(|_| unavailable())?;
+                if !cache.insert(key, Arc::from(png.clone())) { return Err(unavailable()); }
+                png
+            }
+        } else { cache.get(&base_key).ok_or_else(unavailable)?.to_vec() };
+        if self.source(identity)? != entry.source || self.snapshot_epoch()? != epoch { return Err(changed()); }
+        Ok(Some((result,token)))
+    }
+
     fn lock(&self) -> MutexGuard<'_, State> {
         // The job table stays usable after a worker panic (see `worker`).
         self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -505,11 +789,13 @@ impl Inner {
         }
         let row = self.store.with_db(|db| {
             use rs_store::db::Sql;
-            db.query("SELECT id,remote_commit,loaded,deleted_remote,revision,modified_ms FROM notes WHERE id=?",
-                     &rs_store::p![identity])
+            let sql = if self.schema7 { "SELECT id,remote_commit,loaded,deleted_remote,revision,modified_ms,raw_sha256 FROM notes WHERE id=?" }
+                else { "SELECT id,remote_commit,loaded,deleted_remote,revision,modified_ms FROM notes WHERE id=?" };
+            db.query(sql, &rs_store::p![identity])
         }).map_err(store_fail)?;
         let Some(row) = row.one() else { return Err(Fail::store("not_found", "Not bulunamadı.", 404)) };
         let mut values: Vec<Val> = (0..6).map(|i| row.at(i)).collect();
+        if self.schema7 { values.push(row.at(6)); }
         values.push(self.env.session_path().map_or(Val::Null, |p| Val::s(p.to_string_lossy())));
         values.push(Val::Bool(self.env.offline()));
         Ok(Source(values))
@@ -519,11 +805,51 @@ impl Inner {
         self.env.session_path().is_some() && !self.env.offline()
     }
 
+    fn retry_inventory(&self, identity: &str) -> Result<Val, Fail> {
+        let Some(worker) = &self.inventory_worker else { return self.manifest(identity); };
+        let rows = self.store.with_db(|db| {
+            use rs_store::db::Sql;
+            db.query("SELECT loaded,deleted_remote,trashed,container_sha256 FROM notes WHERE id=?", &rs_store::p![identity])
+        }).map_err(store_fail)?;
+        let row = rows.one().ok_or_else(|| Fail::store("not_found", "Not bulunamadı.", 404))?;
+        if !row.truthy("loaded") || row.truthy("deleted_remote") || row.truthy("trashed") || row.is_null("container_sha256") {
+            return self.manifest(identity);
+        }
+        match self.store.preview_inventory(identity, crate::PREVIEW_INVENTORY_RECIPE).map_err(store_fail)? {
+            Some(rs_store::preview_inventory::InventoryOutcome::Ready(_) | rs_store::preview_inventory::InventoryOutcome::Unsupported) => return self.manifest(identity),
+            Some(rs_store::preview_inventory::InventoryOutcome::Failed) => {
+                self.store.retry_preview_inventory(identity, crate::PREVIEW_INVENTORY_RECIPE).map_err(store_fail)?;
+            }
+            None => {},
+        }
+        if !worker.wake_retry() { return Err(Fail::store("preview_inventory_failed", "Sayfa bilgileri hazırlanamadı.", 503)); }
+        Ok(Val::dict(vec![("pending", Val::Bool(true)), ("pages", Val::List(vec![])), ("providerAvailable", Val::Bool(false))]))
+    }
+
+    fn inventory_pending(&self, identity: &str) -> Result<bool, Fail> {
+        let Some(worker) = &self.inventory_worker else { return Ok(false); };
+        let rows = self.store.with_db(|db| {
+            use rs_store::db::Sql;
+            db.query("SELECT loaded,deleted_remote,trashed,container_sha256 FROM notes WHERE id=?", &rs_store::p![identity])
+        }).map_err(store_fail)?;
+        let row = rows.one().ok_or_else(|| Fail::store("not_found", "Not bulunamadı.", 404))?;
+        if !row.truthy("loaded") || row.truthy("deleted_remote") || row.truthy("trashed") || row.is_null("container_sha256") { return Ok(false); }
+        match self.store.preview_inventory(identity, crate::PREVIEW_INVENTORY_RECIPE).map_err(store_fail)? {
+            None => {
+                if worker.last_error().is_some() || !worker.wake() { return Err(Fail::store("preview_inventory_failed", "Sayfa bilgileri hazırlanamadı.", 503)); }
+                Ok(true)
+            }
+            Some(rs_store::preview_inventory::InventoryOutcome::Failed) => Err(Fail::store("preview_inventory_failed", "Sayfa bilgileri hazırlanamadı.", 503)),
+            _ => Ok(false),
+        }
+    }
+
     fn entry(&self, identity: &str) -> Result<Arc<Entry>, Fail> {
         self.refresh_snapshot_epoch()?;
         if let Some(hook) = &self.entry_hook {
             return hook(identity).map(Arc::new);
         }
+        if self.inventory_pending(identity)? { return Err(Fail::store("preview_pending", "Sayfa bilgileri hazırlanıyor.", 503)); }
         let source = self.source(identity)?;
         {
             let state = self.lock();
@@ -533,20 +859,36 @@ impl Inner {
                 }
             }
         }
-        let row = self.store.raw(identity).map_err(store_fail)?;
         let mut candidates: BTreeMap<i64, Candidate> = BTreeMap::new();
         let mut pages: Vec<Val> = Vec::new();
-        let base = row.get("base_document").cloned().unwrap_or(Val::Null);
-        if base.truthy() && row.get("loaded").is_some_and(Val::truthy) && !row.get("deleted_remote").is_some_and(Val::truthy) {
-            if let Err(e) = self.inventory(&base, &mut candidates, &mut pages) {
-                // Unknown/locked documents stay text previews. No URL escapes.
-                let tolerated = e.is_document() || e.kind == Kind::Ink || e.is_value() || e.is_key() || e.is_type();
-                if !tolerated {
-                    return Err(e);
+        let mut used_static = false;
+        if self.inventory_worker.is_some() {
+            if let Some(rs_store::preview_inventory::InventoryOutcome::Ready(inventory)) = self.store.preview_inventory(identity, crate::PREVIEW_INVENTORY_RECIPE).map_err(store_fail)? {
+                if let Some(projection) = crate::container_input::render_index(&self.store, identity)? {
+                    let digest = source.0.get(6).and_then(Val::as_str).ok_or_else(|| Fail::store("preview_storage_corrupt", "Sayfa verisi doğrulanamadı.", 422))?;
+                    let urls = projection.url_ids.iter().map(|id| (id.clone(), INDEXED_URL.to_string())).collect();
+                    self.inventory_static(&inventory, digest, &urls, &mut candidates, &mut pages)?;
+                    used_static = true;
+                } else if let Some(global) = crate::container_input::read_global(&self.store, identity)? {
+                    if let Some(urls) = Self::material_urls(&global) {
+                        self.inventory_static(&inventory, &global.index.raw_sha256, &urls, &mut candidates, &mut pages)?;
+                        used_static = true;
+                    }
                 }
-                pages.clear();
             }
         }
+        if !used_static {
+            let row = self.store.raw(identity).map_err(store_fail)?;
+            let base = row.get("base_document").cloned().unwrap_or(Val::Null);
+            if base.truthy() && row.get("loaded").is_some_and(Val::truthy) && !row.get("deleted_remote").is_some_and(Val::truthy) {
+                if let Err(e) = self.inventory(&base, &mut candidates, &mut pages) {
+                    let tolerated = e.is_document() || e.kind == Kind::Ink || e.is_value() || e.is_key() || e.is_type();
+                    if !tolerated { return Err(e); }
+                    pages.clear();
+                }
+            }
+        }
+        if self.source(identity)? != source { return Err(Fail::store("preview_source_changed", "Not değişti.", 409)); }
         let entry = Arc::new(Entry { source, pages, candidates });
         let mut state = self.lock();
         // Retain only small inventory metadata, never raw multipart bodies.
@@ -724,6 +1066,95 @@ impl Inner {
         Ok(())
     }
 
+    /// Combine source-bound facts with live account, provider and cache state.
+    fn inventory_static(&self, inventory: &rs_store::preview_inventory::Inventory, digest: &str,
+                        urls: &BTreeMap<String, String>, candidates: &mut BTreeMap<i64, Candidate>, pages: &mut Vec<Val>) -> Result<(), Fail> {
+        let mut canvases: Vec<_> = inventory.canvases.iter().map(|c| CanvasPreviewCandidate {
+            page_index: c.page_index, key: c.key, width: c.width, height: c.height, is_dark_mode: c.dark,
+            bind_number: c.bind_number.clone(), sha256: c.sha256.clone(), download_url: urls.get(&c.sha256).cloned(),
+        }).collect();
+        canvases.sort_by_key(|c| (c.is_dark_mode, -(c.width * c.height)));
+        for candidate in canvases {
+            let index = candidate.page_index as i64;
+            if candidate.download_url.as_deref().is_some_and(|u| !u.is_empty()) && candidate.width * candidate.height <= MAX_PIXELS && !candidates.contains_key(&index) {
+                candidates.insert(index, Candidate::Canvas(candidate));
+            }
+        }
+        let mut pdf_pages: Vec<(i64, Vec<PdfBackground>)> = Vec::new();
+        for p in &inventory.pdfs {
+            let candidate = PdfBackground { page_index: p.page_index as i64, pdf_page_index: p.pdf_page_index,
+                width: p.width, height: p.height, rect: p.rect, annotation_objects: p.annotation_objects,
+                sha256: p.sha256.clone(), download_url: urls.get(&p.sha256).cloned(), overlay: None, local_ink: None };
+            match pdf_pages.iter_mut().find(|(i, _)| *i == candidate.page_index) {
+                Some((_, list)) => list.push(candidate), None => pdf_pages.push((candidate.page_index, vec![candidate])),
+            }
+        }
+        let can_decode_overlay = !pdf_pages.is_empty() && codec::provider_available(&self.root);
+        for (index, placements) in &pdf_pages {
+            if placements.len() == 1 && placements[0].download_url.as_deref().is_some_and(|u| !u.is_empty()) {
+                let mut background = placements[0].clone();
+                if let Some(Candidate::Canvas(overlay)) = candidates.get(index) {
+                    if background.annotation_objects != 0 && !overlay.is_dark_mode && (overlay.width, overlay.height) == (background.width, background.height) {
+                        let overlay = overlay.clone();
+                        if (self.connected() && can_decode_overlay) || self.path(&Candidate::Canvas(overlay.clone()))?.is_file() { background.overlay = Some(overlay); }
+                    }
+                }
+                candidates.insert(*index, Candidate::Pdf(background));
+            }
+        }
+        let in_pdf = |index: i64| pdf_pages.iter().any(|(i, _)| *i == index);
+        let unsupported = |index: i64| index >= 0 && inventory.unsupported_pdf_pages.contains(&(index as usize));
+        let pdf_without_layer = candidates.values().any(|c| matches!(c, Candidate::Pdf(p) if p.annotation_objects != 0));
+        let renderer = self.ink.provider_available();
+        let mut over_pdf = Vec::new();
+        if inventory.ink_supported && (candidates.len() < inventory.pages.len() || pdf_without_layer) {
+            for rendered in &inventory.ink_pages {
+                if !renderer && !rendered.composite { continue; }
+                let index = rendered.page_index as i64;
+                if rendered.over_pdf { over_pdf.push(rendered); continue; }
+                if !candidates.contains_key(&index) && !in_pdf(index) && !unsupported(index) {
+                    candidates.insert(index, Candidate::Ink(InkGeometryPreview { page_index: index,
+                        width: rendered.width, height: rendered.height, sha256: digest.to_owned(),
+                        is_dark_mode: rendered.dark, composite: rendered.composite, notice: rendered.notice.clone() }));
+                }
+            }
+        }
+        for page in over_pdf {
+            if let Some(Candidate::Pdf(c)) = candidates.get_mut(&(page.page_index as i64)) {
+                if c.annotation_objects != 0 && (c.width, c.height) == (page.width, page.height) {
+                    c.local_ink = Some(InkGeometryPreview { page_index: page.page_index as i64, width: page.width,
+                        height: page.height, sha256: digest.to_owned(), is_dark_mode: false, composite: true, notice: page.notice.clone() });
+                }
+            }
+        }
+        for index in 0..inventory.pages.len() as i64 {
+            let item = candidates.get(&index); let size = &inventory.pages[index as usize];
+            let mut page = vec![("index", Val::Int(index)),
+                ("width", item.map_or_else(|| size.width.map_or(Val::Null, Val::Int), |c| Val::Int(c.width()))),
+                ("height", item.map_or_else(|| size.height.map_or(Val::Null, Val::Int), |c| Val::Int(c.height()))),
+                ("available", Val::Bool(item.is_some())),
+                ("darkMode", Val::Bool(match item { Some(Candidate::Pdf(_)) => false, Some(Candidate::Ink(c)) => c.is_dark_mode, _ => false }))];
+            match item {
+                Some(Candidate::Pdf(c)) => {
+                    let notes = c.overlay.is_some() || c.local_ink.is_some();
+                    page.push(("previewKind", Val::s(if notes { "pdf-with-notes" } else { "pdf-background" })));
+                    page.push(("complete", Val::Bool(c.complete())));
+                    let notice = match &c.local_ink { Some(local) if !c.complete() && c.overlay.is_none() => local.notice.as_deref().map_or(Val::Null, Val::s), _ if c.complete() => Val::Null, _ => Val::s(PDF_PARTIAL) };
+                    page.push(("previewNotice", notice));
+                }
+                Some(Candidate::Ink(c)) if c.composite => {
+                    page.push(("previewKind", Val::s("page-reconstructed"))); page.push(("complete", Val::Bool(c.notice.is_none())));
+                    page.push(("previewNotice", c.notice.as_deref().map_or(Val::Null, Val::s)));
+                }
+                Some(Candidate::Ink(_)) => { page.push(("previewKind", Val::s("ink-reconstructed"))); page.push(("complete", Val::Bool(true))); page.push(("previewNotice", Val::Null)); }
+                _ if in_pdf(index) || unsupported(index) => { page.push(("complete", Val::Bool(false))); page.push(("previewNotice", Val::s(PDF_UNSUPPORTED))); }
+                _ => {}
+            }
+            pages.push(Val::dict(page));
+        }
+        Ok(())
+    }
+
     /// `_ink_inventory(snapshot)`: renderer page admission, persisted per
     /// exact source and recipe under `page-previews/ink-inventory/`.
     fn ink_inventory(&self, snapshot: &Val, digest: &str) -> Result<Vec<InkPage>, Fail> {
@@ -751,6 +1182,9 @@ impl Inner {
     }
 
     fn manifest(&self, identity: &str) -> Result<Val, Fail> {
+        if self.inventory_pending(identity)? {
+            return Ok(Val::dict(vec![("pending", Val::Bool(true)), ("pages", Val::List(vec![])), ("providerAvailable", Val::Bool(false))]));
+        }
         let entry = self.entry(identity)?;
         let values: Vec<&Candidate> = entry.candidates.values().collect();
         let mut available = if values.iter().any(|c| matches!(c, Candidate::Pdf(_))) { pdf::pdf_provider_available() } else { false };
@@ -813,6 +1247,7 @@ impl Inner {
 
     /// `_request(identity, page_index, priority)`
     fn request_once(this: &Arc<Inner>, identity: &str, page_index: i64, priority: i64) -> Result<Option<Vec<u8>>, Fail> {
+        if this.inventory_pending(identity)? { return Ok(None); }
         let entry = this.entry(identity)?;
         let Some(candidate) = entry.candidates.get(&page_index) else {
             return Err(Fail::store("preview_unavailable", "Bu sayfa için görüntü önizlemesi bulunmuyor.", 404));
@@ -877,7 +1312,10 @@ impl Inner {
             }
         }
         let local_pdf = match candidate {
-            Candidate::Pdf(c) => pdf::cached_pdf(c, &this.directory.join("pdf-files"), &account_of(&this.store)?)?,
+            Candidate::Pdf(c) => {
+                let media = rs_store::media_store::MediaStore::open(&this.store.directory).map_err(store_fail)?;
+                pdf::cached_pdf_shared(c, &this.directory.join("pdf-files"), &account_of(&this.store)?, &media)?
+            },
             _ => None,
         };
         // Canvas pages are queued offline too: the worker draws them locally.
@@ -1084,7 +1522,12 @@ impl Inner {
     fn fetch_pdf_refreshing(&self, identity: &str, candidate: &PdfBackground, guard: &dyn Fn() -> Result<(), Fail>) -> Result<PathBuf, Fail> {
         let account = account_of(&self.store)?;
         let directory = self.directory.join("pdf-files");
-        match pdf::fetch_pdf(candidate, self.env.as_ref(), &directory, &account, Some(guard)) {
+        let media = rs_store::media_store::MediaStore::open(&self.store.directory).map_err(store_fail)?;
+        if let Some(path) = pdf::cached_pdf_shared(candidate, &directory, &account, &media)? { guard()?; return Ok(path); }
+        let mut resolved = candidate.clone();
+        resolved.download_url = self.resolve_indexed_url(identity, &candidate.sha256, candidate.download_url.as_deref())?;
+        guard()?;
+        match pdf::fetch_pdf_shared(&resolved, self.env.as_ref(), &directory, &account, Some(guard), &media) {
             Err(e) if pdf::is_link_expired(&e) => {
                 let fresh = self.env.refresh_note(identity)?;
                 self.invalidate_snapshot(identity);
@@ -1096,7 +1539,7 @@ impl Inner {
                     return Err(pdf_error("PDF sayfası notta değişti; sayfayı yeniden açabilirsin."));
                 };
                 guard()?;
-                pdf::fetch_pdf(&renewed, self.env.as_ref(), &directory, &account, Some(guard))
+                pdf::fetch_pdf_shared(&renewed, self.env.as_ref(), &directory, &account, Some(guard), &media)
             }
             other => other,
         }
@@ -1120,11 +1563,16 @@ impl Inner {
         let (width, height) = (candidate.width(), candidate.height());
         let png = match candidate {
             Candidate::Ink(c) => {
-                let snapshot = self.snapshot(&item.identity)?;
-                if !snapshot.get("raw_sha256").is_some_and(|v| py_eq(v, &Val::s(c.sha256.clone()))) {
-                    return Err(Fail::store("preview_source_changed", "Not değişti.", 409));
-                }
-                let (png, complete) = self.render_local(&item.identity, c, &snapshot, &guard, true, item.priority)?;
+                let (png, complete) = match self.render_container_over(&item.identity, c, &guard, None, true)? {
+                    Some(value) => value,
+                    None => {
+                        let snapshot = self.snapshot(&item.identity)?;
+                        if !snapshot.get("raw_sha256").is_some_and(|v| py_eq(v, &Val::s(c.sha256.clone()))) {
+                            return Err(Fail::store("preview_source_changed", "Not değişti.", 409));
+                        }
+                        self.render_local(&item.identity, c, &snapshot, &guard, true, item.priority)?
+                    }
+                };
                 if !complete {
                     // Pictures not downloaded (or ink approximated): keep it as
                     // a stand-in; the full image is retried later.
@@ -1143,7 +1591,7 @@ impl Inner {
                 guard()?;
                 let mut png = pdf::render_pdf_background(&file, c)?;
                 let native = match &c.overlay {
-                    Some(overlay) => self.pdf_native_layer(c, overlay, &png, &guard).map(Some),
+                    Some(overlay) => self.pdf_native_layer(&item.identity, c, overlay, &png, &guard).map(Some),
                     None => Ok(None),
                 };
                 match native {
@@ -1155,11 +1603,18 @@ impl Inner {
                         if deterministic_overlay { remember_pdf_failure(&mut self.lock(), item); }
                         // Samsung's layer is unavailable: the local layer stands in.
                         let Some(local) = &c.local_ink else { return Err(e) };
-                        let snapshot = self.snapshot(&item.identity)?;
-                        if !snapshot.get("raw_sha256").is_some_and(|v| py_eq(v, &Val::s(local.sha256.clone()))) {
-                            return Err(Fail::store("preview_source_changed", "Not değişti.", 409));
-                        }
-                        let (layered, _) = match self.render_local_over(&item.identity, local, &snapshot, &guard, Some(png), true, item.priority) {
+                        let rendered = match self.render_container_over(&item.identity, local, &guard, Some(png.clone()), true) {
+                            Ok(Some(value)) => Ok(value),
+                            Ok(None) => {
+                                let snapshot = self.snapshot(&item.identity)?;
+                                if !snapshot.get("raw_sha256").is_some_and(|v| py_eq(v, &Val::s(local.sha256.clone()))) {
+                                    return Err(Fail::store("preview_source_changed", "Not değişti.", 409));
+                                }
+                                self.render_local_over(&item.identity, local, &snapshot, &guard, Some(png), true, item.priority)
+                            }
+                            Err(error) => Err(error),
+                        };
+                        let (layered, _) = match rendered {
                             Ok(rendered) => rendered,
                             Err(error) => { guard()?; return Err(overlay_fallback_error(error, deterministic_overlay)); }
                         };
@@ -1172,11 +1627,16 @@ impl Inner {
                 }
                 if let (None, Some(local)) = (&c.overlay, &c.local_ink) {
                     // The page's own objects drawn locally over the PDF page.
-                    let snapshot = self.snapshot(&item.identity)?;
-                    if !snapshot.get("raw_sha256").is_some_and(|v| py_eq(v, &Val::s(local.sha256.clone()))) {
-                        return Err(Fail::store("preview_source_changed", "Not değişti.", 409));
-                    }
-                    let (layered, complete) = self.render_local_over(&item.identity, local, &snapshot, &guard, Some(png), true, item.priority)?;
+                    let (layered, complete) = match self.render_container_over(&item.identity, local, &guard, Some(png.clone()), true)? {
+                        Some(value) => value,
+                        None => {
+                            let snapshot = self.snapshot(&item.identity)?;
+                            if !snapshot.get("raw_sha256").is_some_and(|v| py_eq(v, &Val::s(local.sha256.clone()))) {
+                                return Err(Fail::store("preview_source_changed", "Not değişti.", 409));
+                            }
+                            self.render_local_over(&item.identity, local, &snapshot, &guard, Some(png), true, item.priority)?
+                        }
+                    };
                     if !complete {
                         let partial = partial_path(&item.path);
                         guard()?;
@@ -1196,7 +1656,7 @@ impl Inner {
                     stages.local = start.elapsed();
                     match local {
                         Ok(Some(path)) => return Ok(Some(path)),
-                        Err(e) if e.code == "preview_source_changed" => return Err(e),
+                        Err(e) if matches!(e.code.as_str(), "preview_source_changed" | "preview_storage_corrupt") => return Err(e),
                         _ => guard()?,
                     }
                 }
@@ -1209,7 +1669,10 @@ impl Inner {
                         return Err(preview("Sayfa önbelleği çözümlenemedi."));
                     }
                     let start = Instant::now();
-                    let fetched = (self.fetcher)(c, self.env.as_ref(), &guard);
+                    let mut resolved = c.clone();
+                    resolved.download_url = self.resolve_indexed_url(&item.identity, &c.sha256, c.download_url.as_deref())?;
+                    guard()?;
+                    let fetched = (self.fetcher)(&resolved, self.env.as_ref(), &guard);
                     stages.download = start.elapsed();
                     let raw = match fetched {
                         Ok(raw) => raw,
@@ -1254,7 +1717,7 @@ impl Inner {
                         stages.local = start.elapsed();
                         match fallback {
                             Ok(Some(path)) => return Ok(Some(path)),
-                            Err(changed) if changed.code == "preview_source_changed" => return Err(changed),
+                            Err(changed) if matches!(changed.code.as_str(), "preview_source_changed" | "preview_storage_corrupt") => return Err(changed),
                             _ => { guard()?; return Err(e); },
                         }
                     }
@@ -1268,7 +1731,7 @@ impl Inner {
 
     /// Samsung's canvas layer of a PDF page (cached, else fetched + decoded),
     /// composited over the PDF page image.
-    fn pdf_native_layer(&self, c: &PdfBackground, overlay: &CanvasPreviewCandidate, png: &[u8], guard: &dyn Fn() -> Result<(), Fail>) -> Result<Vec<u8>, Fail> {
+    fn pdf_native_layer(&self, identity: &str, c: &PdfBackground, overlay: &CanvasPreviewCandidate, png: &[u8], guard: &dyn Fn() -> Result<(), Fail>) -> Result<Vec<u8>, Fail> {
         guard()?;
         let overlay_candidate = Candidate::Canvas(overlay.clone());
         let layer_path = self.path(&overlay_candidate)?;
@@ -1284,7 +1747,10 @@ impl Inner {
                     error.code = "pdf_overlay_missing".into();
                     return Err(error);
                 }
-                let raw = (self.fetcher)(overlay, self.env.as_ref(), guard)?;
+                let mut resolved = overlay.clone();
+                resolved.download_url = self.resolve_indexed_url(identity, &overlay.sha256, overlay.download_url.as_deref())?;
+                guard()?;
+                let raw = (self.fetcher)(&resolved, self.env.as_ref(), guard)?;
                 guard()?;
                 let layer = match (self.decoder)(&raw, (c.width, c.height)) {
                     Ok(layer) => layer,
@@ -1405,6 +1871,84 @@ impl Inner {
         urls
     }
 
+    /// Signed URLs come from the authenticated global entries. If both contain
+    /// URL records, their original ordering is not represented by this partial
+    /// view, so use the full snapshot path instead of guessing.
+    fn material_urls(global: &rs_store::note_container::GlobalPageContext) -> Option<BTreeMap<String, String>> {
+        let note = crate::payload::parse_payload(global.note_xml.clone(), "application/xml").ok()?;
+        let separate = if global.download_urls.is_empty() { Vec::new() } else {
+            let mut xml = b"<CompareNoteView>".to_vec();
+            xml.extend_from_slice(&global.download_urls);
+            xml.extend_from_slice(b"</CompareNoteView>");
+            crate::payload::parse_payload(xml, "application/xml").ok()?.result.download_urls
+        };
+        if !note.result.download_urls.is_empty() && !separate.is_empty() { return None; }
+        Some(note.result.download_urls.into_iter().chain(separate).map(|d| (d.id.to_lowercase(), d.url)).collect())
+    }
+
+    fn resolve_indexed_url(&self, identity: &str, sha: &str, current: Option<&str>) -> Result<Option<String>, Fail> {
+        if current != Some(INDEXED_URL) { return Ok(current.map(str::to_owned)); }
+        let Some(global) = crate::container_input::read_global(&self.store, identity)? else { return Ok(None) };
+        Ok(Self::material_urls(&global).and_then(|urls| urls.get(sha).cloned()))
+    }
+
+    /// Prepare and render a verified page without loading other page entries.
+    /// None requests the established full-snapshot path; integrity errors are
+    /// propagated. Existing guards are run before and after all side effects.
+    fn render_container_over(&self, identity: &str, c: &InkGeometryPreview, guard: &dyn Fn() -> Result<(), Fail>,
+                             underlay: Option<Vec<u8>>, download_media: bool) -> Result<Option<(Vec<u8>, bool)>, Fail> {
+        if !self.schema7 || !self.ink.supports_prepared() { return Ok(None); }
+        if !matches!(self.store.preview_inventory(identity, crate::PREVIEW_INVENTORY_RECIPE).map_err(store_fail)?,
+                     Some(rs_store::preview_inventory::InventoryOutcome::Ready(_))) { return Ok(None); }
+        guard()?;
+        let material = match crate::container_input::read_material(&self.store, identity, c.page_index, &c.sha256) {
+            Ok(material) => material,
+            Err(error) if error.code == "preview_source_changed" || error.code == "page_not_found" => return Err(error),
+            Err(_) => return Err(Fail::store("preview_storage_corrupt", "Sayfa verisi doğrulanamadı.", 422)),
+        };
+        let Some(material) = material else { return Ok(None); };
+        let Ok(mut pages) = crate::ink::prepare::prepare_container_page(&material, true) else { return Ok(None); };
+        if pages.len() != 1 { return Ok(None); }
+        let page = pages.remove(0);
+        if (page.index, page.width, page.height, page.dark_mode, page.composite, page.notice.as_ref(), page.over_pdf)
+            != (c.page_index, c.width, c.height, c.is_dark_mode, c.composite, c.notice.as_ref(), underlay.is_some()) {
+            return Ok(None);
+        }
+        let wanted = if c.composite { crate::ink::composite_media(&page.body) } else { Vec::new() };
+        let mut found = BTreeMap::new();
+        if let Some(png) = underlay { found.insert(crate::ink::prepare::PDF_UNDERLAY.to_string(), png); }
+        let mut urls = None;
+        for sha in wanted {
+            if found.contains_key(&sha) || sha.len() != 64 { continue; }
+            if let Some(bytes) = self.media_cached(&sha)? { found.insert(sha, bytes); continue; }
+            if !download_media || !self.connected() { continue; }
+            if urls.is_none() {
+                let global;
+                let source = if material.projected_resource.is_some() {
+                    global = crate::container_input::read_global(&self.store, identity)?;
+                    let Some(global) = global.as_ref() else { return Ok(None) };
+                    global
+                } else { &material.global };
+                let Some(parsed) = Self::material_urls(source) else { return Ok(None); };
+                urls = Some(parsed);
+            }
+            let Some(url) = urls.as_ref().and_then(|u| u.get(&sha)).cloned() else { continue };
+            guard()?;
+            if let Ok(bytes) = self.fetch_media(identity, &sha, &url, guard) {
+                if util::sha256_hex(&bytes) == sha {
+                    let _ = self.store_media(&sha, &bytes, guard);
+                    guard()?;
+                    found.insert(sha, bytes);
+                }
+            }
+        }
+        guard()?;
+        let result = self.ink.render_prepared(&page, &|| crate::ink::prepare::forced_container_composite(&material),
+                                              &|sha| found.get(sha).cloned());
+        guard()?;
+        match result { Some(result) => result.map(Some), None => Ok(None) }
+    }
+
     /// A local page (renderer-only ink or composite) with its pictures:
     /// verified media cache first, then (connected) a download through the
     /// account transport. Returns the PNG and whether it is complete.
@@ -1439,8 +1983,11 @@ impl Inner {
             let Some(url) = urls.as_ref().and_then(|u| u.get(&sha)).cloned() else { continue };
             guard()?;
             if let Ok(bytes) = self.fetch_media(identity, &sha, &url, guard) {
-                let _ = self.store_media(&sha, &bytes, guard);
-                found.insert(sha, bytes);
+                if util::sha256_hex(&bytes) == sha {
+                    let _ = self.store_media(&sha, &bytes, guard);
+                    guard()?;
+                    found.insert(sha, bytes);
+                }
             }
         }
         crate::ink::record_elapsed(crate::ink::MEDIA, media_started.elapsed());
@@ -1456,15 +2003,26 @@ impl Inner {
 
     /// A downloaded picture, only if its bytes still hash to the content id.
     fn media_cached(&self, sha256: &str) -> Result<Option<Vec<u8>>, Fail> {
+        let media = rs_store::media_store::MediaStore::open(&self.store.directory).map_err(store_fail)?;
+        if let Some(bytes) = media.read(sha256, rs_render::compose::MAX_IMAGE_BYTES as u64).map_err(store_fail)? {
+            return Ok(Some(bytes));
+        }
         let path = self.media_path(sha256)?;
         match read_cached(&path, rs_render::compose::MAX_IMAGE_BYTES as u64)? {
-            Some(raw) if util::sha256_hex(&raw) == sha256 => Ok(Some(raw)),
+            Some(raw) if util::sha256_hex(&raw) == sha256 => {
+                media.put(sha256, &raw).map_err(store_fail)?;
+                Ok(Some(raw))
+            },
             _ => Ok(None),
         }
     }
 
     fn store_media(&self, sha256: &str, bytes: &[u8], guard: &dyn Fn() -> Result<(), Fail>) -> Result<(), Fail> {
-        util::write_private(&self.media_path(sha256)?, bytes, 8, false, guard)
+        guard()?;
+        let media = rs_store::media_store::MediaStore::open(&self.store.directory).map_err(store_fail)?;
+        media.put(sha256, bytes).map_err(store_fail)?;
+        guard()?;
+        Ok(())
     }
 
     /// One picture through the account transport (broker -> signed file URL,
@@ -1530,6 +2088,24 @@ impl Inner {
             }
             Ok(())
         };
+        if self.inventory_worker.is_some() {
+            if let Some(rs_store::preview_inventory::InventoryOutcome::Ready(inventory)) = self.store.preview_inventory(&item.identity, crate::PREVIEW_INVENTORY_RECIPE).map_err(store_fail)? {
+                let index = c.page_index as i64;
+                if let (Some(digest), Some(page)) = (item.source.0.get(6).and_then(Val::as_str), inventory.ink_pages.iter().find(|p| inventory.ink_supported && p.page_index == c.page_index && !p.over_pdf)) {
+                    let local = InkGeometryPreview { page_index: index, width: page.width, height: page.height,
+                        sha256: digest.to_owned(), is_dark_mode: page.dark, composite: page.composite, notice: page.notice.clone() };
+                    if let Some((png, complete)) = self.render_container_over(&item.identity, &local, &guard, None, item.priority > 0)? {
+                        let png = if (page.width, page.height) == (c.width, c.height) { png } else { rescale_png(&png, (page.width, page.height), (c.width, c.height))? };
+                        let path = local_path(&item.path);
+                        guard()?;
+                        Inner::cache_png(&path, &png, c.width, c.height, &guard)?;
+                        let mut state = self.lock();
+                        if complete { state.partial_canvas.remove(&item.key); } else { state.partial_canvas.insert(item.key.clone()); }
+                        return Ok(Some(path));
+                    }
+                }
+            }
+        }
         let snapshot = self.snapshot(&item.identity)?;
         let Some(digest) = snapshot.get("raw_sha256").and_then(Val::as_str).map(str::to_string) else { return Ok(None) };
         let index = c.page_index as i64;
@@ -1638,7 +2214,7 @@ fn rescale_png(png: &[u8], from: (i64, i64), to: (i64, i64)) -> Result<Vec<u8>, 
 
 /// `(width, height)` of every page in the note's single pageList, from the
 /// payload XML (None where an attribute is not a plain positive integer).
-fn page_sizes(payload: &crate::payload::Parsed) -> Vec<Option<(i64, i64)>> {
+pub(crate) fn page_sizes(payload: &crate::payload::Parsed) -> Vec<Option<(i64, i64)>> {
     for xml in payload.xml_documents() {
         let Ok(root) = rs_ops::xml::parse_bytes(&xml) else { continue };
         let Some(resource) = root.iter().find(|n| n.local() == "noteresource") else { continue };
@@ -1706,6 +2282,111 @@ fn pdf_error(message: &str) -> Fail {
 #[cfg(test)]
 mod queue_tests {
     use super::*;
+
+    #[test]
+    fn static_inventory_recreates_full_dynamic_candidates() {
+        use crate::test_common::{store, TempDir, TestEnv};
+        let dir = TempDir::new();
+        let manager = PreviewManager::new(store(dir.path()), TestEnv::new(None, true)).unwrap();
+        let ink = rs_store::val::loads(include_str!("../tests/fixtures/ink_cases.json")).unwrap();
+        let objects = rs_store::val::loads(include_str!("../tests/fixtures/objects_note.json")).unwrap();
+        let floating = rs_store::val::loads(include_str!("../tests/fixtures/floating_note.json")).unwrap();
+        let pdf_xml = crate::test_common::pdf_xml(None, "", "false");
+        let pdf_snapshot = crate::test_common::snapshot(pdf_xml.as_bytes(), "application/xml");
+        for snapshot in [objects.get("snapshot").unwrap(), floating.get("snapshot").unwrap(), ink.get("pdf_list").unwrap().get("snapshot").unwrap(), ink.get("rich_flow").unwrap().get("snapshot").unwrap(), &pdf_snapshot] {
+            let static_data = crate::inventory_worker::compute_static(snapshot).unwrap();
+            let raw = crate::payload::payload_from_snapshot(snapshot).unwrap();
+            let urls: BTreeMap<String, String> = raw.result.download_urls.iter().map(|d| (d.id.to_lowercase(), d.url.clone())).collect();
+            let mut old_candidates = BTreeMap::new(); let mut old_pages = Vec::new();
+            let encoded = rs_store::db::dumps_utf8(snapshot).unwrap();
+            manager.inner.inventory(&Val::s(encoded), &mut old_candidates, &mut old_pages).unwrap();
+            let mut new_candidates = BTreeMap::new(); let mut new_pages = Vec::new();
+            manager.inner.inventory_static(&static_data, snapshot.get("raw_sha256").unwrap().as_str().unwrap(), &urls, &mut new_candidates, &mut new_pages).unwrap();
+            assert_eq!(old_candidates, new_candidates);
+            assert_eq!(old_pages, new_pages);
+            let indexed_urls = urls.keys().map(|key| (key.clone(), INDEXED_URL.to_owned())).collect();
+            let mut indexed_candidates = BTreeMap::new(); let mut indexed_pages = Vec::new();
+            manager.inner.inventory_static(&static_data, snapshot.get("raw_sha256").unwrap().as_str().unwrap(), &indexed_urls, &mut indexed_candidates, &mut indexed_pages).unwrap();
+            for candidate in indexed_candidates.values_mut() {
+                match candidate {
+                    Candidate::Canvas(c) => c.download_url = urls.get(&c.sha256).cloned(),
+                    Candidate::Pdf(p) => { p.download_url = urls.get(&p.sha256).cloned(); if let Some(c) = &mut p.overlay { c.download_url = urls.get(&c.sha256).cloned(); } },
+                    Candidate::Ink(_) => {},
+                }
+            }
+            assert_eq!(old_candidates, indexed_candidates);
+            assert_eq!(old_pages, indexed_pages);
+        }
+        manager.close();
+    }
+
+    #[test]
+    fn indexed_canvas_links_are_resolved_only_on_demand() {
+        use crate::test_common::{note_with_document, store, TempDir, TestEnv};
+        let input = rs_store::val::loads(include_str!("../tests/fixtures/objects_note.json")).unwrap();
+        let fixture = crate::container_input::tests::canonical_fixture(input.get("snapshot").unwrap());
+        let dir = TempDir::new();
+        let store = store(dir.path());
+        let identity = note_with_document(&store, &fixture);
+        rs_store::snapshot_migration::migrate_v7(dir.path(), &store.path, &notes_host::areas::MigrationProjectionVerifier).unwrap();
+        let key = store.pending_preview_inventories(crate::PREVIEW_INVENTORY_RECIPE, 1).unwrap().remove(0);
+        crate::container_input::tests::publish_index(&store, &key, &fixture);
+        let urls: BTreeMap<String, String> = payload_from_snapshot(&fixture).unwrap().result.download_urls.into_iter().map(|u| (u.id.to_lowercase(), u.url)).collect();
+        let manager = PreviewManager::new(store.clone(), TestEnv::new(None, true)).unwrap();
+        let trace = rs_store::read_trace::Session::for_container(dir.path(), &key.container_sha256);
+        let entry = manager.entry(&identity).unwrap();
+        assert!(trace.finish().is_empty(), "candidate selection should not read ZIP entries");
+        let canvases: Vec<_> = entry.candidates.values().filter_map(|candidate| if let Candidate::Canvas(c) = candidate { Some(c) } else { None }).collect();
+        assert!(!canvases.is_empty());
+        let canvas_index = canvases[0].page_index;
+        for canvas in canvases {
+            assert_eq!(canvas.download_url.as_deref(), Some(INDEXED_URL));
+            let resolved = manager.inner.resolve_indexed_url(&identity, &canvas.sha256, canvas.download_url.as_deref()).unwrap();
+            assert_eq!(resolved.as_ref(), urls.get(&canvas.sha256));
+        }
+        let page_id = store.with_db(|db| { use rs_store::db::Sql; let rows = db.query("SELECT page_id FROM note_pages WHERE note_id=? AND idx=?", &rs_store::p![&identity, canvas_index as i64])?; Ok(rows.one().unwrap().text("page_id").unwrap().to_owned()) }).unwrap();
+        let trace = rs_store::read_trace::Session::for_container(dir.path(), &key.container_sha256);
+        assert!(manager.request(&identity, canvas_index as i64, 0, 30.0).unwrap().is_some());
+        let seen = trace.finish();
+        assert!(seen.contains(&format!("{page_id}.page")) && seen.contains(&format!("cloud/pages/{page_id}.xml")), "{seen:?}");
+        assert!(seen.iter().all(|name| name == &format!("{page_id}.page") || name == &format!("cloud/pages/{page_id}.xml")), "{seen:?}");
+        manager.close();
+        manager.join(Duration::from_secs(2));
+    }
+
+    #[test]
+    fn indexed_pdf_link_matches_full_snapshot_without_reading_pages() {
+        use crate::test_common::{note_with_document, store, TempDir, TestEnv};
+        let all = rs_store::val::loads(include_str!("../tests/fixtures/ink_cases.json")).unwrap();
+        let original = all.get("pdf_list").unwrap().get("snapshot").unwrap();
+        let old = notes_host::snapshot::from_dict(original).unwrap();
+        let digest = crate::util::sha256_hex(b"synthetic pdf identity");
+        let url = "https://example.invalid/pdf?signature=synthetic";
+        fn replace(bytes: Vec<u8>, from: &str, to: &str) -> Vec<u8> {
+            let start = bytes.windows(from.len()).position(|w| w == from.as_bytes()).expect("synthetic XML marker");
+            let mut result = bytes[..start].to_vec(); result.extend_from_slice(to.as_bytes()); result.extend_from_slice(&bytes[start + from.len()..]); result
+        }
+        let raw = replace(old.raw_body, "<contentFileList />", &format!("<contentFileList><contentFile id=\"{digest}\" bindNumber=\"7\" /></contentFileList>"));
+        let raw = replace(raw, "<pdfDataList />", &format!("<pdfDataList><pdfData pageIndex=\"0\" hash=\"{digest}\"><pdfRect l=\"2\" t=\"3\" r=\"22\" b=\"13\" /></pdfData></pdfDataList>"));
+        let raw = replace(raw, "</CompareNoteView>", &format!("<downloadUrls><downloadUrl><id>{digest}</id><url>{url}</url></downloadUrl></downloadUrls></CompareNoteView>"));
+        let snapshot = notes_host::snapshot::to_dict(&notes_host::snapshot::parse_document(&raw, &old.content_type, old.server_id.as_deref()).unwrap());
+        let fixture = crate::container_input::tests::canonical_fixture(&snapshot);
+        let dir = TempDir::new();
+        let store = store(dir.path());
+        let identity = note_with_document(&store, &fixture);
+        rs_store::snapshot_migration::migrate_v7(dir.path(), &store.path, &notes_host::areas::MigrationProjectionVerifier).unwrap();
+        let key = store.pending_preview_inventories(crate::PREVIEW_INVENTORY_RECIPE, 1).unwrap().remove(0);
+        crate::container_input::tests::publish_index(&store, &key, &fixture);
+        let manager = PreviewManager::new(store, TestEnv::new(None, true)).unwrap();
+        let trace = rs_store::read_trace::Session::for_container(dir.path(), &key.container_sha256);
+        let entry = manager.entry(&identity).unwrap();
+        assert!(trace.finish().is_empty());
+        let pdf = entry.candidates.values().find_map(|c| if let Candidate::Pdf(p) = c { Some(p) } else { None }).expect("PDF candidate");
+        assert_eq!(pdf.download_url.as_deref(), Some(INDEXED_URL));
+        assert_eq!(manager.inner.resolve_indexed_url(&identity, &pdf.sha256, pdf.download_url.as_deref()).unwrap().as_deref(), Some(url));
+        manager.close();
+        manager.join(Duration::from_secs(2));
+    }
 
     fn job(state: JobState, priority: i64) -> Job {
         Job { state, error: None, priority, local_pdf: None, retry_after: None, served: None, offline: false }
@@ -1862,6 +2543,25 @@ mod queue_tests {
         assert!(manager.wait_idle(Some(Duration::from_secs(10))));
         assert_eq!(calls.load(Ordering::SeqCst), 2, "network recovery should retry the native overlay");
         assert!(path.exists(), "recovered overlay should produce a full image");
+        manager.close();
+    }
+
+    #[test]
+    fn legacy_image_cache_is_verified_and_shared() {
+        use crate::test_common::{sha256_hex, store, TempDir, TestEnv};
+        let dir = TempDir::new();
+        let store = store(dir.path());
+        let manager = PreviewManager::new(store.clone(), TestEnv::new(None, true)).unwrap();
+        let bytes = b"synthetic image bytes";
+        let hash = sha256_hex(bytes);
+        let legacy = manager.inner.media_path(&hash).unwrap();
+        util::write_private(&legacy, bytes, 8, false, &|| Ok(())).unwrap();
+        assert_eq!(manager.inner.media_cached(&hash).unwrap().unwrap(), bytes);
+        let shared = rs_store::media_store::MediaStore::open(&store.directory).unwrap();
+        assert!(shared.path_verified(&hash).unwrap().is_some());
+        std::fs::remove_file(legacy).unwrap();
+        assert_eq!(manager.inner.media_cached(&hash).unwrap().unwrap(), bytes);
+        assert!(manager.inner.store_media(&hash, b"wrong bytes", &|| Ok(())).is_err());
         manager.close();
     }
 

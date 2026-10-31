@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
-import {notePath,request} from './api';
+import {ApiError,notePath,request} from './api';
 
 type Pending={signal:AbortSignal;run:()=>Promise<void>;cancel:()=>void};
 const queue:Pending[]=[];let active=0;
@@ -14,6 +14,9 @@ export function useThumbnail(id:string,revision:number,enabled:boolean,refresh:n
   const element=useRef<HTMLDivElement>(null);const [visible,setVisible]=useState(false);
   const key=`${id}\u0000${revision}\u0000${refresh}`;
   const attempts=useRef({key,number:0,terminal:false});
+  // Transient failures (busy or restarting engine, 429/5xx, timeout) retry with
+  // backoff while the card stays visible; only a definite answer (4xx) is final.
+  const retries=useRef({key,count:0});const [retryTick,setRetryTick]=useState(0);
   const [state,setState]=useState<Thumbnail>({key,url:null,phase:'idle',complete:true});
   useEffect(()=>{const target=element.current;if(!target)return;const observer=new IntersectionObserver(entries=>setVisible(entries.some(entry=>entry.isIntersecting)),{threshold:0.01});observer.observe(target);return()=>observer.disconnect();},[]);
   useEffect(()=>{
@@ -34,7 +37,7 @@ export function useThumbnail(id:string,revision:number,enabled:boolean,refresh:n
           attempts.current.number++;
           const response=await request(notePath(id)+`/thumbnail?revision=${revision}`,{signal:controller.signal});
           if(response.status===202)return {response,blob:null};
-          if(response.headers.get('content-type')?.split(';')[0].trim()!=='image/png')throw Error('thumbnail_unavailable');
+          if(response.headers.get('content-type')?.split(';')[0].trim()!=='image/png')throw Error(response.status===429||response.status>=500?'thumbnail_busy':'thumbnail_unavailable');
           const size=Number(response.headers.get('content-length'));if(size>2*1024*1024)throw Error('thumbnail_too_large');
           const blob=await response.blob();if(!blob.size||blob.size>2*1024*1024)throw Error('thumbnail_unavailable');return {response,blob};
         })();
@@ -45,9 +48,17 @@ export function useThumbnail(id:string,revision:number,enabled:boolean,refresh:n
       }
       throw Error('thumbnail_timeout');
     };
-    void scheduled(run,controller.signal).catch(()=>{if(!disposed){attempts.current.terminal=true;setState({key,url:null,phase:'unavailable',complete:true});}}).finally(()=>clearTimeout(deadline));
-    return()=>{disposed=true;controller.abort();clearTimeout(deadline);clearTimeout(delay);if(url)URL.revokeObjectURL(url);};
-  },[id,revision,key,visible,enabled]);
+    let retry:ReturnType<typeof setTimeout>|undefined;
+    void scheduled(run,controller.signal).catch(error=>{
+      if(disposed)return;
+      const status=error instanceof ApiError?error.status:-1;
+      const definite=status>=400&&status<500&&status!==408&&status!==429||error instanceof Error&&!(error instanceof ApiError)&&['thumbnail_unavailable','thumbnail_too_large'].includes(error.message);
+      if(retries.current.key!==key)retries.current={key,count:0};
+      if(!definite&&retries.current.count<10){const wait=Math.min(60_000,5_000*2**retries.current.count++);attempts.current={key,number:0,terminal:false};setState({key,url:null,phase:'pending',complete:true});retry=setTimeout(()=>setRetryTick(tick=>tick+1),wait);return;}
+      attempts.current.terminal=true;setState({key,url:null,phase:'unavailable',complete:true});
+    }).finally(()=>clearTimeout(deadline));
+    return()=>{disposed=true;controller.abort();clearTimeout(deadline);clearTimeout(delay);clearTimeout(retry);if(url)URL.revokeObjectURL(url);};
+  },[id,revision,key,visible,enabled,retryTick]);
   const current=state.key===key?state:{key,url:null,phase:'idle' as const,complete:true};
   return {...current,element};
 }

@@ -8,7 +8,7 @@ use crate::editor;
 use crate::etree::{self, Element};
 use crate::guards::{self, GuardError};
 use crate::json;
-use crate::util::{self, check_uuid, dget, ditem, json_once, load_json, save_json, save_once, R};
+use crate::util::{self, check_uuid, dget, ditem, json_once, load_json, save_once, R};
 use notes_host::deps::{fail_of_ops, PureDeps};
 use notes_host::snapshot::Snapshot;
 use notes_host::{Fail, Kind, Val};
@@ -109,7 +109,7 @@ pub fn verify_erase_readback(output: &Path, snapshot: &Snapshot, expected: &Val)
 pub fn reconcile_erase(api: &CloudApi, operation_id: &str) -> R<Val> {
     let output = api.work_dir.join("operations").join(check_uuid(operation_id)?);
     if output.join("result.json").exists() {
-        return load_json(&output.join("result.json"), 96 * 1024 * 1024);
+        return api.load_operation_result(&output);
     }
     let intent = load_json(&output.join("intent.json"), 2 * 1024 * 1024)?;
     if !py_eq(dget(&intent, "accountFingerprint")?.unwrap_or(&Val::Null), &Val::s(api.identity())) {
@@ -131,7 +131,7 @@ pub fn reconcile_erase(api: &CloudApi, operation_id: &str) -> R<Val> {
         Err(e) => return Err(e),
     };
     let result = result_val(&server, &snapshot);
-    save_json(&output.join("result.json"), &result)?;
+    api.save_operation_result(&output, &result)?;
     Ok(result)
 }
 
@@ -784,7 +784,7 @@ pub fn reconcile_shape(api: &CloudApi, operation_id: &str) -> R<Val> {
 fn reconcile_kinds(api: &CloudApi, operation_id: &str, kinds: &[&str]) -> R<Val> {
     let output = api.work_dir.join("operations").join(check_uuid(operation_id)?);
     if output.join("result.json").exists() {
-        return load_json(&output.join("result.json"), 96 * 1024 * 1024);
+        return api.load_operation_result(&output);
     }
     let intent = load_json(&output.join("intent.json"), 2 * 1024 * 1024)?;
     if !py_eq(dget(&intent, "accountFingerprint")?.unwrap_or(&Val::Null), &Val::s(api.identity())) {
@@ -816,7 +816,7 @@ fn reconcile_kinds(api: &CloudApi, operation_id: &str, kinds: &[&str]) -> R<Val>
         Err(e) => return Err(e),
     };
     let result = result_val(&server, &snapshot);
-    save_json(&output.join("result.json"), &result)?;
+    api.save_operation_result(&output, &result)?;
     Ok(result)
 }
 

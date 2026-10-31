@@ -1,31 +1,72 @@
-import {useEffect, useLayoutEffect, useRef, useState, type ReactNode} from 'react';
+import {createContext,useEffect, useLayoutEffect, useRef, useState, type ReactNode} from 'react';
 import {api, ApiError, notePath, request} from './api';
+import {loadPageManifest} from './pageManifest';
 import type {PreviewPage} from './usePagePreview';
 
 const hasGeometry=(p:PreviewPage)=>typeof p.width==='number'&&typeof p.height==='number'&&p.width>0&&p.height>0;
-type Manifest={noteId:string;revision:number|undefined;pages:PreviewPage[];phase:'loading'|'ready'|'unavailable'};
+type Manifest={noteId:string;revision:number|undefined;pages:PreviewPage[];phase:'loading'|'ready'|'unavailable'|'failed'};
+export const InkPageContext=createContext<{noteId:string;revision:number|undefined;page:PreviewPage;visible:boolean;textless:boolean;suppressTiles:boolean;onTextLayerReady?:(index:number)=>void;onTextLayerFailed?:(index:number)=>void}|null>(null);
+
+// The tile service uses device pixels per page unit, not zoom percentage.
+// Refuse requests above the supported range rather than choosing a blurry
+// smaller bucket.
+export function inkTileBucket(scale:number):number|null{
+  if(!Number.isFinite(scale)||scale<=0)return null;
+  return [1,1.5,2,3,4].find(bucket=>bucket>=scale)??null;
+}
+// Snap in viewport coordinates so a fractional page origin is accounted for;
+// rounding an offset alone does not place its edge on the device pixel grid.
+export function snapInkOffset(pageOrigin:number,offset:number,dpr:number):number|null{
+  if(!Number.isFinite(pageOrigin)||!Number.isFinite(offset)||!Number.isFinite(dpr)||dpr<=0)return null;
+  return Math.round((pageOrigin+offset)*dpr)/dpr-pageOrigin;
+}
+type InkTileBounds={columnStart:number;columnEnd:number;rowStart:number;rowEnd:number};
+export function visibleInkTiles(page:{left:number;top:number;width:number;height:number},viewport:{left:number;top:number;right:number;bottom:number},pageSize:PageSize,bucket:number,margin=1):InkTileBounds|null{
+  const values=[page.left,page.top,page.width,page.height,viewport.left,viewport.top,viewport.right,viewport.bottom,pageSize.width,pageSize.height,bucket,margin];
+  if(values.some(value=>!Number.isFinite(value))||page.width<=0||page.height<=0||pageSize.width<=0||pageSize.height<=0||![1,1.5,2,3,4].includes(bucket)||!Number.isInteger(margin)||margin<0||margin>4)return null;
+  const left=Math.max(page.left,viewport.left),top=Math.max(page.top,viewport.top),right=Math.min(page.left+page.width,viewport.right),bottom=Math.min(page.top+page.height,viewport.bottom);
+  if(left>=right||top>=bottom)return null;
+  const columns=Math.ceil(pageSize.width*bucket/512),rows=Math.ceil(pageSize.height*bucket/512);
+  const x=(value:number)=>(value-page.left)/page.width*pageSize.width*bucket/512;
+  const y=(value:number)=>(value-page.top)/page.height*pageSize.height*bucket/512;
+  return {columnStart:Math.max(0,Math.floor(x(left))-margin),columnEnd:Math.min(columns-1,Math.ceil(x(right))-1+margin),rowStart:Math.max(0,Math.floor(y(top))-margin),rowEnd:Math.min(rows-1,Math.ceil(y(bottom))-1+margin)};
+}
 
 // The note's page list, fetched once per revision. Images are loaded per page
 // by PageStack, so scrolling never refetches the manifest.
 export function usePageManifest(noteId:string|null,revision:number|undefined,enabled:boolean){
   const [state,setState]=useState<Manifest>({noteId:'',revision:undefined,pages:[],phase:'unavailable'});
   const [current,setCurrent]=useState({noteId:'',index:0});
+  const [retryEpoch,setRetryEpoch]=useState(0);
+  const retryRequested=useRef<string|null>(null);
   useEffect(()=>{
-    if(!noteId||!enabled){setState({noteId:'',revision:undefined,pages:[],phase:'unavailable'});return;}
-    const controller=new AbortController();
+    if(!noteId||!enabled){retryRequested.current=null;setState({noteId:'',revision:undefined,pages:[],phase:'unavailable'});return;}
+    if(retryRequested.current&&retryRequested.current!==noteId)retryRequested.current=null;
+    const controller=new AbortController();let disposed=false,timedOut=false;
+    const timeout=setTimeout(()=>{timedOut=true;controller.abort();},120_000);
     setState(previous=>previous.noteId===noteId&&previous.revision!==revision&&previous.phase==='ready'?previous:{noteId,revision,pages:[],phase:'loading'});
-    void api<{pages:PreviewPage[];providerAvailable:boolean}>(notePath(noteId)+'/pages','GET',undefined,controller.signal).then(result=>{
+    const load=async()=>{
+      if(retryRequested.current===noteId){
+        await api(notePath(noteId)+'/pages','POST',{},controller.signal);
+        if(controller.signal.aborted)return null;
+        retryRequested.current=null;
+      }
+      return loadPageManifest(noteId,controller.signal);
+    };
+    void load().then(result=>{
+      if(!result)return;
       const pages=(Array.isArray(result.pages)?result.pages:[]).filter(p=>Number.isInteger(p.index)&&p.index>=0&&p.index<10000).map(p=>({...p,available:p.available===true&&typeof p.width==='number'&&typeof p.height==='number'&&p.width>0&&p.height>0}));
       if(controller.signal.aborted)return;
       // A page without an image but with known geometry is still shown (calm
       // placeholder, ink on a blank sheet).
       setState({noteId,revision,pages,phase:result.providerAvailable&&pages.some(p=>p.available||hasGeometry(p))?'ready':'unavailable'});
-    }).catch(()=>{if(!controller.signal.aborted)setState({noteId,revision,pages:[],phase:'unavailable'});});
-    return()=>controller.abort();
-  },[noteId,revision,enabled]);
+    }).catch(error=>{if(!disposed&&(timedOut||!controller.signal.aborted)){retryRequested.current=null;setState({noteId,revision,pages:[],phase:error instanceof ApiError&&error.code==='preview_inventory_failed'?'failed':'unavailable'});}}).finally(()=>clearTimeout(timeout));
+    return()=>{disposed=true;clearTimeout(timeout);controller.abort();};
+  },[noteId,revision,enabled,retryEpoch]);
   const mine=state.noteId===noteId?state:{noteId:'',revision:undefined,pages:[] as PreviewPage[],phase:'unavailable' as const};
   return {pages:mine.pages,phase:mine.phase,pageIndex:current.noteId===noteId?current.index:(mine.pages.find(p=>p.available)??mine.pages.find(hasGeometry))?.index??0,
-    setPageIndex:(index:number)=>setCurrent({noteId:noteId||'',index})};
+    setPageIndex:(index:number)=>setCurrent({noteId:noteId||'',index}),
+    retry:()=>{if(noteId){retryRequested.current=noteId;setRetryEpoch(value=>value+1);}}};
 }
 
 // Calm placeholder copy: a page image that is not ready yet is never an error.
@@ -37,14 +78,14 @@ export const PAGE_UNRENDERABLE='Bu sayfanın görüntüsü bu cihazda oluşturul
 const BACKOFF_MS=[1000,2000,5000,10000,20000,30000];
 const MAX_RETRIES=12;
 const MAX_PENDING_POLLS=480;
-type ImageState={url:string|null;phase:'loading'|'ready'|'waiting'|'final'};
+type ImageState={url:string|null;phase:'loading'|'ready'|'waiting'|'final';key?:string};
 const sleep=(ms:number,signal:AbortSignal)=>new Promise<void>((resolve,reject)=>{
   if(signal.aborted){reject(new DOMException('Aborted','AbortError'));return;}
   const onAbort=()=>{clearTimeout(timer);reject(new DOMException('Aborted','AbortError'));};
   const timer=setTimeout(()=>{signal.removeEventListener('abort',onAbort);resolve();},ms);
   signal.addEventListener('abort',onAbort,{once:true});
 });
-function usePageImage(noteId:string,revision:number|undefined,index:number,wanted:boolean,visible:boolean,retain:boolean){
+function usePageImage(noteId:string,revision:number|undefined,index:number,wanted:boolean,visible:boolean,retain:boolean,variant:'normal'|'notext'|'fulltext',refreshKey:string){
   // The previous image stays visible until the next revision's image is ready.
   const [state,setState]=useState<ImageState>({url:null,phase:'loading'});const shown=useRef<string|null>(null);const retired=useRef<string[]>([]);const fetched=useRef<string|null>(null);
   // Bumped to try again after the retries ran out: the page came back into
@@ -66,14 +107,14 @@ function usePageImage(noteId:string,revision:number|undefined,index:number,wante
       if(!retain){if(shown.current){URL.revokeObjectURL(shown.current);shown.current=null;}fetched.current=null;setState({url:null,phase:'loading'});}
       return;
     }
-    const key=`${noteId}:${revision}:${index}`;if(shown.current&&fetched.current===key)return;
+    const key=`${noteId}:${revision}:${index}:${variant}:${refreshKey}`;if(shown.current&&fetched.current===key)return;
     const controller=new AbortController();exhausted.current=false;
-    setState(previous=>({url:previous.url,phase:previous.url?'ready':'loading'}));
+    setState(previous=>({...previous,phase:previous.url?'ready':'loading'}));
     const run=async()=>{
       let retries=0,polls=0;
       for(;;){
         let response:Response|null=null,final=false;
-        try{response=await request(notePath(noteId)+`/preview?page=${index}`,{signal:controller.signal});}
+        try{response=await request(notePath(noteId)+`/preview?page=${index}`+(variant!=='normal'?`&variant=${variant}${revision===undefined?'':`&revision=${revision}`}`:''),{signal:controller.signal});}
         catch(error){
           if(error instanceof DOMException&&error.name==='AbortError')throw error;
           // 404: this page has no image source at all. Everything else may pass.
@@ -84,13 +125,16 @@ function usePageImage(noteId:string,revision:number|undefined,index:number,wante
           const blob=await response.blob();if(controller.signal.aborted)return;
           if(blob.size){
             const next=URL.createObjectURL(blob);const image=new Image();image.src=next;
-            try{await image.decode();}catch{/* Preserve the existing fallback for undecodable fixtures. */}
+            try{await image.decode();}catch{
+              if(variant!=='normal'){URL.revokeObjectURL(next);setState(previous=>({...previous,phase:'final'}));return;}
+              // Preserve the established fallback for old normal-preview fixtures.
+            }
             if(controller.signal.aborted){URL.revokeObjectURL(next);return;}
             const previous=shown.current;shown.current=next;fetched.current=key;if(previous)retired.current.push(previous);
-            setState({url:next,phase:'ready'});return;
+            setState({url:next,phase:'ready',key});return;
           }
         }
-        if(final){setState(previous=>previous.url?previous:{url:null,phase:'final'});return;}
+        if(final){setState(previous=>variant==='normal'&&previous.url?previous:{...previous,phase:'final'});return;}
         if(retries>=MAX_RETRIES&&!onScreen.current){exhausted.current=true;setState(previous=>previous.url?previous:{url:null,phase:'waiting'});return;}
         setState(previous=>previous.url?previous:{url:null,phase:'waiting'});
         await sleep(BACKOFF_MS[Math.min(retries,BACKOFF_MS.length-1)],controller.signal);retries++;polls=0;
@@ -98,12 +142,12 @@ function usePageImage(noteId:string,revision:number|undefined,index:number,wante
     };
     void run().catch(()=>{});
     return()=>controller.abort();
-  },[noteId,revision,index,wanted,retain,epoch]);
+  },[noteId,revision,index,wanted,retain,epoch,variant,refreshKey]);
   return state;
 }
 
 export type PageSize={width:number;height:number};
-function PageItem({noteId,revision,page,isCurrent,register,render,renderUnavailable,size}:{noteId:string;revision:number|undefined;page:PreviewPage;isCurrent:boolean;register:(index:number,element:HTMLElement|null)=>void;render:(page:PreviewPage,url:string|null,isCurrent:boolean)=>ReactNode;renderUnavailable?:(page:PreviewPage,isCurrent:boolean)=>ReactNode;size?:PageSize}){
+function PageItem({noteId,revision,page,isCurrent,register,render,renderUnavailable,size,variant,refreshKey,onVariantReady,onVariantFailed,onTextLayerReady,onTextLayerFailed,onPageDoubleClick}:{noteId:string;revision:number|undefined;page:PreviewPage;isCurrent:boolean;register:(index:number,element:HTMLElement|null)=>void;render:(page:PreviewPage,url:string|null,isCurrent:boolean)=>ReactNode;renderUnavailable?:(page:PreviewPage,isCurrent:boolean)=>ReactNode;size?:PageSize;variant:'normal'|'notext'|'fulltext';refreshKey:string;onVariantReady?:(index:number,variant:'normal'|'notext'|'fulltext')=>void;onVariantFailed?:(index:number,variant:'normal'|'notext'|'fulltext')=>void;onTextLayerReady?:(index:number)=>void;onTextLayerFailed?:(index:number)=>void;onPageDoubleClick?:(page:PreviewPage,event:React.MouseEvent)=>void}){
   const box=useRef<HTMLDivElement>(null);const [near,setNear]=useState(false);const [visible,setVisible]=useState(false);
   useEffect(()=>{
     const element=box.current;if(!element)return;register(page.index,element);
@@ -116,20 +160,23 @@ function PageItem({noteId,revision,page,isCurrent,register,render,renderUnavaila
     nearby.observe(element);
     return()=>{clearTimeout(evict);nearby.disconnect();register(page.index,null);};
   },[page.index]);
-  const {url,phase}=usePageImage(noteId,revision,page.index,visible&&page.available,visible,near);
+  const {url,phase,key}=usePageImage(noteId,revision,page.index,visible&&page.available,visible,near,variant,refreshKey);
+  const expected=`${noteId}:${revision}:${page.index}:${variant}:${refreshKey}`;
+  useEffect(()=>{if(url&&key===expected)onVariantReady?.(page.index,variant);},[url,key,expected,variant,page.index,onVariantReady]);
+  useEffect(()=>{if(variant!=='normal'&&phase==='final'&&key!==expected)onVariantFailed?.(page.index,variant);},[phase,key,expected,variant,page.index,onVariantFailed]);
   // Page geometry from the manifest, else from the caller (ink projection).
   const width=page.width&&page.height?page.width:size?.width,height=page.width&&page.height?page.height:size?.height;
   const ratio=width&&height?`${width} / ${height}`:'1 / 1.414';
-  return <div ref={box} className={`page-sheet ${isCurrent?'current':''}`} style={{aspectRatio:ratio,backgroundColor:page.darkMode?'#000':'#fff'}} data-page-dark={String(page.darkMode===true)} data-page-index={page.index} data-preview-phase={url?'ready':page.available?phase:'unavailable'}>
+  return <div ref={box} className={`page-sheet ${isCurrent?'current':''}`} style={{aspectRatio:ratio,backgroundColor:page.darkMode?'#000':'#fff'}} data-page-dark={String(page.darkMode===true)} data-page-index={page.index} data-preview-phase={url?'ready':page.available?phase:'unavailable'} onDoubleClick={event=>onPageDoubleClick?.(page,event)}>
     {!url&&<div className="page-placeholder" aria-hidden="true"/>}
     {!url&&!page.available&&renderUnavailable?.(page,isCurrent)}
-    {(url||near)&&render(page,url,isCurrent)}
+    {(url||near)&&<InkPageContext.Provider value={{noteId,revision,page,visible,textless:variant==='notext',suppressTiles:variant==='fulltext',onTextLayerReady,onTextLayerFailed}}>{render(page,url,isCurrent)}</InkPageContext.Provider>}
   </div>;
 }
 
 // All pages of a note stacked vertically like Samsung Notes. The current page
 // is the one crossing a reading line 40% down the scroll area; `jump` scrolls.
-export function PageStack({noteId,revision,pages,current,onCurrent,jump,render,renderUnavailable,pageSize,zoom}:{noteId:string;revision:number|undefined;pages:PreviewPage[];current:number;onCurrent:(index:number)=>void;jump:{index:number;seq:number}|null;render:(page:PreviewPage,url:string|null,isCurrent:boolean)=>ReactNode;renderUnavailable?:(page:PreviewPage,isCurrent:boolean)=>ReactNode;pageSize?:(index:number)=>PageSize|undefined;zoom?:number}){
+export function PageStack({noteId,revision,pages,current,onCurrent,jump,render,renderUnavailable,pageSize,zoom,variant='normal',refreshKey='',onVariantReady,onVariantFailed,onTextLayerReady,onTextLayerFailed,onPageDoubleClick,overlay}:{noteId:string;revision:number|undefined;pages:PreviewPage[];current:number;onCurrent:(index:number)=>void;jump:{index:number;seq:number}|null;render:(page:PreviewPage,url:string|null,isCurrent:boolean)=>ReactNode;renderUnavailable?:(page:PreviewPage,isCurrent:boolean)=>ReactNode;pageSize?:(index:number)=>PageSize|undefined;zoom?:number;variant?:'normal'|'notext'|'fulltext';refreshKey?:string;onVariantReady?:(index:number,variant:'normal'|'notext'|'fulltext')=>void;onVariantFailed?:(index:number,variant:'normal'|'notext'|'fulltext')=>void;onTextLayerReady?:(index:number)=>void;onTextLayerFailed?:(index:number)=>void;onPageDoubleClick?:(page:PreviewPage,event:React.MouseEvent)=>void;overlay?:ReactNode}){
   const stack=useRef<HTMLDivElement>(null);const elements=useRef(new Map<number,HTMLElement>());
   const latest=useRef({current,onCurrent});latest.current={current,onCurrent};
   // The point of the page on the reading line (40 % down), kept in place when
@@ -162,5 +209,5 @@ export function PageStack({noteId,revision,pages,current,onCurrent,jump,render,r
     return()=>{container.removeEventListener('scroll',schedule);resize.disconnect();if(frame)cancelAnimationFrame(frame);};
   },[pages.length]);
   useEffect(()=>{if(jump)elements.current.get(jump.index)?.scrollIntoView({block:'start'});},[jump?.seq]);
-  return <div ref={stack} className="page-stack">{pages.map(page=><PageItem key={page.index} noteId={noteId} revision={revision} page={page} isCurrent={page.index===current} register={register} render={render} renderUnavailable={renderUnavailable} size={pageSize?.(page.index)}/>)}</div>;
+  return <div ref={stack} className="page-stack">{pages.map(page=><PageItem key={page.index} noteId={noteId} revision={revision} page={page} isCurrent={page.index===current} register={register} render={render} renderUnavailable={renderUnavailable} size={pageSize?.(page.index)} variant={variant} refreshKey={refreshKey} onVariantReady={onVariantReady} onVariantFailed={onVariantFailed} onTextLayerReady={onTextLayerReady} onTextLayerFailed={onTextLayerFailed} onPageDoubleClick={onPageDoubleClick}/>)}{overlay}</div>;
 }

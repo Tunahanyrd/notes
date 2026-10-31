@@ -68,7 +68,8 @@ What happens per scenario (one per data directory in LIB, see manifest.json):
   fresh UUIDs (numbered by first appearance; candidate ids learned from
   responses are mapped to reference ids), current wall-clock timestamps
   (ms/us/s within the run window), the per-server scratch root and port;
-* previews/thumbnails that answer ``202 pending`` are polled until final;
+* previews/thumbnails that answer ``202 pending`` and page inventories that
+  answer with ``pending: true`` are polled until final;
 * after both servers stop, a masked dump of every SQLite table (rows sorted)
   and every file written under the data dirs and Downloads (path, mode,
   sha256; PDF dates normalised) are compared.
@@ -91,6 +92,7 @@ import argparse
 import atexit
 import base64
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -239,8 +241,21 @@ def start_server(prefix, layout, log_path):
         try:
             value = json.loads(layout['runtime'].read_text())
             if {'port', 'token', 'pid'} <= set(value):
-                return process, value
-        except (OSError, ValueError):
+                # The runtime now appears before storage migration completes.
+                # Recorded scenarios still begin only after ordinary API
+                # readiness, just as they did before the bootstrap server.
+                conn = http.client.HTTPConnection('127.0.0.1', value['port'], timeout=2)
+                try:
+                    conn.request('GET', '/api/status', headers={'Authorization': 'Bearer ' + value['token']})
+                    response = conn.getresponse(); body = response.read()
+                    if response.status == 200:
+                        status = json.loads(body)
+                        migration = status.get('migration')
+                        if not migration: return process, value
+                        if migration.get('state') == 'failed': raise RuntimeError('storage migration failed')
+                finally:
+                    conn.close()
+        except (OSError, ValueError, http.client.HTTPException):
             pass
         time.sleep(0.05)
     stop_server(process)
@@ -998,7 +1013,17 @@ def run_step(step, ctx):
         return {'status': 'SKIP', 'code': None, 'headers': [], 'body': f'<<unresolved {error}>>'.encode()}, b''
     response = parse_response(exchange(ctx.port, raw, half_close=step.half_close))
     attempts = 1
-    while step.poll and response.get('code') == 202 and attempts < 60:
+    request_line = raw.split(b'\r\n', 1)[0].split(b' ')
+    pages_request = (len(request_line) >= 2 and request_line[0] == b'GET'
+                     and request_line[1].split(b'?', 1)[0].endswith(b'/pages'))
+    def pending():
+        if step.poll and response.get('code') == 202:
+            return True
+        if pages_request and response.get('code') == 200:
+            body = json_body(response)
+            return isinstance(body, dict) and body.get('pending') is True
+        return False
+    while pending() and attempts < (480 if pages_request else 60):
         time.sleep(0.25)
         response = parse_response(exchange(ctx.port, raw, half_close=step.half_close))
         attempts += 1
@@ -1415,8 +1440,7 @@ def record(args, library, manifest, names):
             'scenarios': {name: {'file': f'{name}.json.gz', 'responses': len(value['steps']),
                                  'tables': len(value['state']['database']), 'files': len(value['state']['files'])}
                           for name, value in recordings.items()},
-            'note': 'Frozen responses of the historical Python reference (NOTES_IMPL=rust python3 -m samsung_notes) '
-                    'over the synthetic library in library/ (reference/python/conformance/gen_library.py). '
+            'note': 'Frozen reference responses over the synthetic library in library/. '
                     'Synthetic data only. Replay: run.py --replay --candidate target/debug/notes-engine'}
     (staging / 'golden.json').write_text(json.dumps(meta, indent=1, ensure_ascii=False, sort_keys=True) + '\n')
     if out.exists():

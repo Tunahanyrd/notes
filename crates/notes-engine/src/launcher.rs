@@ -102,8 +102,9 @@ pub struct StartOptions {
 
 /// A running engine + loopback server (in-process host for the desktop shell).
 pub struct Running {
-    pub engine: Arc<Engine>,
     pub server: AppServer,
+    startup: Arc<crate::server::StartupBackend>,
+    worker: Option<std::thread::JoinHandle<()>>,
     accept: Option<std::thread::JoinHandle<()>>,
     _lock: LibraryLock,
 }
@@ -121,7 +122,8 @@ impl Running {
         if let Some(h) = self.accept.take() {
             let _ = h.join();
         }
-        self.engine.close();
+        if let Some(h) = self.worker.take() { let _ = h.join(); }
+        if let Some(engine) = self.startup.engine() { engine.close(); }
     }
 }
 
@@ -150,17 +152,31 @@ pub fn start(options: StartOptions) -> Result<Running, String> {
         Err(LockError::Busy) => return Err("Bu yerel arşiv için Notlar hizmeti zaten açık.".into()),
         Err(LockError::Io(e)) => return Err(e.to_string()),
     };
-    let engine = Engine::new(&directory, engine_options(options.offline, options.session.clone(), options.auto_sync)).map_err(|e| e.message)?;
     let token = token_urlsafe(32);
-    let server = match AppServer::bind(options.port, Arc::clone(&engine), &token, &options.frontend_dir, options.font_dir.clone()) {
-        Ok(s) => s,
-        Err(e) => {
-            engine.close();
-            return Err(e.to_string());
-        }
+    let startup = Arc::new(crate::server::StartupBackend::new());
+    let server = AppServer::bind_starting(options.port, startup.clone(), &token, &options.frontend_dir, options.font_dir.clone()).map_err(|e| e.to_string())?;
+    let mut accept = Some(server.spawn());
+    let worker = match start_engine(directory, startup.clone(), engine_options(options.offline, options.session, options.auto_sync)) {
+        Ok(worker) => Some(worker),
+        Err(error) => { server.close(); if let Some(h) = accept.take() { let _ = h.join(); } return Err(error); }
     };
-    let accept = Some(server.spawn());
-    Ok(Running { engine, server, accept, _lock: lock })
+    Ok(Running { server, startup, worker, accept, _lock: lock })
+}
+
+fn start_engine(directory: PathBuf, startup: Arc<crate::server::StartupBackend>, options: Options) -> Result<std::thread::JoinHandle<()>, String> {
+    std::thread::Builder::new().name("notes-migration".into()).spawn(move || {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let report = |done, total| startup.progress(done, total);
+            rs_store::storage::StoreCore::prepare_schema7_progress(&directory, &notes_host::migration_projection::StreamingMigrationProjectionVerifier, Some(&report))
+                .map_err(|e| e.to_string())
+                .and_then(|()| Engine::new(&directory, options).map_err(|e| e.message))
+        }));
+        match result {
+            Ok(Ok(engine)) => startup.ready(engine),
+            Ok(Err(error)) => { eprintln!("notes-engine: storage preparation failed: {error}"); startup.fail(); }
+            Err(_) => { eprintln!("notes-engine: storage preparation panicked"); startup.fail(); }
+        }
+    }).map_err(|e| e.to_string())
 }
 
 static SIGNALLED: AtomicBool = AtomicBool::new(false);
@@ -211,16 +227,16 @@ pub fn main(argv: &[String]) -> i32 {
         }
     }
     let pid = std::process::id();
-    let mut engine: Option<Arc<Engine>> = None;
     let mut server: Option<AppServer> = None;
+    let startup = Arc::new(crate::server::StartupBackend::new());
+    let mut worker: Option<std::thread::JoinHandle<()>> = None;
     let outcome = (|| -> Result<(), String> {
-        let e = Engine::new(&directory, engine_options(args.offline, args.session.clone(), !args.no_auto_sync)).map_err(|e| e.message)?;
-        engine = Some(Arc::clone(&e));
         let token = token_urlsafe(32);
-        let s = AppServer::bind(args.port as u16, e, &token, &args.frontend_dir, None).map_err(|e| e.to_string())?;
+        let s = AppServer::bind_starting(args.port as u16, startup.clone(), &token, &args.frontend_dir, None).map_err(|e| e.to_string())?;
         server = Some(s.clone());
         let url = s.url();
         write_private_new(&runtime, &runtime_json(s.port, &url, &token, pid), true).map_err(|e| e.to_string())?;
+        worker = Some(start_engine(directory.clone(), startup.clone(), engine_options(args.offline, args.session.clone(), !args.no_auto_sync))?);
         // SAFETY: `on_signal` is an `extern "C" fn(c_int)` that only stores
         // to an AtomicBool, which is async-signal-safe.
         unsafe {
@@ -253,9 +269,8 @@ pub fn main(argv: &[String]) -> i32 {
     if let Some(s) = &server {
         s.close();
     }
-    if let Some(e) = &engine {
-        e.close();
-    }
+    if let Some(h) = worker { let _ = h.join(); }
+    if let Some(e) = startup.engine() { e.close(); }
     if runtime.exists() {
         if let Ok(raw) = std::fs::read(&runtime) {
             if let Ok(value) = pyjson::loads_lenient(&raw) {

@@ -48,7 +48,7 @@ test('account login waits for real status, avoids duplicate start and reflects c
   await expect(page.getByRole('heading',{name:'Samsung hesabı bağlı'})).toBeVisible({timeout:7000});
   await expect(page.getByText('Test hesabı',{exact:true})).toBeVisible();
   expect(calls).toEqual(['login']);
-  await page.screenshot({path:'/tmp/samsung-account-connected-synthetic.png'});
+  await page.screenshot({path:`${process.env.TMPDIR||'/tmp'}/samsung-account-connected-synthetic.png`});
   expect(errors).toEqual([]);
 });
 test('failed browser login has inline error and retry, not a false connected state',async({page})=>{
@@ -73,7 +73,7 @@ test('disconnect is explicit and preserves local/offline explanation',async({pag
   await expect(page.getByRole('button',{name:'Samsung hesabıyla bağlan',exact:true})).toBeEnabled();
   expect(calls).toEqual(['disconnect']);
   await page.locator('.settings-page-scroll').evaluate(element=>{element.scrollTop=0;});
-  await page.screenshot({path:'/tmp/samsung-account-offline-mobile-synthetic.png'});
+  await page.screenshot({path:`${process.env.TMPDIR||'/tmp'}/samsung-account-offline-mobile-synthetic.png`});
 });
 test('account action failure does not appear connected or repeat automatically',async({page})=>{
   const {calls,setFailLogin}=await accountFixture(page);

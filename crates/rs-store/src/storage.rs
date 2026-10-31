@@ -245,6 +245,11 @@ fn document_fault(f: Fault, code: &str) -> Error {
     }
 }
 
+pub struct PreparedSnapshot {
+    metadata: Val,
+    pages: Vec<crate::note_container::PageInfo>,
+}
+
 pub struct StoreCore {
     pub directory: PathBuf,
     pub path: PathBuf,
@@ -269,19 +274,57 @@ impl StoreCore {
         }
         store.refresh_editor_capabilities()?;
         if !store.meta("favorite_snapshot_imported")?.map(|v| v.truthy()).unwrap_or(false) {
-            let rows = store.with_db(|db| {
-                db.query(
-                    "SELECT id,json_object('resource_xml',json_extract(base_document,'$.resource_xml')) AS snapshot FROM notes WHERE base_document IS NOT NULL",
-                    &[],
-                )
-            })?;
-            for row in rows.iter() {
-                let snapshot = loads_sql(row.raw("snapshot"))?;
-                store.apply_favorite(row.text("id").unwrap_or(""), &snapshot)?;
+            if store.with_db(|db| Self::schema7(db))? {
+                let rows = store.with_db(|db| db.query("SELECT id FROM notes WHERE container_metadata IS NOT NULL", &[]))?;
+                for row in rows.iter() {
+                    let id = row.text("id").unwrap_or("");
+                    let raw = store.raw(id)?;
+                    let snapshot = crate::val::loads(raw.get_or_null("base_document").as_str().unwrap_or(""))?;
+                    store.apply_favorite(id, &snapshot)?;
+                }
+            } else {
+                let rows = store.with_db(|db| {
+                    db.query(
+                        "SELECT id,json_object('resource_xml',json_extract(base_document,'$.resource_xml')) AS snapshot FROM notes WHERE base_document IS NOT NULL",
+                        &[],
+                    )
+                })?;
+                for row in rows.iter() {
+                    let snapshot = loads_sql(row.raw("snapshot"))?;
+                    store.apply_favorite(row.text("id").unwrap_or(""), &snapshot)?;
+                }
             }
             store.set_meta("favorite_snapshot_imported", &Val::Bool(true))?;
         }
         Ok(store)
+    }
+
+    /// Prepare schema 7 while the caller holds the exclusive library engine
+    /// lock. The deploy must have already made the verified online backup.
+    /// This is deliberately separate from `open` for embedded callers that do
+    /// not own that lock or the backup procedure.
+    pub fn prepare_schema7(directory: &Path, verifier: &dyn crate::snapshot_migration::ProjectionVerifier) -> Result<()> {
+        Self::prepare_schema7_progress(directory, verifier, None)
+    }
+
+    pub fn prepare_schema7_progress(directory: &Path, verifier: &dyn crate::snapshot_migration::ProjectionVerifier, progress: Option<&dyn Fn(u64,u64)>) -> Result<()> {
+        let directory = private_directory(directory)?;
+        let database = directory.join("library.sqlite3");
+        if database.is_symlink() { return Err(Error::Value("database cannot be a symbolic link".into())); }
+        if database.exists() {
+            let conn = rusqlite::Connection::open_with_flags(&database, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            let has_metadata: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='metadata')", [], |row| row.get(0))?;
+            if has_metadata {
+                let version: String = conn.query_row("SELECT value FROM metadata WHERE key='schema_version'", [], |row| row.get(0))?;
+                drop(conn);
+                if version == "7" {
+                    return match progress { Some(report) => crate::snapshot_migration::migrate_v7_with_progress(&directory, &database, verifier, report), None => crate::snapshot_migration::migrate_v7(&directory, &database, verifier) };
+                }
+            }
+        }
+        // Initialize new libraries and upgrade older metadata schemas first.
+        drop(Self::open(&directory)?);
+        match progress { Some(report) => crate::snapshot_migration::migrate_v7_with_progress(&directory, &database, verifier, report), None => crate::snapshot_migration::migrate_v7(&directory, &database, verifier) }
     }
 
     pub fn with_db<T>(&self, f: impl FnOnce(&DbHandle) -> Result<T>) -> Result<T> {
@@ -302,7 +345,7 @@ impl StoreCore {
         let encoded = dumps_ascii(&Val::s(recipe))?;
         self.with_db(|db| {
             db.exec("BEGIN IMMEDIATE", &[])?;
-            let synced = "SELECT id FROM notes WHERE sync_state='synced' AND base_document IS NOT NULL";
+            let synced = if Self::schema7(db)? { "SELECT id FROM notes WHERE sync_state='synced' AND container_metadata IS NOT NULL" } else { "SELECT id FROM notes WHERE sync_state='synced' AND base_document IS NOT NULL" };
             db.exec(&format!("DELETE FROM editor_documents WHERE note_id IN ({synced})"), &[])?;
             // The rules only ever widen title editing: re-derive the refused ones.
             db.exec(&format!("UPDATE notes SET title_editable=NULL WHERE title_editable=0 AND id IN ({synced})"), &[])?;
@@ -326,19 +369,116 @@ impl StoreCore {
         })
     }
 
-    pub fn raw(&self, note_id: &str) -> Result<Val> {
-        let cur = self.with_db(|db| db.query("SELECT * FROM notes WHERE id=?", &p![note_id]))?;
-        match cur.one() {
-            Some(row) => Ok(row.to_dict()),
-            None => fail("not_found", "Not bulunamadı.", 404),
+    /// Hold the publication lock across reference lookup and container reads.
+    pub(crate) fn with_container_read<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
+        if self.with_db(|db| Self::schema7(db))? {
+            let store = crate::document_store::DocumentStore::open(&self.directory)?;
+            store.with_write(|_| f())
+        } else {
+            f()
         }
+    }
+
+    pub(crate) fn base_ref<'a>(row: &Row<'a>) -> &'a SqlVal {
+        row.try_raw("container_metadata").filter(|v| !matches!(v, SqlVal::Null)).unwrap_or_else(|| row.raw("base_document"))
+    }
+
+    pub(crate) fn load_snapshot_value(&self, value: &Val) -> Result<Val> {
+        if value.get("container_sha256").is_some() {
+            let store = crate::document_store::DocumentStore::open(&self.directory)?;
+            crate::snapshot_store::load_snapshot_cached(&store, &self.directory, value)
+        } else {
+            Ok(value.clone())
+        }
+    }
+
+    pub(crate) fn load_snapshot_sql(&self, value: &SqlVal) -> Result<Val> {
+        self.load_snapshot_value(&loads_sql(value)?)
+    }
+
+    pub(crate) fn hydrate_snapshot_field(&self, row: &mut Val, field: &str) -> Result<()> {
+        let value = row.get_or_null(field);
+        if let Some(json) = value.as_str() {
+            let snapshot = crate::val::loads(json)?;
+            if snapshot.get("container_sha256").is_some() {
+                row.set(field, Val::s(dumps_utf8(&self.load_snapshot_value(&snapshot)?)?));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn clear_finished_job_refs(db: &dyn Sql, identity: &str) -> Result<()> {
+        if Self::schema7(db)? {
+            db.exec("UPDATE jobs SET snapshot=NULL WHERE note_id=? AND state IN ('done','cancelled')", &p![identity])?;
+            for table in ["ink_jobs", "ink_erase_jobs", "ink_move_jobs"] {
+                db.exec(&format!("UPDATE {table} SET current_snapshot='{{}}' WHERE job_id IN (SELECT id FROM jobs WHERE note_id=? AND state IN ('done','cancelled'))"), &p![identity])?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn schema7(db: &dyn Sql) -> Result<bool> {
+        Ok(matches!(db.one("SELECT value FROM metadata WHERE key='schema_version'", &[])?.as_deref(), Some([SqlVal::Text(value)]) if value == "7"))
+    }
+
+    fn prepared_snapshot(&self, writer: &crate::document_store::DocumentWriter<'_>, db: &dyn Sql, identity: &str, snapshot: &Val) -> Result<PreparedSnapshot> {
+        let row = db.one("SELECT container_metadata FROM notes WHERE id=?", &p![identity])?;
+        let mut previous = match row.as_ref().and_then(|r| r.first()) {
+            Some(SqlVal::Text(json)) => {
+                let metadata = crate::val::loads(json)?;
+                let reference = crate::snapshot_store::raw_reference(&metadata)?;
+                Some(writer.open_raw(&reference)?)
+            }
+            _ => None,
+        };
+        let prior = previous.as_mut().map(|file| file as &mut dyn crate::note_container::ReadSeek);
+        let (metadata, pages) = crate::snapshot_store::store_snapshot_with_pages_from_reader(writer, snapshot, prior)?;
+        Ok(PreparedSnapshot { metadata, pages })
+    }
+
+    pub fn raw(&self, note_id: &str) -> Result<Val> {
+        if !self.with_db(|db| Self::schema7(db))? {
+            let cur = self.with_db(|db| db.query("SELECT * FROM notes WHERE id=?", &p![note_id]))?;
+            return cur.one().map(|row| row.to_dict()).ok_or_else(|| crate::db::store_err("not_found", "Not bulunamadı.", 404));
+        }
+        let (result, pinned) = self.pin_raw(note_id)?;
+        self.hydrate_pinned_raw(result, pinned)
+    }
+
+    pub(crate) fn pin_raw(&self, note_id: &str) -> Result<(Val, Vec<(&'static str, Val, std::fs::File)>)> {
+        let store = crate::document_store::DocumentStore::open(&self.directory)?;
+        // Keep the exact row and its file descriptors together under the
+        // publication lock. The pinned descriptors survive a later GC unlink.
+        store.with_write(|writer| {
+            let cur = self.with_db(|db| db.query("SELECT * FROM notes WHERE id=?", &p![note_id]))?;
+            let row = cur.one().ok_or_else(|| crate::db::store_err("not_found", "Not bulunamadı.", 404))?;
+            let mut pinned = Vec::new();
+            for (legacy, reference) in [("base_document", "container_metadata"), ("remote_document", "remote_container_metadata")] {
+                if let Some(value) = row.try_raw(reference).filter(|v| !matches!(v, SqlVal::Null)) {
+                    let metadata = loads_sql(value)?;
+                    let file = writer.open_raw(&crate::snapshot_store::raw_reference(&metadata)?)?;
+                    pinned.push((legacy, metadata, file));
+                }
+            }
+            Ok((row.to_dict(), pinned))
+        })
+    }
+
+    pub(crate) fn hydrate_pinned_raw(&self, mut result: Val, pinned: Vec<(&'static str, Val, std::fs::File)>) -> Result<Val> {
+        for (legacy, metadata, file) in pinned {
+            let snapshot = crate::snapshot_store::load_snapshot_cached_from_file(&self.directory, &metadata, file)?;
+            result.set(legacy, Val::s(dumps_utf8(&snapshot)?));
+        }
+        Ok(result)
     }
 
     pub fn get(&self, note_id: &str) -> Result<Val> {
         // Do not read multi-megabyte raw Cloud snapshots on every UI poll.
+        let v7 = self.with_db(|db| Self::schema7(db))?;
+        let remote = if v7 { "remote_container_metadata" } else { "remote_document" };
         let sql = format!(
-            "SELECT {}, CASE WHEN sync_state='conflict' AND remote_document IS NOT NULL \
-             THEN json_object('title',json_extract(remote_document,'$.title'),'body',json_extract(remote_document,'$.body')) \
+            "SELECT {}, CASE WHEN sync_state='conflict' AND {remote} IS NOT NULL \
+             THEN json_object('title',json_extract({remote},'$.title'),'body',json_extract({remote},'$.body')) \
              ELSE NULL END AS remote_document FROM notes WHERE id=?",
             PUBLIC_COLUMNS
         );
@@ -449,7 +589,7 @@ impl StoreCore {
             if row.text("title") == Some(title) && row.text("body") == Some(body) {
                 return Ok(Some(public(&row, true)?));
             }
-            let base = loads_opt(row.raw("base_document"))?;
+            let base = loads_opt(Self::base_ref(&row))?;
             let active = db
                 .one("SELECT 1 FROM jobs WHERE note_id=? AND state IN ('queued','running','uncertain') LIMIT 1", &p![identity])?
                 .is_some();
@@ -468,6 +608,7 @@ impl StoreCore {
                 &p![title, body, now_ms(), state, identity],
             )?;
             db.exec("UPDATE jobs SET state='cancelled' WHERE note_id=? AND state='failed'", &p![identity])?;
+            Self::clear_finished_job_refs(db, identity)?;
             Ok(None)
         })?;
         match early {
@@ -479,10 +620,8 @@ impl StoreCore {
     pub fn title_capability(&self, identity: &str, supported: bool, raw_sha256: &Val) -> Result<()> {
         let sha = b(raw_sha256)?;
         self.with_db(|db| {
-            db.exec(
-                "UPDATE notes SET title_editable=? WHERE id=? AND json_extract(base_document,'$.raw_sha256')=?",
-                &p![supported, identity, sha],
-            )?;
+            let sql = if Self::schema7(db)? { "UPDATE notes SET title_editable=? WHERE id=? AND raw_sha256=?" } else { "UPDATE notes SET title_editable=? WHERE id=? AND json_extract(base_document,'$.raw_sha256')=?" };
+            db.exec(sql, &p![supported, identity, sha])?;
             Ok(())
         })
     }
@@ -522,7 +661,7 @@ impl StoreCore {
             let revision = row.int("revision") + 1;
             db.exec(
                 "INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?)",
-                &p![uuid4(), identity, "title", revision, title, row.raw("body"), row.raw("base_document"), "queued", null(), now_ms()],
+                &p![uuid4(), identity, "title", revision, title, row.raw("body"), Self::base_ref(&row), "queued", null(), now_ms()],
             )?;
             db.exec(
                 "UPDATE notes SET title=?,revision=?,modified_ms=?,sync_state='pending',error=NULL WHERE id=?",
@@ -595,7 +734,7 @@ impl StoreCore {
             return fail("revision_conflict", "Not başka bir yerde değişti.", 409);
         }
         h.ensure_no_active_ink(db, identity)?;
-        if row.truthy("deleted_remote") || row.truthy("trashed") || !row.truthy("server_id") || !row.truthy("base_document") {
+        if row.truthy("deleted_remote") || row.truthy("trashed") || !row.truthy("server_id") || matches!(Self::base_ref(&row), SqlVal::Null) {
             return fail(read_only.0, read_only.1, 422);
         }
         if row.text("sync_state") != Some("synced") || row.text("org_state") != Some("synced") {
@@ -609,7 +748,7 @@ impl StoreCore {
         let job = uuid4();
         db.exec(
             "INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?)",
-            &p![&job, identity, kind, revision, row.raw("title"), row.raw("body"), row.raw("base_document"), "queued", null(), now_ms()],
+            &p![&job, identity, kind, revision, row.raw("title"), row.raw("body"), Self::base_ref(&row), "queued", null(), now_ms()],
         )?;
         Ok((job, revision))
     }
@@ -623,6 +762,7 @@ impl StoreCore {
     }
 
     pub fn save_page_background<H: Host>(&self, h: &H, identity: &str, color_argb: &Val, expected_revision: &Val) -> Result<Val> {
+        self.with_container_read(|| {
         let color = match color_argb {
             Val::Int(c) if (0..=0xFFFF_FFFF).contains(c) && c >> 24 == 0xFF => *c,
             _ => return fail("invalid_color", "Sayfa rengi opak bir renk olmalı.", 400),
@@ -632,7 +772,7 @@ impl StoreCore {
             db.exec("BEGIN IMMEDIATE", &[])?;
             let cur = db.query("SELECT * FROM notes WHERE id=?", &p![identity])?;
             let row = self.gate_row(h, db, &cur, identity, expected, ("style_read_only", "Bu notun sayfa rengi değiştirilemiyor."))?;
-            let base = loads_sql(row.raw("base_document"))?;
+            let base = self.load_snapshot_sql(Self::base_ref(&row))?;
             // Offline dry run: unsupported notes fail here, before queueing.
             h.prepare_page_background(&base, color).map_err(|f| document_fault(f, "style_read_only"))?;
             let (job, revision) = Self::queue_snapshot_job(db, &row, identity, "page_style")?;
@@ -640,6 +780,7 @@ impl StoreCore {
             Self::mark_pending(db, identity, revision)
         })?;
         self.get(identity)
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -654,6 +795,7 @@ impl StoreCore {
         page_indices: &Val,
         template_type: &Val,
     ) -> Result<Val> {
+        self.with_container_read(|| {
         let expected = require_revision(expected_revision, "Not sürümü eksik.")?;
         let sizes = match page_sizes {
             Val::List(items) => items,
@@ -668,7 +810,7 @@ impl StoreCore {
             db.exec("BEGIN IMMEDIATE", &[])?;
             let cur = db.query("SELECT * FROM notes WHERE id=?", &p![identity])?;
             let row = self.gate_row(h, db, &cur, identity, expected, ("pdf_read_only", "Bu nota sayfa eklenemiyor."))?;
-            let base = loads_sql(row.raw("base_document"))?;
+            let base = self.load_snapshot_sql(Self::base_ref(&row))?;
             h.prepare_pdf_pages(&base, file_sha256, file_name, page_sizes, &indices, template_type)
                 .map_err(|f| document_fault(f, "pdf_read_only"))?;
             let (job, revision) = Self::queue_snapshot_job(db, &row, identity, "pdf_pages")?;
@@ -694,6 +836,7 @@ impl StoreCore {
             Self::mark_pending(db, identity, revision)
         })?;
         self.get(identity)
+        })
     }
 
     pub fn pdf_page_job(&self, job: &Val) -> Result<Val> {
@@ -732,6 +875,7 @@ impl StoreCore {
     }
 
     pub fn save_page_op<H: Host>(&self, h: &H, identity: &str, op: &Val, spec: &Val, expected_revision: &Val) -> Result<Val> {
+        self.with_container_read(|| {
         let op_name = match op.as_str() {
             Some(o @ ("add" | "delete" | "reorder" | "shape")) if expected_revision.is_exact_int() => o,
             _ => return fail("invalid_change", "Sayfa işlemi geçersiz.", 400),
@@ -741,7 +885,7 @@ impl StoreCore {
             db.exec("BEGIN IMMEDIATE", &[])?;
             let cur = db.query("SELECT * FROM notes WHERE id=?", &p![identity])?;
             let row = self.gate_row(h, db, &cur, identity, expected, ("pages_read_only", "Bu notun sayfaları değiştirilemiyor."))?;
-            let base = loads_sql(row.raw("base_document"))?;
+            let base = self.load_snapshot_sql(Self::base_ref(&row))?;
             // offline dry run before queueing
             let mut stored = spec.clone();
             let attempt = (|| -> std::result::Result<(), Fault> {
@@ -768,6 +912,7 @@ impl StoreCore {
             Self::mark_pending(db, identity, revision)
         })?;
         self.get(identity)
+        })
     }
 
     pub fn page_op_job(&self, job: &Val) -> Result<(Val, Val)> {
@@ -805,16 +950,22 @@ impl StoreCore {
         })
     }
 
-    pub fn by_server(&self, server_id: &Val) -> Result<Option<Val>> {
+    fn by_server_metadata(&self, server_id: &Val) -> Result<Option<Val>> {
         let sid = b(server_id)?;
         let cur = self.with_db(|db| db.query("SELECT * FROM notes WHERE server_id=?", &[sid]))?;
         Ok(cur.one().map(|r| r.to_dict()))
     }
 
+    pub fn by_server(&self, server_id: &Val) -> Result<Option<Val>> {
+        let Some(row) = self.by_server_metadata(server_id)? else { return Ok(None) };
+        let identity = sid(key(&row, "id")?)?;
+        Ok(Some(self.raw(identity)?))
+    }
+
     /// Durably stage metadata before advancing a feed checkpoint.
     pub fn stage_change(&self, change: &Val) -> Result<Option<String>> {
         let server = key(change, "server_id")?.clone();
-        let existing = self.by_server(&server)?;
+        let existing = self.by_server_metadata(&server)?;
         let deleted = matches!(change.get("is_deleted"), Some(Val::Bool(true)));
         if deleted && existing.is_none() {
             return Ok(None);
@@ -870,7 +1021,7 @@ impl StoreCore {
     }
 
     pub fn apply_document<H: Host>(&self, h: &H, server_id: &Val, document: &Val, expected_job: Option<&Val>) -> Result<String> {
-        let identity = match self.by_server(server_id)? {
+        let identity = match self.by_server_metadata(server_id)? {
             None => {
                 let change = Val::dict(vec![
                     ("server_id", server_id.clone()),
@@ -882,18 +1033,34 @@ impl StoreCore {
             }
             Some(existing) => sid(key(&existing, "id")?)?.to_string(),
         };
-        self.with_db(|db| {
-            db.exec("BEGIN IMMEDIATE", &[])?;
-            if h.apply_document_tx(self, db, &identity, document, expected_job)? {
-                h.apply_favorite_tx(self, db, &identity, document)?;
-            }
-            Ok(())
-        })?;
+        let v7 = self.with_db(|db| Self::schema7(db))?;
+        if v7 {
+            let store = crate::document_store::DocumentStore::open(&self.directory)?;
+            store.with_write(|writer| self.with_db(|db| {
+                db.exec("BEGIN IMMEDIATE", &[])?;
+                let prepared = self.prepared_snapshot(writer, db, &identity, document)?;
+                if h.apply_document_tx(self, db, &identity, document, expected_job, Some(&prepared))? {
+                    h.apply_favorite_tx(self, db, &identity, document)?;
+                }
+                Ok(())
+            }))?;
+        } else {
+            self.with_db(|db| {
+                db.exec("BEGIN IMMEDIATE", &[])?;
+                if h.apply_document_tx(self, db, &identity, document, expected_job, None)? {
+                    h.apply_favorite_tx(self, db, &identity, document)?;
+                }
+                Ok(())
+            })?;
+        }
         Ok(identity)
     }
 
     /// Caller holds BEGIN IMMEDIATE; acknowledgement can share this commit.
-    pub fn apply_document_tx<H: Host>(&self, h: &H, db: &dyn Sql, identity: &str, document: &Val, expected_job: Option<&Val>) -> Result<bool> {
+    pub fn apply_document_tx<H: Host>(&self, h: &H, db: &dyn Sql, identity: &str, document: &Val, expected_job: Option<&Val>, prepared: Option<&PreparedSnapshot>) -> Result<bool> {
+        if Self::schema7(db)? != prepared.is_some() {
+            return Err(Error::Value("snapshot publication must hold the transaction guard".into()));
+        }
         let encoded = dumps_utf8(document)?;
         let cur = db.query("SELECT * FROM notes WHERE id=?", &p![identity])?;
         let Some(row) = cur.one() else {
@@ -905,17 +1072,19 @@ impl StoreCore {
             }
         }
         let dirty = !matches!(row.text("sync_state"), Some("synced" | "local"));
-        let base = loads_opt(row.raw("base_document"))?;
+        let base = loads_opt(Self::base_ref(&row))?;
         let unchanged = match &base {
             Some(base) if base.truthy() => normalize_commit_val(key(base, "commit_id")?)? == normalize_commit_val(key(document, "commit_id")?)?,
             _ => false,
         };
         if dirty && expected_job.is_none() {
             if !unchanged && base.is_some() {
+                let remote = if let Some(prepared) = prepared { text(&dumps_utf8(&prepared.metadata)?) } else { text(&encoded) };
+                let column = if prepared.is_some() { "remote_container_metadata" } else { "remote_document" };
                 db.exec(
-                    "UPDATE notes SET sync_state='conflict',loaded=1,remote_document=?,remote_commit=?,error=? WHERE id=?",
+                    &format!("UPDATE notes SET sync_state='conflict',loaded=1,{column}=?,remote_commit=?,error=? WHERE id=?"),
                     &vec![
-                        text(&encoded),
+                        remote,
                         b(key(document, "commit_id")?)?,
                         text("Not başka bir cihazda değişti. İki sürüm de korunuyor."),
                         text(identity),
@@ -991,12 +1160,26 @@ impl StoreCore {
                 text(if newer_local { "pending" } else { "synced" }),
                 editable,
                 b(&document.get_or_null("read_only_reason"))?,
-                text(&encoded),
+                if prepared.is_some() { null() } else { text(&encoded) },
                 b(key(document, "commit_id")?)?,
                 int(unchanged as i64),
                 text(identity),
             ],
         )?;
+        if let Some(prepared) = prepared {
+            let reference = crate::snapshot_store::raw_reference(&prepared.metadata)?;
+            db.exec("UPDATE notes SET container_sha256=?,container_size=?,raw_sha256=?,container_metadata=?,remote_container_metadata=NULL WHERE id=?",
+                &p![reference.sha256, reference.size as i64, b(key(&prepared.metadata, "raw_sha256")?)?, dumps_utf8(&prepared.metadata)?, identity])?;
+            let history_metadata = dumps_utf8(&prepared.metadata)?;
+            db.exec("INSERT INTO note_container_revisions(note_id,revision,container_metadata) SELECT ?,COALESCE(MAX(revision)+1,0),? FROM note_container_revisions WHERE note_id=? HAVING NOT EXISTS (SELECT 1 FROM note_container_revisions WHERE note_id=? AND container_metadata=? AND revision=(SELECT MAX(revision) FROM note_container_revisions WHERE note_id=?))", &p![identity, &history_metadata, identity, identity, &history_metadata, identity])?;
+            db.exec("DELETE FROM note_container_revisions WHERE note_id=? AND revision NOT IN (SELECT revision FROM note_container_revisions WHERE note_id=? ORDER BY revision DESC LIMIT 2)", &p![identity, identity])?;
+            db.exec("DELETE FROM note_pages WHERE note_id=?", &p![identity])?;
+            let revision = db.one("SELECT revision FROM notes WHERE id=?", &p![identity])?.ok_or_else(|| Error::Value("missing note revision".into()))?;
+            for (index, page) in prepared.pages.iter().enumerate() {
+                db.exec("INSERT INTO note_pages(note_id,revision,page_id,idx,page_sha256,xml_sha256,has_ink) VALUES(?,?,?,?,?,?,?)",
+                    &p![identity, revision[0].clone(), &page.page_id, index as i64, &page.page_sha256, &page.xml_sha256, page.has_ink])?;
+            }
+        }
         Ok(true)
     }
 
@@ -1009,11 +1192,14 @@ impl StoreCore {
     }
 
     pub fn next_job(&self) -> Result<Option<Val>> {
+        self.with_container_read(|| {
         self.with_db(|db| {
             db.exec("BEGIN IMMEDIATE", &[])?;
             let cur = db.query("SELECT * FROM jobs WHERE state IN ('queued','running') ORDER BY created_ms LIMIT 1", &[])?;
             if let Some(row) = cur.one() {
-                return Ok(Some(row.to_dict()));
+                let mut job = row.to_dict();
+                self.hydrate_snapshot_field(&mut job, "snapshot")?;
+                return Ok(Some(job));
             }
             let cur = db.query(
                 "SELECT * FROM notes WHERE sync_state='pending' AND trashed=0 AND
@@ -1029,7 +1215,7 @@ impl StoreCore {
                 ("local_revision", row.val("revision")),
                 ("title", row.val("title")),
                 ("body", row.val("body")),
-                ("snapshot", row.val("base_document")),
+                ("snapshot", sql_to_val(Self::base_ref(&row))),
                 ("state", Val::s("queued")),
                 ("error", Val::Null),
                 ("created_ms", Val::Int(now_ms())),
@@ -1066,7 +1252,9 @@ impl StoreCore {
             if let Some(model) = &model {
                 db.exec("INSERT INTO editor_jobs VALUES (?,?)", &vec![b(key(&job, "id")?)?, text(&dumps_utf8(model)?)])?;
             }
+            self.hydrate_snapshot_field(&mut job, "snapshot")?;
             Ok(Some(job))
+        })
         })
     }
 
@@ -1092,7 +1280,7 @@ impl StoreCore {
 
     /// Snapshot/UI acknowledgement and job completion are one durable
     /// transaction. Cloud receipts/checkpoints remain separately durable.
-    pub fn complete_job_tx<H: Host>(&self, h: &H, db: &DbHandle, job: &Val, result: &Val) -> Result<()> {
+    pub fn complete_job_tx<H: Host>(&self, h: &H, db: &DbHandle, job: &Val, result: &Val, prepared: Option<&PreparedSnapshot>) -> Result<()> {
         db.exec("BEGIN IMMEDIATE", &[])?;
         if py_eq(key(job, "kind")?, &Val::s("append_ink")) {
             h.guard_ink_job(self, db, job)?;
@@ -1104,15 +1292,32 @@ impl StoreCore {
         )?;
         let note = sid(note)?;
         let snapshot = key(result, "snapshot")?;
-        if h.apply_document_tx(self, db, note, snapshot, Some(job))? {
+        if h.apply_document_tx(self, db, note, snapshot, Some(job), prepared)? {
             h.apply_favorite_tx(self, db, note, snapshot)?;
         }
-        db.exec("UPDATE jobs SET state='done',error=NULL WHERE id=?", &vec![b(key(job, "id")?)?])?;
+        if prepared.is_some() {
+            let id = b(key(job, "id")?)?;
+            db.exec("UPDATE jobs SET state='done',error=NULL,snapshot=NULL WHERE id=?", &[id.clone()])?;
+            for table in ["ink_jobs", "ink_erase_jobs", "ink_move_jobs"] {
+                db.exec(&format!("UPDATE {table} SET current_snapshot='{{}}' WHERE job_id=?"), &[id.clone()])?;
+            }
+        } else {
+            db.exec("UPDATE jobs SET state='done',error=NULL WHERE id=?", &vec![b(key(job, "id")?)?])?;
+        }
         Ok(())
     }
 
     pub fn complete_job<H: Host>(&self, h: &H, job: &Val, result: &Val) -> Result<()> {
-        self.with_db(|db| self.complete_job_tx(h, db, job, result))
+        if self.with_db(|db| Self::schema7(db))? {
+            let store = crate::document_store::DocumentStore::open(&self.directory)?;
+            store.with_write(|writer| self.with_db(|db| {
+                let note = sid(key(job, "note_id")?)?;
+                let prepared = self.prepared_snapshot(writer, db, note, key(result, "snapshot")?)?;
+                self.complete_job_tx(h, db, job, result, Some(&prepared))
+            }))
+        } else {
+            self.with_db(|db| self.complete_job_tx(h, db, job, result, None))
+        }
     }
 
     pub fn resolve<H: Host>(&self, h: &H, identity: &str, strategy: &Val) -> Result<Val> {
@@ -1147,6 +1352,7 @@ impl StoreCore {
         };
         self.with_db(|db| {
             db.exec("UPDATE jobs SET state='cancelled' WHERE note_id=? AND state NOT IN ('done','cancelled')", &p![identity])?;
+            Self::clear_finished_job_refs(db, identity)?;
             db.exec("UPDATE notes SET sync_state='synced',error=NULL WHERE id=?", &p![identity])?;
             Ok(())
         })?;

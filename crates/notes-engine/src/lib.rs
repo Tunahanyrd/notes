@@ -22,6 +22,12 @@ pub mod util;
 
 use std::sync::Arc;
 
+/// Prepare storage during deployment, after the caller takes and verifies the
+/// SQLite online backup and while it holds the exclusive engine lock.
+pub fn prepare_schema7(directory: &std::path::Path) -> rs_store::db::Result<()> {
+    rs_store::storage::StoreCore::prepare_schema7(directory, &notes_host::migration_projection::StreamingMigrationProjectionVerifier)
+}
+
 /// The Cloud implementation linked into this build.
 pub fn cloud_factory() -> Arc<dyn cloud::CloudFactory> {
     Arc::new(cloud_impl::NativeCloud::default())

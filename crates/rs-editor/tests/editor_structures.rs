@@ -421,7 +421,7 @@ fn a_body_anchoring_a_floating_picture_is_editable() {
     let objects = rich::model_objects(&m);
     assert_eq!(objects.len(), 1);
     assert!(rs_editor::pyval::py_eq(&objects[0], &anchor(5, Some("image"))), "{:?}", objects[0]);
-    assert_eq!(edit::PROJECTION_RECIPE, "editor-projection-v4");
+    assert_eq!(edit::PROJECTION_RECIPE, "editor-projection-v5");
 }
 
 #[test]

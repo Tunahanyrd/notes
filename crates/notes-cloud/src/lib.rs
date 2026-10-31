@@ -12,6 +12,7 @@
 //! `.code`, Turkish `.message` and `.ambiguous`. On-disk receipts are
 //! byte-identical to the oracle's.
 pub mod api;
+mod result_store;
 pub mod auth;
 pub mod editor;
 pub mod etree;

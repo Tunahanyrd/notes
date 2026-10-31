@@ -1,6 +1,7 @@
-import {useEffect,useLayoutEffect,useRef,useState,type PointerEvent as ReactPointerEvent} from 'react';
-import {api,ApiError,notePath} from './api';
+import {useContext,useEffect,useLayoutEffect,useRef,useState,type PointerEvent as ReactPointerEvent} from 'react';
+import {api,ApiError,notePath,request} from './api';
 import {useInkLive,type InkPenTemplate,type LivePenSpec,type LiveRaster} from './inkLive';
+import {InkPageContext,inkTileBucket,snapInkOffset,visibleInkTiles} from './PageStack';
 import type {Note} from './types';
 import './ink-editor.css';
 
@@ -89,6 +90,10 @@ export function useInkDrafts(note:Note|null,enabled:boolean,onSaved:(note:Note)=
   const [loaded,setLoaded]=useState<{noteId:string;projection:InkProjection}|null>(null);
   const [phase,setPhase]=useState<'idle'|'loading'|'ready'|'unavailable'>('idle');
   const [error,setError]=useState('');const [saving,setSaving]=useState<string|null>(null);
+  // Our previous batch still syncing (409 sync_pending): nothing was accepted,
+  // so the draft is saved again once the note is synced. `waitTick` re-arms
+  // the autosave every 2 s; after 10 minutes it gives up with an error.
+  const [waitTick,setWaitTick]=useState(0);const waitingSince=useRef<number|null>(null);
   // Saved strokes the eraser marked, per note, bound to the projection revision.
   const [erasures,setErasures]=useState<Record<string,InkErasure>>({});
   const [moves,setMoves]=useState<Record<string,InkMoveMark>>({});
@@ -402,9 +407,16 @@ export function useInkDrafts(note:Note|null,enabled:boolean,onSaved:(note:Note)=
       // History stays: these draws become queued Cloud strokes (savedDraw).
       setSavedBatches(previous=>({...previous,[current.id]:{revision:updated.revision,clientIds:frozen.strokes.map(stroke=>stroke.id),strokes:frozen.strokes,...(first?{firstPageId:frozen.strokes[0].pageId}:{})}}));
       setFutures(previous=>({...previous,[current.id]:(previous[current.id]??[]).filter(item=>item.kind!=='erase'||!item.drafts.length)}));
+      waitingSince.current=null;
       // Do not replace the projection or unmount a pointer gesture in flight.
       if(captureLock.current)pendingAccept.current=()=>accept(updated);else accept(updated);
-    }catch{setError(uncertainTransfer.current.has(current.id)?'Çizimin durumunu doğrulamak için uygulamayı yeniden açın.':'Çizimler kaydedilemedi. Taslağınız bu pencerede korunuyor.');}
+    }catch(failure){
+      if(failure instanceof ApiError&&failure.status===409&&failure.code==='sync_pending'&&!uncertainTransfer.current.has(current.id)){
+        const since=waitingSince.current??=Date.now();
+        if(Date.now()-since<10*60*1000){window.setTimeout(()=>setWaitTick(t=>t+1),2000);return;}
+      }
+      waitingSince.current=null;
+      setError(uncertainTransfer.current.has(current.id)?'Çizimin durumunu doğrulamak için uygulamayı yeniden açın.':'Çizimler kaydedilemedi. Taslağınız bu pencerede korunuyor.');}
     finally{releaseDraft();if(batchReady.current?.ready===ready)batchReady.current=null;saveLock.current=false;setSaving(null);}
   };
   // Erasures are saved separately from new strokes (one queued job each).
@@ -462,7 +474,7 @@ export function useInkDrafts(note:Note|null,enabled:boolean,onSaved:(note:Note)=
     if(!note||!moveMark||capturing||saving||error||note.syncState!=='synced'||drafts[note.id]?.strokes.length||erasures[note.id]?.ids.length||moveMark.revision!==projection?.revision)return;
     const timer=setTimeout(()=>void saveMove(),1500);return()=>clearTimeout(timer);
   },[note?.id,note?.syncState,moveMark,capturing,saving,error,drafts,erasures,projection?.revision]);
-  return {projection,draft,erasure,moveMark,phase,error,drawing,setDrawing,tool,setTool,capturing,setCapturing,
+  return {projection,draft,erasure,moveMark,phase,error,waitTick,drawing,setDrawing,tool,setTool,capturing,setCapturing,noteSyncState:note?.syncState,
     hasDraft:(id:string)=>!!drafts[id]?.strokes.length||!!erasures[id]?.ids.length||!!moves[id],
     sourceId:note?sources[note.id]??'':'',chooseSource,penStyle:note?penStyles[note.id]??{}:{},setPenStyle,highlighterStyle,setHighlighterStyle,
     undo,redo,canUndo:!undoReason,canRedo:!redoReason,undoReason,redoReason,
@@ -562,12 +574,111 @@ function Mask({points,size,className}:{points:[number,number][];size:number;clas
 function MovedStroke({points,size,colorARGB,dx,dy}:{points:[number,number][];size:number;colorARGB:number;dx:number;dy:number}){const {color,opacity}=inkColor(colorARGB);if(points.length===1)return <circle className="ink-moved" cx={points[0][0]+dx} cy={points[0][1]+dy} r={size/2} fill={color} fillOpacity={opacity}/>;return <polyline className="ink-moved" points={points.map(([x,y])=>`${x+dx},${y+dy}`).join(' ')} fill="none" stroke={color} strokeOpacity={opacity} strokeWidth={size} strokeLinecap="round" strokeLinejoin="round"/>;}
 // A finished pen stroke drawn by the live renderer (device pixels, placed in
 // CSS pixels over the page). Layout effect: painted in the same frame it mounts.
-function RasterCanvas({id,raster,unit,dx,dy,faded}:{id:string;raster:LiveRaster;unit:number;dx:number;dy:number;faded:boolean}){
-  // CSS pixels per raster pixel; an older raster (other zoom) stays in place, scaled.
-  const css=unit/raster.scale;
+type PixelBox={w:number;h:number;x:number;y:number;dpr:number};
+function RasterCanvas({id,raster,pageWidth,pageHeight,dx,dy,faded,pixel,snap}:{id:string;raster:LiveRaster;pageWidth:number;pageHeight:number;dx:number;dy:number;faded:boolean;pixel:PixelBox;snap:boolean}){
+  // Page-relative layout scales immediately with the image, including before
+  // ResizeObserver reports the new size and the next raster is ready.
+  const x=(raster.x/raster.scale+dx)/pageWidth*100,y=(raster.y/raster.scale+dy)/pageHeight*100;
+  const width=raster.width/raster.scale/pageWidth*100,height=raster.height/raster.scale/pageHeight*100;
+  const adjusted=(percent:number,extent:number,origin:number)=>{const raw=percent*extent/100;return snap?(snapInkOffset(origin,raw,pixel.dpr)??raw)-raw:0;};
+  const l=adjusted(x,pixel.w,pixel.x),t=adjusted(y,pixel.h,pixel.y),r=adjusted(x+width,pixel.w,pixel.x),b=adjusted(y+height,pixel.h,pixel.y);
   const ref=useRef<HTMLCanvasElement>(null);
   useLayoutEffect(()=>{const canvas=ref.current;if(!canvas)return;canvas.width=raster.width;canvas.height=raster.height;canvas.getContext('2d')?.putImageData(raster.image,0,0);},[raster]);
-  return <canvas ref={ref} className={`ink-raster${faded?' ink-erase-hit':''}`} data-ink-stroke={id} aria-hidden="true" style={{left:raster.x*css,top:raster.y*css,width:raster.width*css,height:raster.height*css,transform:dx||dy?`translate(${dx}px,${dy}px)`:undefined}}/>;
+  return <canvas ref={ref} className={`ink-raster${faded?' ink-erase-hit':''}`} data-ink-stroke={id} aria-hidden="true" style={{left:`calc(${x}% + ${l}px)`,top:`calc(${y}% + ${t}px)`,width:`calc(${width}% + ${r-l}px)`,height:`calc(${height}% + ${b-t}px)`}}/>;
+}
+type InkTileImage={column:number;row:number;url:string;image:HTMLImageElement};
+type InkTileFrame={noteId:string;pageId:string;base:string;token:string;bucket:number;width:number;height:number;tiles:InkTileImage[];textless:boolean};
+type TileDraft={raster:LiveRaster;dx:number;dy:number;faded:boolean};
+function InkTileCanvas({tile,frame,pixel,drafts}:{tile:InkTileImage;frame:InkTileFrame;pixel:PixelBox|null;drafts:TileDraft[]}){
+  const ref=useRef<HTMLCanvasElement>(null);
+  useLayoutEffect(()=>{
+    const canvas=ref.current;if(!canvas)return;canvas.width=512;canvas.height=512;
+    const context=canvas.getContext('2d');if(!context)return;context.drawImage(tile.image,0,0);
+    for(const {raster,dx,dy,faded} of drafts){
+      const ratio=frame.bucket/raster.scale,x=(raster.x+raster.scale*dx)*ratio-tile.column*512,y=(raster.y+raster.scale*dy)*ratio-tile.row*512;
+      const width=raster.width*ratio,height=raster.height*ratio;if(x>=512||y>=512||x+width<=0||y+height<=0)continue;
+      const source=document.createElement('canvas');source.width=raster.width;source.height=raster.height;source.getContext('2d')?.putImageData(raster.image,0,0);
+      context.save();context.globalAlpha=faded ? .35 : 1;context.drawImage(source,x,y,width,height);context.restore();
+    }
+  },[tile,frame.bucket,drafts]);
+  const x=tile.column*512/frame.bucket/frame.width*100,y=tile.row*512/frame.bucket/frame.height*100,w=512/frame.bucket/frame.width*100,h=512/frame.bucket/frame.height*100;
+  const delta=(percent:number,extent:number,origin:number)=>{if(!pixel)return 0;const raw=percent*extent/100;return (snapInkOffset(origin,raw,pixel.dpr)??raw)-raw;};
+  const l=delta(x,pixel?.w??0,pixel?.x??0),t=delta(y,pixel?.h??0,pixel?.y??0),r=delta(x+w,pixel?.w??0,pixel?.x??0),b=delta(y+h,pixel?.h??0,pixel?.y??0);
+  return <canvas ref={ref} className="ink-raster ink-tile" aria-hidden="true" data-tile={`${tile.column},${tile.row}`} style={{left:`calc(${x}% + ${l}px)`,top:`calc(${y}% + ${t}px)`,width:`calc(${w}% + ${r-l}px)`,height:`calc(${h}% + ${b-t}px)`}}/>;
+}
+const frameUrls=(frame:InkTileFrame|null)=>frame?[frame.base,...frame.tiles.map(tile=>tile.url)]:[];
+// The existing bitmap is the fallback until the entire visible tile set and
+// its base have decoded. A zoom retains the previous set until the new one is
+// committed in a single animation frame.
+function useInkTiles(box:React.RefObject<HTMLDivElement|null>,page:InkPage|undefined,phase:string,syncState:string|undefined,pendingCount:number,allowReplace:boolean,cover:InkStroke[]){
+  const context=useContext(InkPageContext);
+  const [frame,setFrame]=useState<InkTileFrame|null>(null);
+  const [tileRetry,setTileRetry]=useState(0);
+  const frameRef=useRef<InkTileFrame|null>(null);frameRef.current=frame;
+  const [view,setView]=useState<{bucket:number;startX:number;endX:number;startY:number;endY:number;visibleX0:number;visibleX1:number;visibleY0:number;visibleY1:number}|null>(null);
+  const currentUrls=useRef<string[]>([]);
+  useLayoutEffect(()=>{if(frameRef.current&&(frameRef.current.noteId!==context?.noteId||frameRef.current.pageId!==page?.id))setFrame(null);},[context?.noteId,page?.id]);
+  useLayoutEffect(()=>{const next=frameUrls(frame);for(const url of currentUrls.current)if(!next.includes(url))URL.revokeObjectURL(url);currentUrls.current=next;},[frame]);
+  useEffect(()=>()=>{for(const url of currentUrls.current)URL.revokeObjectURL(url);currentUrls.current=[];},[]);
+  const eligible=!!context&&!context.suppressTiles&&context.visible&&!!page&&phase==='ready'&&(context.textless||['ink-reconstructed','page-reconstructed','pdf-with-notes'].includes(context.page.previewKind??''));
+  useLayoutEffect(()=>{
+    const element=box.current;if(!eligible||!element||!page){setView(null);return;}
+    const scroll=element.closest('.canvas-scroll');if(!scroll)return;let raf=0;
+    const measure=()=>{raf=0;const rect=element.getBoundingClientRect(),viewport=scroll.getBoundingClientRect();
+      const bucket=inkTileBucket(rect.width*(window.devicePixelRatio||1)/page.width);if(!bucket){setView(null);return;}
+      const all=visibleInkTiles(rect,viewport,page,bucket,1),visible=visibleInkTiles(rect,viewport,page,bucket,0);if(!all||!visible){setView(null);return;}
+      const next={bucket,startX:all.columnStart,endX:all.columnEnd,startY:all.rowStart,endY:all.rowEnd,visibleX0:visible.columnStart,visibleX1:visible.columnEnd,visibleY0:visible.rowStart,visibleY1:visible.rowEnd};
+      setView(old=>old&&Object.keys(next).every(key=>old[key as keyof typeof next]===next[key as keyof typeof next])?old:next);
+    };
+    const schedule=()=>{if(!raf)raf=requestAnimationFrame(measure);};
+    const observer=new ResizeObserver(schedule);observer.observe(element);observer.observe(scroll);scroll.addEventListener('scroll',schedule,{passive:true});measure();
+    return()=>{observer.disconnect();scroll.removeEventListener('scroll',schedule);if(raf)cancelAnimationFrame(raf);};
+  },[eligible,page?.id,page?.width,page?.height]);
+  useEffect(()=>{
+    if(!context||!view||!page||!eligible)return;
+    const abort=new AbortController();const created:string[]=[];let committed=false,raf=0,retry:ReturnType<typeof setTimeout>|undefined;
+    const pause=()=>new Promise<void>((resolve,reject)=>{const onAbort=()=>{clearTimeout(timer);reject(new DOMException('Aborted','AbortError'));};const timer=setTimeout(()=>{abort.signal.removeEventListener('abort',onAbort);resolve();},100);abort.signal.addEventListener('abort',onAbort,{once:true});});
+    const fetchImage=async(path:string)=>{
+      for(;;){const response=await request(path,{signal:abort.signal});if(response.status===202){await pause();continue;}
+        if(response.headers.get('content-type')?.split(';')[0].trim()!=='image/png')throw Error('invalid tile');
+        const blob=await response.blob();if(abort.signal.aborted)throw new DOMException('Aborted','AbortError');
+        const url=URL.createObjectURL(blob);created.push(url);const image=new Image();image.src=url;await image.decode();
+        return {url,image,token:response.headers.get('x-ink-snapshot'),supported:response.headers.get('x-ink-tiles')};
+      }
+    };
+    const run=async()=>{
+      const prefix=notePath(context.noteId)+`/preview?page=${page.index}`+(context.revision===undefined?'':`&revision=${context.revision}`);
+      const base=await fetchImage(prefix+(context.textless?'&variant=notextbase':'&variant=noink'));if(base.supported!=='1'||!base.token)throw Error('unsupported layer');
+      // Never substitute a different snapshot while queued strokes are still
+      // represented by the overlay. The previous frame remains visible.
+      if(frameRef.current?.noteId===context.noteId&&frameRef.current.pageId===page.id&&(pendingCount||!allowReplace)&&frameRef.current.token!==base.token)return;
+      const coords:{column:number;row:number;visible:boolean}[]=[];
+      for(let row=view.startY;row<=view.endY;row++)for(let column=view.startX;column<=view.endX;column++)coords.push({column,row,visible:column>=view.visibleX0&&column<=view.visibleX1&&row>=view.visibleY0&&row<=view.visibleY1});
+      const existing=new Set(coords.map(item=>`${item.column},${item.row}`));
+      for(const stroke of cover){if(stroke.pageId!==page.id||!stroke.points.length)continue;const pad=stroke.size/2+4;
+        const xs=stroke.points.map(point=>point.x),ys=stroke.points.map(point=>point.y);
+        const x0=Math.max(0,Math.floor((Math.min(...xs)-pad)*view.bucket/512)),x1=Math.min(Math.ceil(page.width*view.bucket/512)-1,Math.floor((Math.max(...xs)+pad)*view.bucket/512));
+        const y0=Math.max(0,Math.floor((Math.min(...ys)-pad)*view.bucket/512)),y1=Math.min(Math.ceil(page.height*view.bucket/512)-1,Math.floor((Math.max(...ys)+pad)*view.bucket/512));
+        for(let row=y0;row<=y1;row++)for(let column=x0;column<=x1;column++){const key=`${column},${row}`;if(!existing.has(key)){existing.add(key);coords.push({column,row,visible:false});}}
+      }
+      coords.sort((a,b)=>Number(b.visible)-Number(a.visible));
+      const tiles:InkTileImage[]=[];
+      for(const {column,row} of coords){const tile=await fetchImage(prefix+`&layer=${context.textless?'textink':'ink'}&scale=${view.bucket}&tile=${column},${row}&snapshot=${base.token}`);if(tile.token!==base.token)throw Error('snapshot changed');tiles.push({column,row,url:tile.url,image:tile.image});}
+      if(abort.signal.aborted)return;
+      const next={noteId:context.noteId,pageId:page.id,base:base.url,token:base.token,bucket:view.bucket,width:page.width,height:page.height,tiles,textless:context.textless};
+      raf=requestAnimationFrame(()=>{if(abort.signal.aborted)return;committed=true;setFrame(next);});
+    };
+    void run().catch(error=>{
+      if(abort.signal.aborted)return;
+      if(error?.message==='unsupported layer'||(error instanceof ApiError&&[400,401,403,404].includes(error.status))){if(context.textless)context.onTextLayerFailed?.(page.index);return;}
+      // A source can change between its base and tile requests. Retry with a
+      // fresh token while retaining the old, decoded frame.
+      retry=setTimeout(()=>setTileRetry(value=>value+1),error instanceof ApiError&&error.status===409?250:2000);
+    }).finally(()=>{if(!committed&&!raf){for(const url of created)URL.revokeObjectURL(url);}});
+    return()=>{abort.abort();if(raf)cancelAnimationFrame(raf);if(retry)clearTimeout(retry);if(!committed)for(const url of created)URL.revokeObjectURL(url);};
+  },[eligible,context?.noteId,context?.revision,context?.textless,page?.id,page?.width,page?.height,view,syncState,pendingCount,allowReplace,tileRetry,cover.map(stroke=>stroke.id).join('|')]);
+  useEffect(()=>{if(context?.textless&&frame?.textless&&frame.noteId===context.noteId&&frame.pageId===page?.id)context.onTextLayerReady?.(page.index);},[context?.textless,context?.noteId,context?.onTextLayerReady,frame,page?.id,page?.index]);
+  return eligible&&frame?.noteId===context?.noteId&&frame?.pageId===page?.id&&frame.textless===context?.textless?frame:null;
 }
 // Optional probe for headless timing (tests set window.__inkLiveProbe = []).
 type LiveProbe={kind:'tip'|'exact';event:number;painted:number;points:number}[];
@@ -599,13 +710,29 @@ export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineC
   // Live pen renderer (WebAssembly). Without it every stroke keeps the SVG preview.
   const live=useInkLive(phase==='ready');
   const pageBox=useRef<HTMLDivElement>(null);const liveCanvas=useRef<HTMLCanvasElement>(null);
-  const [pixel,setPixel]=useState<{w:number;h:number;dpr:number}|null>(null);
+  const pagePending=pending.filter(stroke=>stroke.pageId===page?.id);
+  const previousPending=useRef<{pageId:string|undefined;token:string|null;strokes:InkStroke[]}>({pageId:undefined,token:null,strokes:[]});
+  const [retainedPending,setRetainedPending]=useState<{stroke:InkStroke;token:string}[]>([]);
+  const cover=[...previousPending.current.strokes,...retainedPending.map(item=>item.stroke)];
+  const allowReplace=cover.every(stroke=>pagePending.some(item=>item.id===stroke.id)||page?.strokes.some(item=>item.id===stroke.id));
+  const tileFrame=useInkTiles(pageBox,page,phase,controller.noteSyncState,pagePending.length,allowReplace,cover);
+  const pendingSignature=pagePending.map(stroke=>stroke.id).join('|');
+  useLayoutEffect(()=>{
+    const previous=previousPending.current,token=tileFrame?.token??null;
+    const same=(a:InkStroke,b:InkStroke)=>a.pageId===b.pageId&&a.colorARGB===b.colorARGB&&a.size===b.size&&a.points.length===b.points.length&&a.points.every((point,i)=>point.x===b.points[i].x&&point.y===b.points[i].y&&point.pressure===b.points[i].pressure&&point.timeMs===b.points[i].timeMs);
+    const removed=previous.pageId===page?.id&&previous.token&&previous.token===token?previous.strokes.filter(stroke=>!pagePending.some(current=>same(stroke,current))):[];
+    setRetainedPending(old=>{const kept=old.filter(item=>item.token===token&&!pagePending.some(current=>same(item.stroke,current)));
+      for(const stroke of removed)if(!kept.some(item=>same(item.stroke,stroke)))kept.push({stroke,token:previous.token!});
+      return kept.length===old.length&&kept.every((item,i)=>item===old[i])?old:kept;});
+    previousPending.current={pageId:page?.id,token,strokes:pagePending};
+  },[page?.id,pendingSignature,tileFrame?.token]);
+  const [pixel,setPixel]=useState<PixelBox|null>(null);
   useLayoutEffect(()=>{
     const element=pageBox.current;if(!element)return;
-    const measure=()=>{const rect=element.getBoundingClientRect(),dpr=window.devicePixelRatio||1;setPixel(previous=>previous&&previous.w===rect.width&&previous.h===rect.height&&previous.dpr===dpr?previous:rect.width&&rect.height?{w:rect.width,h:rect.height,dpr}:null);};
-    measure();if(typeof ResizeObserver!=='function')return;const observer=new ResizeObserver(measure);observer.observe(element);return()=>observer.disconnect();
-  },[!!page,phase,!!live]);
-  const scale=pixel&&page?pixel.w*pixel.dpr/page.width:0;
+    const measure=()=>{const rect=element.getBoundingClientRect(),dpr=window.devicePixelRatio||1;setPixel(previous=>previous&&previous.w===rect.width&&previous.h===rect.height&&previous.x===rect.left&&previous.y===rect.top&&previous.dpr===dpr?previous:rect.width&&rect.height?{w:rect.width,h:rect.height,x:rect.left,y:rect.top,dpr}:null);};
+    measure();if(typeof ResizeObserver!=='function')return;const observer=new ResizeObserver(measure);observer.observe(element);const scroll=tileFrame?element.closest('.canvas-scroll'):null;scroll?.addEventListener('scroll',measure,{passive:true});return()=>{observer.disconnect();scroll?.removeEventListener('scroll',measure);};
+  },[!!page,phase,!!live,!!tileFrame]);
+  const scale=pixel&&page?(tileFrame?.bucket??pixel.w*pixel.dpr/page.width):0;
   // The pen the writer will store for this stroke; null keeps the SVG preview.
   const specOf=(stroke:InkStroke):LivePenSpec|null=>{
     if(!page||isHighlighter(stroke)||!Number.isFinite(stroke.size)||stroke.size<=0)return null;
@@ -832,7 +959,7 @@ export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineC
   // Without an image (still loading, failed or none) the ink layer sits on a
   // blank sheet of the page's own size and colour; PageStack keeps the calm
   // placeholder text underneath.
-  const image=imageUrl?<img className="page-image" src={imageUrl} alt={`Notun ${pageIndex+1}. sayfası`} onError={onImageError}/>:null;
+  const image=(tileFrame?.base??imageUrl)?<img className="page-image" src={tileFrame?.base??imageUrl!} alt={`Notun ${pageIndex+1}. sayfası`} onError={onImageError}/>:null;
   if(phase!=='ready'||!page||!projection)return <>{null}{null}<div className="ink-page" ref={pageBox}>{image}</div></>;
   const geometryById=new Map((geometry?.strokes??[]).map(stroke=>[stroke.id,stroke]));
   const dragOffset=(id:string,draftStroke:boolean):[number,number]=>drag&&(draftStroke?selectedDrafts.has(id):selectedSaved.has(id))?drag:[0,0];
@@ -845,20 +972,22 @@ export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineC
   const mode=drawing&&available?(selecting?'selecting':erasing?'erasing':'drawing'):'';
   // Pen strokes the live renderer draws (same pixels as while drawing); the
   // rest (highlighters, one-sample taps, pens without a known template) stay SVG.
-  const pageStrokes=[...pending,...strokes].filter(stroke=>stroke.pageId===page.id);
+  const pageStrokes=[...pending,...strokes,...retainedPending.filter(item=>item.token===tileFrame?.token).map(item=>item.stroke)].filter(stroke=>stroke.pageId===page.id);
   // A stroke still being rasterized shows its pen-up pixels (handoff) or,
   // when it has none, keeps the SVG preview until its raster is ready.
   const rastered=pageStrokes.flatMap(stroke=>{const value=rasterOf(stroke);const raster=value??(value===undefined?handoffs[stroke.id]??shown.current.get(stroke.id):undefined);if(raster)shown.current.set(stroke.id,raster);else shown.current.delete(stroke.id);return raster?[{stroke,raster}]:[];});
   for(const id of [...shown.current.keys()])if(!pageStrokes.some(stroke=>stroke.id===id))shown.current.delete(id);
   const rasters=new Set(rastered.map(item=>item.stroke.id));
+  const tiledDrafts:TileDraft[]=tileFrame?rastered.map(({stroke,raster})=>{const [dx,dy]=dragOffset(stroke.id,true);return {raster,dx,dy,faded:hitDrafts.has(stroke.id)};}):[];
   return <>
     {null}{null}
-    <div className="ink-page" ref={pageBox}>{image}
+    <div className="ink-page" ref={pageBox} data-ink-overlay-count={pageStrokes.length} data-ink-bucket={tileFrame?.bucket}>{image}
+      {tileFrame&&tileFrame.tiles.map(tile=><InkTileCanvas key={`${tile.column}:${tile.row}`} tile={tile} frame={tileFrame} pixel={pixel} drafts={tiledDrafts}/>)}
       {(masks.length>0||movedSaved.length>0)&&<svg className="ink-underlay" style={{['--ink-erase-mask' as string]:maskColor}} viewBox={`0 0 ${page.width} ${page.height}`} preserveAspectRatio="none" aria-hidden="true">
         {masks.map(stroke=><Mask key={'m'+stroke.id} className="ink-erase-mask" points={stroke.points} size={stroke.size}/>)}
         {movedSaved.map(({stroke,dx,dy})=><MovedStroke key={'v'+stroke.id} points={stroke.points} size={stroke.size} colorARGB={meta.get(stroke.id)?.colorARGB??0xff252525} dx={dx} dy={dy}/>)}
       </svg>}
-      {pixel&&rastered.map(({stroke,raster})=>{const [dx,dy]=dragOffset(stroke.id,true);return <RasterCanvas key={stroke.id} id={stroke.id} raster={raster} unit={pixel.w/page.width} dx={dx*pixel.w/page.width} dy={dy*pixel.h/page.height} faded={hitDrafts.has(stroke.id)}/>;})}
+      {!tileFrame&&pixel&&rastered.map(({stroke,raster})=>{const [dx,dy]=dragOffset(stroke.id,true);return <RasterCanvas key={stroke.id} id={stroke.id} raster={raster} pageWidth={page.width} pageHeight={page.height} dx={dx} dy={dy} faded={hitDrafts.has(stroke.id)} pixel={pixel} snap={false}/>;})}
       {live&&<canvas ref={liveCanvas} className="ink-live" aria-hidden="true"/>}
       <svg ref={canvas} className={`ink-overlay ${mode}${drag?" moving":""}`} style={{['--ink-erase-mask' as string]:maskColor}} viewBox={`0 0 ${page.width} ${page.height}`} preserveAspectRatio="none" aria-label={isCurrent?(selecting?'Seçim alanı':erasing?'Silgi alanı':'Çizim alanı'):`${pageIndex+1}. sayfa`} onPointerDown={event=>{
       if(!drawing||!available||gesture.current||eraseGesture.current||selectGesture.current||event.button!==0)return;
@@ -881,7 +1010,7 @@ export function InkEditor({controller,pageIndex,current:isCurrent=true,baselineC
       gesture.current={pointer:event.pointerId,started:event.timeStamp,stroke:marker?{id:crypto.randomUUID(),pageId:page.id,pageSize:[page.width,page.height],sourceStrokeId:'',kind:'highlighter',colorARGB:controller.highlighterStyle.colorARGB,size:controller.highlighterStyle.size,points:[]}:{id:crypto.randomUUID(),pageId:page.id,pageSize:[page.width,page.height],sourceStrokeId:source?.id??'',kind:source?.kind??'fountain',colorARGB:controller.penStyle.colorARGB??source?.colorARGB??FIRST_STROKE_COLOR,size:controller.penStyle.size??source?.size??FIRST_STROKE_SIZE,points:[]}};
       const spec=!marker&&live&&scale&&pixel&&liveCanvas.current?specOf(gesture.current.stroke):null;
       if(spec&&pixel){
-        const canvas=liveCanvas.current!;const width=Math.round(pixel.w*pixel.dpr),height=Math.round(pixel.h*pixel.dpr);if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;}
+        const canvas=liveCanvas.current!;const width=tileFrame?Math.ceil(page.width*scale):Math.round(pixel.w*pixel.dpr),height=tileFrame?Math.ceil(page.height*scale):Math.round(pixel.h*pixel.dpr);if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;}
         const {color,opacity}=inkColor(spec.colorARGB);
         liveGesture.current={spec,scale,width:spec.size,color,opacity,predicted:[],expire:0,frame:0,busy:false,rendered:0,exact:null,tail:null,events:[],exactEvents:[]};
       }

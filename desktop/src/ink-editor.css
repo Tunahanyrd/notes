@@ -7,3 +7,11 @@
 .ink-underlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:hidden}.ink-raster{position:absolute;pointer-events:none;max-width:none}.ink-live{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 /* Zoomed pages may be wider than the window (horizontal scroll), like Samsung Notes. */
 .page-document{max-width:none}
+@font-face{font-family:PageRoboto;src:url('/page-fonts/Roboto-Regular.ttf');font-weight:400;font-style:normal}
+@font-face{font-family:PageRoboto;src:url('/page-fonts/Roboto-Bold.ttf');font-weight:700;font-style:normal}
+@font-face{font-family:PageRoboto;src:url('/page-fonts/Roboto-Italic.ttf');font-weight:400;font-style:italic}
+@font-face{font-family:PageRoboto;src:url('/page-fonts/Roboto-BoldItalic.ttf');font-weight:700;font-style:italic}
+.page-stack{position:relative}
+.inline-text-overlay{position:absolute;z-index:2;background:transparent;min-height:1em}
+.inline-text-overlay .rich-document-body{min-height:1.5em;font-family:PageRoboto,sans-serif;font-size:17px;line-height:1.5}
+.page-sheet .ink-overlay,.page-sheet .ink-live,.page-sheet .ink-raster{z-index:3}

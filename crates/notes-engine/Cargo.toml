@@ -32,3 +32,6 @@ libc = "=0.2.191"
 [features]
 # Statically link SQLite (packaged builds without a system libsqlite3).
 bundled-sqlite = ["rs_store/bundled"]
+
+[dev-dependencies]
+rs_store = { path = "../rs-store", package = "rs-store", features = ["read-tracing"] }

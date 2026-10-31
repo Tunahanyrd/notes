@@ -17,13 +17,13 @@ separate program), bubblewrap (LGPL-2.0+, separate program).
 
 ## Rust: Rust engine workspace
 
-Lock file: `Cargo.lock` (122 packages)
+Lock file: `Cargo.lock` (130 packages)
 
-- MIT OR Apache-2.0: 79
-- MIT: 16
-- Apache-2.0 OR MIT: 10
+- MIT OR Apache-2.0: 81
+- MIT: 17
+- Apache-2.0 OR MIT: 12
+- BSD-3-Clause: 5
 - Unlicense OR MIT: 3
-- BSD-3-Clause: 2
 - MIT OR Apache-2.0 OR Zlib: 2
 - MIT OR Zlib OR Apache-2.0: 2
 - Zlib: 2
@@ -60,6 +60,7 @@ Lock file: `Cargo.lock` (122 packages)
 | data-url | 0.3.2 | MIT OR Apache-2.0 | crates.io |
 | digest | 0.10.7 | MIT OR Apache-2.0 | crates.io |
 | digest | 0.11.3 | MIT OR Apache-2.0 | crates.io |
+| equivalent | 1.0.3 | Apache-2.0 OR MIT | crates.io |
 | euclid | 0.22.14 | MIT OR Apache-2.0 | crates.io |
 | fallible-iterator | 0.3.0 | MIT OR Apache-2.0 | crates.io |
 | fallible-streaming-iterator | 0.1.9 | MIT OR Apache-2.0 | crates.io |
@@ -82,7 +83,9 @@ Lock file: `Cargo.lock` (122 packages)
 | hybrid-array | 0.4.15 | MIT OR Apache-2.0 | crates.io |
 | image-webp | 0.2.4 | MIT OR Apache-2.0 | crates.io |
 | imagesize | 0.15.0 | MIT | crates.io |
+| indexmap | 2.14.2 | Apache-2.0 OR MIT | crates.io |
 | itoa | 1.0.18 | MIT OR Apache-2.0 | crates.io |
+| jobserver | 0.1.35 | MIT OR Apache-2.0 | crates.io |
 | js-sys | 0.3.104 | MIT OR Apache-2.0 | crates.io |
 | kurbo | 0.13.1 | Apache-2.0 OR MIT | crates.io |
 | libc | 0.2.191 | MIT OR Apache-2.0 | crates.io |
@@ -141,6 +144,7 @@ Lock file: `Cargo.lock` (122 packages)
 | thiserror-impl | 2.0.21 | MIT OR Apache-2.0 | crates.io |
 | tiny-skia | 0.12.0 | BSD-3-Clause | crates.io |
 | tiny-skia-path | 0.12.0 | BSD-3-Clause | crates.io |
+| typed-path | 0.12.4 | MIT OR Apache-2.0 | crates.io |
 | typenum | 1.20.1 | MIT OR Apache-2.0 | crates.io |
 | unicode-ident | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 | crates.io |
 | usvg | 0.49.0 | Apache-2.0 OR MIT | crates.io |
@@ -154,24 +158,28 @@ Lock file: `Cargo.lock` (122 packages)
 | weezl | 0.1.12 | MIT OR Apache-2.0 | crates.io |
 | windows-link | 0.2.1 | MIT OR Apache-2.0 | crates.io |
 | zeroize | 1.9.1 | Apache-2.0 OR MIT | crates.io |
+| zip | 8.2.0 | MIT | crates.io |
 | zlib-rs | 0.6.8 | Zlib | crates.io |
 | zmij | 1.0.23 | MIT | crates.io |
+| zstd | 0.14.3 | BSD-3-Clause | crates.io |
+| zstd-safe | 8.2.0 | BSD-3-Clause | crates.io |
+| zstd-sys | 2.1.2+zstd.1.5.7 | BSD-3-Clause | crates.io |
 | zune-core | 0.5.3 | MIT OR Apache-2.0 OR Zlib | crates.io |
 | zune-jpeg | 0.5.15 | MIT OR Apache-2.0 OR Zlib | crates.io |
 
 ## Rust: Tauri desktop shell
 
-Lock file: `desktop/src-tauri/Cargo.lock` (463 packages)
+Lock file: `desktop/src-tauri/Cargo.lock` (469 packages)
 
-- MIT OR Apache-2.0: 228
-- MIT: 110
+- MIT OR Apache-2.0: 230
+- MIT: 111
 - Apache-2.0 OR MIT: 40
 - Unicode-3.0: 18
 - Zlib OR Apache-2.0 OR MIT: 17
 - Unlicense OR MIT: 12
+- BSD-3-Clause: 7
 - Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT: 5
 - MPL-2.0: 5
-- BSD-3-Clause: 4
 - MIT OR Apache-2.0 OR Zlib: 4
 - Apache-2.0: 3
 - BSD-3-Clause OR MIT OR Apache-2.0: 2
@@ -372,6 +380,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (463 packages)
 | jni-sys | 0.3.1 | MIT OR Apache-2.0 | crates.io |
 | jni-sys | 0.4.1 | MIT OR Apache-2.0 | crates.io |
 | jni-sys-macros | 0.4.1 | MIT OR Apache-2.0 | crates.io |
+| jobserver | 0.1.35 | MIT OR Apache-2.0 | crates.io |
 | js-sys | 0.3.104 | MIT OR Apache-2.0 | crates.io |
 | json-patch | 4.2.0 | MIT OR Apache-2.0 | crates.io |
 | jsonptr | 0.7.1 | MIT OR Apache-2.0 | crates.io |
@@ -573,6 +582,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (463 packages)
 | tracing-core | 0.1.36 | MIT | crates.io |
 | tray-icon | 0.25.1 | MIT OR Apache-2.0 | crates.io |
 | try-lock | 0.2.5 | MIT | crates.io |
+| typed-path | 0.12.4 | MIT OR Apache-2.0 | crates.io |
 | typeid | 1.0.3 | MIT OR Apache-2.0 | crates.io |
 | typenum | 1.20.1 | MIT OR Apache-2.0 | crates.io |
 | unicode-ident | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 | crates.io |
@@ -649,8 +659,12 @@ Lock file: `desktop/src-tauri/Cargo.lock` (463 packages)
 | zerotrie | 0.2.5 | Unicode-3.0 | crates.io |
 | zerovec | 0.11.9 | Unicode-3.0 | crates.io |
 | zerovec-derive | 0.11.7 | Unicode-3.0 | crates.io |
+| zip | 8.2.0 | MIT | crates.io |
 | zlib-rs | 0.6.8 | Zlib | crates.io |
 | zmij | 1.0.23 | MIT | crates.io |
+| zstd | 0.14.3 | BSD-3-Clause | crates.io |
+| zstd-safe | 8.2.0 | BSD-3-Clause | crates.io |
+| zstd-sys | 2.1.2+zstd.1.5.7 | BSD-3-Clause | crates.io |
 | zune-core | 0.5.3 | MIT OR Apache-2.0 OR Zlib | crates.io |
 | zune-jpeg | 0.5.15 | MIT OR Apache-2.0 OR Zlib | crates.io |
 
@@ -1057,3 +1071,8 @@ Lock file: `desktop/package-lock.json` (135 packages)
 
 The UI icons in `desktop/assets-free/windows-assets/` are rendered from
 Lucide (ISC; portions MIT from Feather). See `desktop/assets-free/LICENSE`.
+
+## Fonts
+
+The page text editor uses Roboto (Apache-2.0) in `desktop/public/page-fonts/`, the same files
+the pinned sdocx crate bundles. See `desktop/public/page-fonts/Roboto-LICENSE.txt`.

@@ -235,6 +235,13 @@ impl CloudFactory for NativeCloud {
     fn open(&self, session: &Path, work_dir: &Path) -> R<Arc<dyn Cloud>> {
         Ok(Arc::new(Api(Arc::new(CloudApi::new(session, work_dir, (self.options)())?))))
     }
+    fn open_for_library(&self, session: &Path, work_dir: &Path, container_directory: Option<&Path>) -> R<Arc<dyn Cloud>> {
+        let mut options = (self.options)();
+        if let Some(directory) = container_directory {
+            options = options.with_container_store(directory);
+        }
+        Ok(Arc::new(Api(Arc::new(CloudApi::new(session, work_dir, options)?))))
+    }
     fn metadata(&self, api: &Arc<dyn Cloud>) -> Option<Arc<dyn Metadata>> {
         api.metadata()
     }

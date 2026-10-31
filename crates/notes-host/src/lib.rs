@@ -13,6 +13,7 @@ pub mod snapshot;
 pub mod deps;
 pub mod host;
 pub mod areas;
+pub mod migration_projection;
 
 pub use deps::PureDeps;
 pub use err::{Fail, Kind};

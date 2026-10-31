@@ -13,6 +13,8 @@
 :root[data-dark-pages="true"] .rich-document-body .native-link{color:#8bbcff!important}
 :root[data-dark-pages="true"] .page-sheet[data-page-dark="false"]{background:#000!important}
 :root[data-dark-pages="true"] .page-sheet[data-page-dark="false"] .ink-page,:root[data-dark-pages="true"] .page-sheet[data-page-dark="false"] .shape-overlay{filter:invert(1) hue-rotate(180deg)}
+:root[data-dark-pages="true"] .page-sheet[data-page-dark="false"] .ink-page{filter:none}
+:root[data-dark-pages="true"] .page-sheet[data-page-dark="false"] .page-image,:root[data-dark-pages="true"] .page-sheet[data-page-dark="false"] .ink-underlay,:root[data-dark-pages="true"] .page-sheet[data-page-dark="false"] .ink-live,:root[data-dark-pages="true"] .page-sheet[data-page-dark="false"] .ink-raster,:root[data-dark-pages="true"] .page-sheet[data-page-dark="false"] .ink-overlay{filter:invert(1) hue-rotate(180deg)}
 :root[data-theme="dark"]{--muted:#bcbcc2;--text-secondary:#bcbcc2;--line:#55555b}
 :root[data-theme="dark"] .settings-inline-error,:root[data-theme="dark"] .shortcut-error,:root[data-theme="dark"] .note-drag-text small.blocked{color:#ff9a8b}
 :root[data-theme="dark"] .account-connected{color:#a5cba2}

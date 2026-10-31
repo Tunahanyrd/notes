@@ -59,6 +59,20 @@ impl Error {
     }
 }
 
+/// Map the pure document parser error exactly as the native host adapter.
+pub fn from_doc(e: _doc::Error) -> Error {
+    use _doc::Error as D;
+    match e {
+        D::Payload(m) => Error::new(Kind::Payload, m),
+        D::Document(m) => Error::new(Kind::Doc, m.to_string()),
+        D::Value(m) => Error::new(Kind::Value, m.to_string()),
+        D::Type(m) => Error::new(Kind::Type, m.to_string()),
+        D::XmlParse(m) => Error::new(Kind::Parse, m),
+        D::Io(e) => Error::new(Kind::Other, e.to_string()),
+        D::External(_) => Error::new(Kind::Other, "external error"),
+    }
+}
+
 pub type R<T> = Result<T, Error>;
 
 pub fn ink<T>(msg: &str) -> R<T> {

@@ -40,6 +40,7 @@ pub struct Options {
     pub clock: Clock,
     pub random: Arc<dyn Random>,
     pub changes_parser: Option<ChangesParser>,
+    pub container_directory: Option<PathBuf>,
 }
 
 impl Default for Options {
@@ -50,11 +51,17 @@ impl Default for Options {
             clock: system_clock(),
             random: Arc::new(OsRandom),
             changes_parser: None,
+            container_directory: None,
         }
     }
 }
 
 impl Options {
+    /// Enable immutable container-backed operation receipts for a schema 7 library.
+    pub fn with_container_store(mut self, directory: impl Into<PathBuf>) -> Self {
+        self.container_directory = Some(directory.into());
+        self
+    }
     pub fn with_transport(mut self, transport: impl Transport + 'static) -> Self {
         self.transport = Arc::new(transport);
         self
@@ -284,6 +291,7 @@ pub struct CloudApi {
     pub(crate) clock: Clock,
     pub(crate) random: Arc<dyn Random>,
     pub(crate) changes_parser: Option<ChangesParser>,
+    container_directory: Option<PathBuf>,
 }
 
 fn sha_identity(client: &str, user: &str) -> String {
@@ -335,9 +343,18 @@ impl CloudApi {
             clock: options.clock,
             random: options.random,
             changes_parser: options.changes_parser,
+            container_directory: options.container_directory,
         };
         api.validate_identity()?;
         Ok(api)
+    }
+
+    pub(crate) fn save_operation_result(&self, output: &Path, result: &Val) -> R<()> {
+        crate::result_store::save_result(self.container_directory.as_deref(), output, result)
+    }
+
+    pub(crate) fn load_operation_result(&self, output: &Path) -> R<Val> {
+        crate::result_store::load_result(self.container_directory.as_deref(), output)
     }
 
     /// `self._clock()`
@@ -713,7 +730,7 @@ impl CloudApi {
                     return Err(Fail::api("operation_mismatch", "Bu işlem kimliği farklı bir kayıt için kullanılmış."));
                 }
                 if output.join("result.json").exists() {
-                    return Ok((output.clone(), Some(load_json(&output.join("result.json"), 96 * 1024 * 1024)?)));
+                    return Ok((output.clone(), Some(self.load_operation_result(&output)?)));
                 }
                 if output.join("published.json").exists() {
                     return Ok((output, Some(reconcile(self, operation_id)?)));
@@ -811,7 +828,7 @@ impl CloudApi {
     pub fn reconcile(&self, operation_id: &str) -> R<Val> {
         let output = self.work_dir.join("operations").join(check_uuid(operation_id)?);
         if output.join("result.json").exists() {
-            return load_json(&output.join("result.json"), 96 * 1024 * 1024);
+            return self.load_operation_result(&output);
         }
         let intent = load_json(&output.join("intent.json"), 2 * 1024 * 1024)?;
         if !py_eq(dget(&intent, "accountFingerprint")?.unwrap_or(&Val::Null), &Val::s(self.identity())) {
@@ -867,7 +884,7 @@ impl CloudApi {
             Err(e) => return Err(e),
         };
         let result = result_val(&server, &snapshot);
-        save_json(&output.join("result.json"), &result)?;
+        self.save_operation_result(&output, &result)?;
         Ok(result)
     }
 

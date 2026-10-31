@@ -10,6 +10,7 @@ use rs_ink::core::payload::CanvasPreviewCandidate;
 use rs_render::pdf_background as rp;
 use rs_render::pixels as px;
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -90,6 +91,46 @@ pub fn valid_cached_pdf(path: &Path, digest: &str) -> Result<bool, Fail> {
 pub fn cached_pdf(candidate: &PdfBackground, directory: &Path, account: &str) -> Result<Option<PathBuf>, Fail> {
     let path = directory.join(rp::cache_name(account, &candidate.sha256));
     Ok(if valid_cached_pdf(&path, &candidate.sha256)? { Some(path) } else { None })
+}
+
+/// Look up a verified shared content file, importing the old per-account cache
+/// lazily so existing offline libraries keep their PDFs.
+pub fn cached_pdf_shared(candidate: &PdfBackground, directory: &Path, account: &str,
+                         media: &rs_store::media_store::MediaStore) -> Result<Option<PathBuf>, Fail> {
+    if let Some(path) = media.path_verified(&candidate.sha256).map_err(Fail::from)? {
+        return Ok(if valid_cached_pdf(&path, &candidate.sha256)? { Some(path) } else { None });
+    }
+    match cached_pdf(candidate, directory, account)? {
+        Some(path) => Ok(Some(media.put_file(&candidate.sha256, &path).map_err(Fail::from)?)),
+        None => Ok(None),
+    }
+}
+
+/// Download through the existing bounded transport, then publish the verified
+/// bytes to the shared content store and return its immutable path.
+pub fn fetch_pdf_shared(candidate: &PdfBackground, env: &dyn PreviewEnv, directory: &Path, account: &str,
+                        guard: Option<&dyn Fn() -> Result<(), Fail>>, media: &rs_store::media_store::MediaStore)
+                        -> Result<PathBuf, Fail> {
+    if let Some(path) = cached_pdf_shared(candidate, directory, account, media)? {
+        if let Some(check) = guard { check()?; }
+        return Ok(path);
+    }
+    let directory = private_directory(directory)?;
+    let staging = directory.join(format!(".media-download-{}", token_hex(12)));
+    std::fs::DirBuilder::new().mode(0o700).create(&staging)?;
+    struct Staging { directory: PathBuf, file: PathBuf }
+    impl Drop for Staging {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.file);
+            let _ = std::fs::remove_dir(&self.directory);
+        }
+    }
+    let staging = Staging { file: staging.join(rp::cache_name(account, &candidate.sha256)), directory: staging };
+    let path = fetch_pdf(candidate, env, &staging.directory, account, guard)?;
+    if let Some(check) = guard { check()?; }
+    let shared = media.put_file(&candidate.sha256, &path).map_err(Fail::from)?;
+    if let Some(check) = guard { check()?; }
+    Ok(shared)
 }
 
 /// `(url, headers, temporary, bound, check) -> (status, Location)`

@@ -72,7 +72,7 @@ test('Windows surfaces use restrained corners and reduced-motion respects naviga
   // Surfaces open without an enter animation (on WebKitGTK/Wayland its compositing layer flickered).
   await expect(dialog).toHaveCSS('animation-name','none');
   await dialog.evaluate(element=>Promise.all(element.getAnimations().map(animation=>animation.finished)));
-  await page.screenshot({path:'/tmp/notes-settings-corners.png'});
+  await page.screenshot({path:`${process.env.TMPDIR||'/tmp'}/notes-settings-corners.png`});
   await page.getByRole('button',{name:'Ayarları kapat'}).click();
   await openNote(page,/Aklımda kalanlar/);
   // Switching between the list and a note is instant: no panel slide (it read as surfaces "going and coming back").
@@ -383,7 +383,7 @@ test('real rich editor selection, formatting, lists, history and revisioned API 
   await page.getByRole('button',{name:'Geri al',exact:true}).click();await page.getByRole('button',{name:'Yinele',exact:true}).click();
   await page.keyboard.press('ControlOrMeta+s');await expect(page.locator('.editor-footer')).toHaveAttribute('data-dirty','false');expect(writes).toHaveLength(1);expect(writes[0]).not.toHaveProperty('body');expect(writes[0].expectedRevision).toBe(1);
   expect(model.text).toBe('Merhaba 🌱\nİkinci satır');expect(model.spans).toContainEqual({start:0,end:7,kind:'bold',value:true,interval:3});expect(model.spans).toContainEqual({start:0,end:7,kind:'foregroundColor',value:'#FFFF343B',interval:3});expect(model.spans).toContainEqual({start:0,end:7,kind:'fontSize',value:17,interval:3});expect(model.paragraphs[0]).toMatchObject({index:0,alignment:'center',bullet:{kind:'check',checked:false},indentLevel:{level:1,direction:'ltr'}});
-  await editor.press('ControlOrMeta+End');await page.screenshot({path:'/tmp/notes-rich-editor.png'});await page.reload();await openNote(page,/Aklımda kalanlar/);await expect(page.locator('.rich-document-body span[data-samsung-kind="bold"]')).toHaveText('Merhaba');await expect(page.locator('.rich-document-body p').first()).toHaveAttribute('data-native-bullet','check');
+  await editor.press('ControlOrMeta+End');await page.screenshot({path:`${process.env.TMPDIR||'/tmp'}/notes-rich-editor.png`});await page.reload();await openNote(page,/Aklımda kalanlar/);await expect(page.locator('.rich-document-body span[data-samsung-kind="bold"]')).toHaveText('Merhaba');await expect(page.locator('.rich-document-body p').first()).toHaveAttribute('data-native-bullet','check');
   const beforeZoom=await editor.locator('[data-samsung-kind="fontSize"]').first().boundingBox();await page.getByRole('button',{name:'Yakınlaştır',exact:true}).click();await expect.poll(async()=>{const box=await editor.locator('[data-samsung-kind="fontSize"]').first().boundingBox();return box!.width/beforeZoom!.width;}).toBeGreaterThan(1.09);await page.getByRole('button',{name:'Uzaklaştır',exact:true}).click();
   await page.getByRole('checkbox',{name:'Yapılacak öğesini tamamla'}).click();await expect(page.getByRole('checkbox')).toHaveAttribute('aria-checked','true');
   await editor.click();await page.keyboard.press('ControlOrMeta+End');await page.keyboard.press('Enter');await page.keyboard.type('Yeni satır');await expect(editor).toHaveAttribute('contenteditable','true');
@@ -465,6 +465,12 @@ test('thumbnail pending, terminal failures and revision changes preserve honest 
   await page.getByRole('button',{name:'Ayarlar',exact:true}).click();await page.getByRole('button',{name:'Şimdi eşitle',exact:true}).click();await expect.poll(()=>counts.two).toBe(2);
 });
 
+test('a busy engine answer (503) retries the thumbnail instead of leaving a placeholder',async({page})=>{
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lfoAAAAASUVORK5CYII=','base64');let calls=0;
+  await setup(page,async()=>{await page.route('**/api/notes/one/thumbnail?*',route=>{calls++;return calls===1?route.fulfill({status:503,json:{error:{code:'busy',message:'Sentetik meşgul'}}}):route.fulfill({contentType:'image/png',body:png});});});
+  const first=page.getByRole('button',{name:/Aklımda kalanlar/});await expect(first.locator('.thumbnail-image')).toBeVisible({timeout:12000});expect(calls).toBe(2);
+});
+
 test('pending thumbnails retain all three work slots instead of filling the backend queue',async({page})=>{
   const requested:string[]=[];
   await setup(page,async notes=>{
@@ -512,7 +518,7 @@ test('folder right click replaces ellipsis and supports keyboard, pointer placem
   const viewport=page.viewportSize()!;await folder.evaluate((element,point)=>element.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:point.x,clientY:point.y})),{x:viewport.width-1,y:viewport.height-1});await expect(menu).toBeVisible();await menu.evaluate(element=>Promise.all(element.getAnimations().map(animation=>animation.finished)));
   const box=await menu.boundingBox();expect(box!.x).toBeGreaterThanOrEqual(0);expect(box!.y).toBeGreaterThanOrEqual(0);expect(box!.x+box!.width).toBeLessThanOrEqual(viewport.width);expect(box!.y+box!.height).toBeLessThanOrEqual(viewport.height);
   expect(requests.filter(request=>['POST','PATCH','PUT','DELETE'].includes(request.method))).toHaveLength(0);
-  await page.screenshot({path:'/tmp/notes-context-folder.png'});
+  await page.screenshot({path:`${process.env.TMPDIR||'/tmp'}/notes-context-folder.png`});
 });
 
 test('note right click acts on clicked record without opening it or losing another note draft',async({page})=>{
@@ -586,7 +592,7 @@ test('trash shows Samsung days left, folder cards first and only real restore ac
   await expect(menu.getByRole('menuitem')).toHaveText(['Geri yükle']);await page.keyboard.press('Escape');
   await expect(page.getByRole('button',{name:/Boşalt|Kalıcı/})).toHaveCount(0);
   expect(requests.filter(r=>['PATCH','POST','PUT','DELETE'].includes(r.method))).toHaveLength(0);
-  await page.screenshot({path:'/tmp/notes-trash-parity.png'});
+  await page.screenshot({path:`${process.env.TMPDIR||'/tmp'}/notes-trash-parity.png`});
 });
 
 test('dropdowns close on a press outside them and on Escape',async({page})=>{

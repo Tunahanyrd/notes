@@ -92,6 +92,43 @@ fn redirect_strips_account_headers_and_cache_is_verified_private() {
 }
 
 #[test]
+fn shared_pdf_imports_legacy_cache_and_reuses_it_across_notes() {
+    let dir = TempDir::new();
+    let legacy = dir.path().join("legacy");
+    std::fs::create_dir(&legacy).unwrap();
+    std::fs::set_permissions(&legacy, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let page = cand(0, 0, (2, 3, 22, 13));
+    let old = pdf::fetch_pdf_with(&page, &|| Ok(vec![]), &legacy, "one", None,
+        &|_, _, path, _, _| write_pdf(path)).unwrap();
+    let media = rs_store::media_store::MediaStore::open(dir.path()).unwrap();
+    let shared = pdf::cached_pdf_shared(&page, &legacy, "one", &media).unwrap().unwrap();
+    assert_eq!(shared, dir.path().join("media").join(&page.sha256[..2]).join(&page.sha256[2..4]).join(&page.sha256));
+    std::fs::remove_file(old).unwrap();
+    assert_eq!(pdf::cached_pdf_shared(&page, &legacy, "other", &media).unwrap(), Some(shared));
+}
+
+#[test]
+fn shared_pdf_download_is_verified_and_reused_offline() {
+    let dir = TempDir::new();
+    let legacy = dir.path().join("legacy");
+    let media = rs_store::media_store::MediaStore::open(dir.path()).unwrap();
+    let env = TestEnv::new(None, false);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
+    *env.download.lock().unwrap() = Some(Box::new(move |_, _, path, _, _| {
+        seen.fetch_add(1, Ordering::SeqCst);
+        write_pdf(path)
+    }));
+    let page = cand(0, 0, (2, 3, 22, 13));
+    let path = pdf::fetch_pdf_shared(&page, env.as_ref(), &legacy, "one", None, &media).unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(std::fs::read(&path).unwrap(), pdf_fixture());
+    assert_eq!(std::fs::read_dir(&legacy).unwrap().count(), 0);
+    assert_eq!(pdf::fetch_pdf_shared(&page, env.as_ref(), &legacy, "two", None, &media).unwrap(), path);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn untrusted_redirect_fails_before_second_get() {
     let dir = TempDir::new();
     let calls = AtomicUsize::new(0);

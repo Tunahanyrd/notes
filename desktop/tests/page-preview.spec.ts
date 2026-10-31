@@ -7,7 +7,8 @@ const TOKEN='synthetic_local_session_1234567890';
 const PNG=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==','base64');
 const base={folderId:null,metadataSync:{state:'synced',error:null},createdAt:1777000000000,modifiedAt:1777000000000,revision:1,syncState:'synced',editable:false,titleEditable:true,readOnlyReason:'Bu not çizimler içeriyor.',favorite:false,trashed:false,contentLoaded:true,source:'cloud',error:null,body:'',preview:''};
 type Answer=number|'png';
-async function setup(page:Page,pages:any[],answers:(index:number,attempt:number)=>Answer){
+type ManifestAnswer={status?:number;body:unknown};
+async function setup(page:Page,pages:any[],answers:(index:number,attempt:number)=>Answer,options:{manifest?:(attempt:number)=>ManifestAnswer;manifestAttempts?:number[];retry?:()=>ManifestAnswer}={}){
   const attempts=new Map<number,number>();
   await page.route('**/api/**',async route=>{
     const url=new URL(route.request().url()),path=url.pathname,method=route.request().method();
@@ -18,7 +19,11 @@ async function setup(page:Page,pages:any[],answers:(index:number,attempt:number)
     if(path==='/api/status')return send({connected:true,accountLabel:'Test',loginPending:false,sync:{state:'idle',lastSyncedAt:1777000000000,pending:0,conflicts:0,progress:{processed:0,total:0},error:null},capabilities:{textEditing:true,richTextEditing:true,cloudDelete:false,cloudTrash:true,cloudFavorites:true,cloudFolders:true,attachments:false}});
     if(path==='/api/notes'&&method==='GET')return send({notes:[{...base,id:'paged-note',title:'Sayfalı not'}]});
     if(path.endsWith('/editor'))return send({schemaVersion:1,capabilities:{titleEdit:true,textEdit:false,richStyle:false,inkEdit:true},model:null,reason:'unsupported_body',revision:1});
-    if(path.endsWith('/pages'))return send({providerAvailable:true,pages});
+    if(path.endsWith('/pages')){
+      if(method==='POST'&&options.retry){const answer=options.retry();return send(answer.body,answer.status);}
+      if(options.manifest){const attempt=options.manifestAttempts?.length??0;options.manifestAttempts?.push(attempt);const answer=options.manifest(attempt);return send(answer.body,answer.status);}
+      return send({providerAvailable:true,pages});
+    }
     if(path.endsWith('/preview')){
       const index=Number(url.searchParams.get('page')),attempt=attempts.get(index)??0;attempts.set(index,attempt+1);
       const answer=answers(index,attempt);
@@ -37,6 +42,35 @@ async function setup(page:Page,pages:any[],answers:(index:number,attempt:number)
   return attempts;
 }
 const sheet=(page:Page,index:number)=>page.locator(`.page-sheet[data-page-index="${index}"]`);
+
+test('pending inventory stays loading and becomes a rendered page when ready',async({page})=>{
+  const calls:number[]=[];
+  await setup(page,[{index:0,width:800,height:1000,available:true}],()=> 'png',{manifestAttempts:calls,manifest:attempt=>({body:attempt<2?{pending:true,pages:[],providerAvailable:false}:{providerAvailable:true,pages:[{index:0,width:800,height:1000,available:true}]}})});
+  await expect(page.locator('.document-loading')).toHaveCount(1);
+  await expect(sheet(page,0).locator('img.page-image')).toBeVisible();
+  expect(calls.length).toBe(3);
+});
+
+test('an inventory error stops polling and returns to the note content',async({page})=>{
+  const calls:number[]=[];
+  await setup(page,[],()=> 'png',{manifestAttempts:calls,manifest:attempt=>attempt===0?{body:{pending:true,pages:[],providerAvailable:false}}:{status:503,body:{error:{code:'preview_unavailable',message:'unavailable'}}}});
+  await expect.poll(()=>calls.length).toBe(2);
+  await expect(page.locator('textarea.document-body')).toBeVisible();
+  expect(calls.length).toBe(2);
+  await page.waitForTimeout(800);
+  expect(calls.length).toBe(2);
+});
+
+test('closing a note cancels pending inventory polling',async({page})=>{
+  const calls:number[]=[];
+  await setup(page,[],()=> 'png',{manifestAttempts:calls,manifest:()=>({body:{pending:true,pages:[],providerAvailable:false}})});
+  await expect(page.locator('.document-loading')).toHaveCount(1);
+  await expect.poll(()=>calls.length).toBeGreaterThan(0);
+  await page.getByRole('button',{name:'Not listesine dön'}).click();
+  const stopped=calls.length;
+  await page.waitForTimeout(800);
+  expect(calls.length).toBe(stopped);
+});
 
 test('busy, offline and failed-job answers are retried until the page image arrives',async({page})=>{
   // 503 offline → 429 busy → 202 pending → 422 failed job (retry window) → image.
@@ -114,4 +148,23 @@ test('transient visibility changes during zoom keep the decoded bitmap and avoid
   await page.evaluate(()=>(window as any).__pageVisibility(true));
   await expect(img).toBeVisible();expect(await img.evaluate(element=>element===(window as any).__zoomBitmap)).toBe(true);
   await page.waitForTimeout(1000);expect(attempts.get(0)).toBe(1);
+});
+
+
+test('failed inventory waits for explicit retry, then returns to pending and ready',async({page})=>{
+  const calls:number[]=[];let retries=0;
+  await setup(page,[{index:0,width:1,height:1,available:true}],()=> 'png',{
+    manifestAttempts:calls,
+    manifest:attempt=>attempt===0?{status:503,body:{error:{code:'preview_inventory_failed',message:'Sayfa bilgileri hazırlanamadı.'}}}:attempt===1?{body:{pending:true,pages:[],providerAvailable:false}}:{body:{pages:[{index:0,width:1,height:1,available:true}],providerAvailable:true}},
+    retry:()=>{retries++;return {body:{pending:true,pages:[],providerAvailable:false}};},
+  });
+  const button=page.getByRole('button',{name:'Tekrar dene',exact:true});
+  await expect(button).toBeVisible();
+  await page.waitForTimeout(600);
+  expect(calls).toHaveLength(1);expect(retries).toBe(0);
+  await button.click();
+  await expect(sheet(page,0)).toBeVisible();
+  await expect.poll(()=>retries).toBe(1);
+  await expect.poll(()=>calls.length).toBeGreaterThanOrEqual(3);
+  await expect(button).toHaveCount(0);
 });

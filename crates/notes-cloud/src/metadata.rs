@@ -15,7 +15,6 @@ use std::sync::Arc;
 
 pub const MAX_XML: usize = 8 * 1024 * 1024;
 pub const MAX_NODES: usize = 20000;
-const RESULT_LIMIT: usize = 96 * 1024 * 1024;
 
 /// `cloud_metadata.INITIAL_FOLDER_CURSOR`
 pub fn initial_folder_cursor() -> String {
@@ -540,7 +539,7 @@ impl CloudMetadata {
         };
         if noop {
             let result = Val::dict(vec![("node", current.clone()), ("verified", Val::Bool(true))]);
-            save_json(&output.join("result.json"), &result)?;
+            self.api.save_operation_result(&output, &result)?;
             return Ok(result);
         }
         let mut node = xml(s_of(&current, "raw_xml").as_bytes())?;
@@ -647,7 +646,7 @@ impl CloudMetadata {
             Err(e) => return Err(e),
         };
         let result = Val::dict(vec![("node", found), ("verified", Val::Bool(true))]);
-        save_json(&output.join("result.json"), &result)?;
+        self.api.save_operation_result(&output, &result)?;
         Ok(result)
     }
 
@@ -670,7 +669,7 @@ impl CloudMetadata {
                 return Err(Fail::api("operation_mismatch", "İşlem farklı bir düzenlemeye ait."));
             }
             if output.join("result.json").exists() {
-                return Ok((output.clone(), Some(load_json(&output.join("result.json"), RESULT_LIMIT)?)));
+                return Ok((output.clone(), Some(self.api.load_operation_result(&output)?)));
             }
             if output.join(".mutation-claim").exists() {
                 return Err(Fail::ambiguous("write_uncertain", "İşlem daha önce gönderilmiş olabilir; tekrar gönderilmedi."));
@@ -757,7 +756,7 @@ impl CloudMetadata {
                     ("node", c.clone()),
                     ("verified", Val::Bool(true)),
                 ]);
-                save_json(&output.join("result.json"), &result)?;
+                self.api.save_operation_result(&output, &result)?;
                 return Ok(result);
             }
         }
@@ -877,7 +876,7 @@ impl CloudMetadata {
             ("node", updated),
             ("verified", Val::Bool(true)),
         ]);
-        save_json(&output.join("result.json"), &result)?;
+        self.api.save_operation_result(&output, &result)?;
         Ok(result)
     }
 
@@ -958,7 +957,7 @@ impl CloudMetadata {
                 ("favorite", Val::Bool(favorite)),
                 ("verified", Val::Bool(true)),
             ]);
-            save_json(&output.join("result.json"), &result)?;
+            self.api.save_operation_result(&output, &result)?;
             return Ok(result);
         }
         let now = self.api.now_ms();
@@ -1035,7 +1034,7 @@ impl CloudMetadata {
             ("favorite", Val::Bool(favorite)),
             ("verified", Val::Bool(true)),
         ]);
-        save_json(&output.join("result.json"), &result)?;
+        self.api.save_operation_result(&output, &result)?;
         Ok(result)
     }
 }

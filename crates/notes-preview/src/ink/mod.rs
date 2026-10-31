@@ -128,12 +128,24 @@ pub struct InkPage {
 /// The `ink_render` functions the manager calls (tests substitute it the way
 /// the Python tests patch `sys.modules['samsung_notes.ink_render']`).
 pub trait InkBackend: Send + Sync {
+    fn supports_prepared(&self) -> bool { false }
+    fn split_page(&self, _snapshot: &Val, _page_index: i64, _media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Option<Result<(Vec<u8>, Vec<u8>, bool), Fail>> { None }
     /// `ink_render.provider_available()`
     fn provider_available(&self) -> bool;
     /// `ink_render.inspect_render_pages(snapshot)`; `[]` on any failure.
     fn inspect_render_pages(&self, snapshot: &Val) -> Vec<InkPage>;
     /// `ink_render.render_ink_page(snapshot, page_index)`: contract RGBA PNG.
     fn render_ink_page(&self, snapshot: &Val, page_index: i64) -> Result<Vec<u8>, Fail>;
+    /// Optional rendering of a verified page-local input. Custom backends that
+    /// only understand full snapshots return None and retain their old path.
+    fn render_prepared(&self, _page: &prepare::PageInput, _forced: &dyn Fn() -> Vec<u8>,
+                       _media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Option<Result<(Vec<u8>, bool), Fail>> {
+        None
+    }
+    fn split_prepared(&self, _page: &prepare::PageInput, _media: &dyn Fn(&str) -> Option<Vec<u8>>)
+        -> Option<Result<(Vec<u8>, Vec<u8>, bool), Fail>> { None }
+    fn split_text_prepared(&self, _page: &prepare::PageInput, _media: &dyn Fn(&str) -> Option<Vec<u8>>)
+        -> Option<Result<(Vec<u8>, Vec<u8>, bool), Fail>> { None }
     /// Content-file SHA256s (images) the page composite draws.
     fn page_media(&self, _snapshot: &Val, _page_index: i64) -> Vec<String> {
         Vec::new()
@@ -166,7 +178,7 @@ pub trait InkBackend: Send + Sync {
 pub struct NativeInk {
     root: PathBuf,
     child: Option<PathBuf>,
-    identities: Mutex<VecDeque<(Arc<Val>, [u8; 32], Arc<Vec<u8>>)>>,
+    identities: Mutex<VecDeque<(Arc<Val>, [u8; 32], Arc<Vec<u8>>, usize)>>,
 }
 
 impl NativeInk {
@@ -178,6 +190,88 @@ impl NativeInk {
     pub fn renderer(&self) -> PathBuf {
         renderer_path(&self.root)
     }
+
+    /// Prepare a base PNG and transparent SVG for a stroke-only renderer page.
+    /// For a composite, media includes the PDF underlay when applicable. Text
+    /// and approximate ink are refused until their z-order can be preserved.
+    pub fn split_ink_page(&self, snapshot: &Val, page_index: i64, media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<(Vec<u8>, Vec<u8>, bool), Fail> {
+        let (page, body) = page_body(snapshot, page_index, self.child.as_deref())?;
+        self.split_prepared_ink_page(page, body, media)
+    }
+
+    /// Split a textless composite into its objects and its exact saved ink.
+    /// Unlike the ordinary ink split, other page text boxes stay in the base.
+    fn split_text_page(&self, page: &prepare::PageInput, media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<(Vec<u8>,Vec<u8>,bool),Fail> {
+        let mut outer = composite_value(&page.body).ok_or_else(|| ink_render(UNSAFE))?;
+        if page.over_pdf && media(prepare::PDF_UNDERLAY).is_none() { return Err(ink_render(NOT_FOUND)); }
+        if matches!(outer.get("notices"), Some(Val::List(notices)) if notices.iter().any(|n| n.as_str()==Some(objects::NOTICE_HIDDEN))) {
+            return Err(ink_render(NOT_FOUND));
+        }
+        let mut ink_input = outer.get("renderer").and_then(Val::as_str).and_then(|raw| composite_value(raw.as_bytes()));
+        let mut base_input = ink_input.clone();
+        let has_strokes = ink_input.as_ref().and_then(|v| v.get("strokes")).is_some_and(Val::truthy);
+        let mut layer = if has_strokes {
+            let input = ink_input.as_mut().ok_or_else(|| ink_render(UNSAFE))?;
+            input.remove("flow");input.remove("textBoxes");
+            let raw = rs_store::val::dumps_utf8(input).map_err(|_| ink_render(UNSAFE))?;
+            let svg = measure_renderer(|| rs_render::ink_render::run_renderer(&self.renderer(), false, raw.into_bytes(), MAX_SVG)).map_err(renderer_error)?;
+            let svg = std::str::from_utf8(&svg).map_err(|_| ink_render(UNSAFE))?;
+            rs_render::compose::transparent_ink_svg(svg, page.width, page.height).map_err(|_| ink_render(UNSAFE))?
+        } else { format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\"></svg>",page.width,page.height,page.width,page.height) };
+        if let Some(Val::List(approximate))=outer.remove("editingInk") {
+            let at=layer.find('>').ok_or_else(||ink_render(UNSAFE))?+1;
+            let paths=approximate.iter().map(|item|item.as_str().ok_or_else(||ink_render(UNSAFE))).collect::<Result<Vec<_>,_>>()?.join("");
+            layer.insert_str(at,&paths);
+        }
+        if let Some(input) = base_input.as_mut() {
+            input.set("strokes",Val::List(vec![]));input.remove("flow");
+            if let Some(Val::List(boxes)) = input.get("textBoxes").cloned() {
+                let mut boxes=boxes;
+                for item in &mut boxes { item.set("at",Val::Int(0)); }
+                input.set("textBoxes",Val::List(boxes));
+                outer.set("renderer",Val::s(rs_store::val::dumps_utf8(input).map_err(|_| ink_render(UNSAFE))?));
+            } else { outer.set("renderer",Val::Null); }
+        }
+        outer.set("rendererPlain",Val::Null);outer.set("fallback",Val::s(""));
+        let data=rs_store::val::dumps_utf8(&outer).map_err(|_| ink_render(UNSAFE))?;
+        let (base,complete)=render_composite(&self.renderer(),data.as_bytes(),(page.width,page.height),media)?;
+        Ok((base,layer.into_bytes(),complete))
+    }
+
+    fn split_prepared_ink_page(&self, page: InkPage, body: Vec<u8>, media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<(Vec<u8>, Vec<u8>, bool), Fail> {
+        let composite = is_composite(&body);
+        let mut outer = composite_value(&body).ok_or_else(|| ink_render(UNSAFE))?;
+        let renderer_input = if composite {
+            if page.over_pdf && media(prepare::PDF_UNDERLAY).is_none() { return Err(ink_render(NOT_FOUND)); }
+            if matches!(outer.get("notices"), Some(Val::List(notices)) if notices.iter().any(|n| n.as_str() == Some(objects::NOTICE_INK))) {
+                return Err(ink_render(NOT_FOUND));
+            }
+            outer.get("renderer").and_then(Val::as_str).ok_or_else(|| ink_render(NOT_FOUND))?.as_bytes().to_vec()
+        } else { body };
+        let value = composite_value(&renderer_input).ok_or_else(|| ink_render(UNSAFE))?;
+        let width = value.get("width").and_then(Val::as_i64).ok_or_else(|| ink_render(UNSAFE))?;
+        let height = value.get("height").and_then(Val::as_i64).ok_or_else(|| ink_render(UNSAFE))?;
+        let color = value.get("backgroundArgb").and_then(Val::as_i64)
+            .and_then(|n| u32::try_from(n).ok()).filter(|n| n >> 24 == 255).ok_or_else(|| ink_render(UNSAFE))?;
+        if (width, height) != (page.width, page.height) || width <= 0 || height <= 0 || width > 32768 || height > 32768
+            || width * height > crate::MAX_PIXELS || value.get("flow").is_some()
+            || value.get("textBoxes").is_some_and(Val::truthy)
+            || !matches!(value.get("strokes"), Some(Val::List(strokes)) if !strokes.is_empty()) {
+            return Err(ink_render(NOT_FOUND));
+        }
+        let svg = measure_renderer(|| rs_render::ink_render::run_renderer(&self.renderer(), false, renderer_input, MAX_SVG)).map_err(renderer_error)?;
+        let svg = std::str::from_utf8(&svg).map_err(|_| ink_render(UNSAFE))?;
+        let layer = rs_render::compose::transparent_ink_svg(svg, width, height).map_err(|_| ink_render(UNSAFE))?;
+        let (base, complete) = if composite {
+            outer.set("renderer", Val::Null);outer.set("rendererPlain", Val::Null);outer.set("fallback", Val::s(""));
+            let data = rs_store::val::dumps_utf8(&outer).map_err(|_| ink_render(UNSAFE))?;
+            render_composite(&self.renderer(), data.as_bytes(), (width, height), media)?
+        } else {
+            let pixels = rs_render::ink_render::background_pixels(width, height, color);
+            (measure_png(|| px::rgba_png(width, height, &pixels)).map_err(|_| ink_render(UNSAFE))?, true)
+        };
+        Ok((base, layer.into_bytes(), complete))
+    }
 }
 
 pub fn renderer_path(root: &Path) -> PathBuf {
@@ -187,6 +281,10 @@ pub fn renderer_path(root: &Path) -> PathBuf {
 }
 
 impl InkBackend for NativeInk {
+    fn supports_prepared(&self) -> bool { true }
+    fn split_page(&self, snapshot: &Val, page_index: i64, media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Option<Result<(Vec<u8>, Vec<u8>, bool), Fail>> {
+        Some(self.split_ink_page(snapshot, page_index, media))
+    }
     fn provider_available(&self) -> bool {
         rs_render::ink_render::renderer_available(&self.renderer())
     }
@@ -198,6 +296,34 @@ impl InkBackend for NativeInk {
     fn render_ink_page(&self, snapshot: &Val, page_index: i64) -> Result<Vec<u8>, Fail> {
         self.render_page(snapshot, page_index, &|_| None).map(|(png, _)| png)
     }
+
+    fn render_prepared(&self, page: &prepare::PageInput, forced: &dyn Fn() -> Vec<u8>,
+                       media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Option<Result<(Vec<u8>, bool), Fail>> {
+        let result = if is_composite(&page.body) {
+            measure(COMPOSITE, || render_composite(&self.renderer(), &page.body, (page.width, page.height), media))
+        } else {
+            let ink_page = InkPage { index: page.index, width: page.width, height: page.height,
+                dark_mode: Some(page.dark_mode), composite: page.composite, notice: page.notice.clone(), over_pdf: page.over_pdf };
+            match self.render_strokes(ink_page, page.body.clone()) {
+                Ok(png) => Ok((png, true)),
+                Err(e) => {
+                    let body = forced();
+                    if !is_composite(&body) { Err(e) }
+                    else { render_composite(&self.renderer(), &body, (page.width, page.height), media).map(|(png, _)| (png, false)) }
+                }
+            }
+        };
+        Some(result)
+    }
+
+    fn split_prepared(&self, page: &prepare::PageInput, media: &dyn Fn(&str) -> Option<Vec<u8>>)
+        -> Option<Result<(Vec<u8>, Vec<u8>, bool), Fail>> {
+        let ink_page = InkPage { index: page.index, width: page.width, height: page.height,
+            dark_mode: Some(page.dark_mode), composite: page.composite, notice: page.notice.clone(), over_pdf: page.over_pdf };
+        Some(self.split_prepared_ink_page(ink_page, page.body.clone(), media))
+    }
+    fn split_text_prepared(&self, page: &prepare::PageInput, media: &dyn Fn(&str) -> Option<Vec<u8>>)
+        -> Option<Result<(Vec<u8>, Vec<u8>, bool), Fail>> { Some(self.split_text_page(page,media)) }
 
     fn page_media(&self, snapshot: &Val, page_index: i64) -> Vec<String> {
         match measure(BODY, || page_body(snapshot, page_index, self.child.as_deref())) {
@@ -239,7 +365,7 @@ impl NativeInk {
     fn identity_inner(&self, snapshot: &Arc<Val>) -> Option<([u8; 32], Arc<Vec<u8>>)> {
         {
             let mut cache = self.identities.lock().unwrap();
-            if let Some(at) = cache.iter().position(|(s, _, _)| Arc::ptr_eq(s, snapshot)) {
+            if let Some(at) = cache.iter().position(|(s, _, _, _)| Arc::ptr_eq(s, snapshot)) {
                 let entry = cache.remove(at).unwrap();
                 let result = (entry.1, entry.2.clone());
                 cache.push_back(entry);
@@ -250,16 +376,19 @@ impl NativeInk {
         // while doing it, so another note's foreground request can proceed.
         let data = Arc::new(snapshot_bytes(snapshot)?);
         let key = sha256(&data);
-        if data.len() <= 64 * 1024 * 1024 {
+        // Count both live objects and allow for Arc, hash table and allocator
+        // overhead; a large serialized copy alone is not the full cache cost.
+        let weight = data.capacity().saturating_add(rs_store::snapshot_store::snapshot_heap_cost(snapshot)).saturating_add(std::mem::size_of::<Val>()).saturating_mul(2);
+        if weight <= 64 * 1024 * 1024 {
             let mut cache = self.identities.lock().unwrap();
-            if let Some(at) = cache.iter().position(|(s, _, _)| Arc::ptr_eq(s, snapshot)) {
+            if let Some(at) = cache.iter().position(|(s, _, _, _)| Arc::ptr_eq(s, snapshot)) {
                 let entry = cache.remove(at).unwrap();
                 let result = (entry.1, entry.2.clone());
                 cache.push_back(entry);
                 return Some(result);
             }
-            cache.push_back((snapshot.clone(), key, data.clone()));
-            while cache.len() > 4 || cache.iter().map(|e| e.2.len()).sum::<usize>() > 64 * 1024 * 1024 {
+            cache.push_back((snapshot.clone(), key, data.clone(), weight));
+            while cache.len() > 4 || cache.iter().fold(0usize, |n, e| n.saturating_add(e.3)) > 64 * 1024 * 1024 {
                 cache.pop_front();
             }
         }
@@ -648,9 +777,14 @@ fn order(inventory: &[u8], wanted: i64) -> Vec<i64> {
 
 /// In-process producer: retain the verified note and prepare only requested pages.
 fn start_note_thread(snapshot: Val, _wanted: i64, slot: Slot) {
+    start_note_thread_with_budget(snapshot, slot, prepare::PREPARED_BYTES)
+}
+
+fn start_note_thread_with_budget(snapshot: Val, slot: Slot, budget: usize) {
     let fallback = slot.clone();
     let spawned = std::thread::Builder::new().name("notes-ink-prepare".into()).spawn(move || {
         let session = prepare::PreparedSession::new(&snapshot).ok();
+        let retain = session.as_ref().is_some_and(|s| s.retain_with_budget(budget));
         let inventory = session.as_ref().map_or_else(|| "[]".to_string(), |s| s.inventory()).into_bytes();
         set_inventory(&slot, Some(inventory));
         loop {
@@ -667,7 +801,13 @@ fn start_note_thread(snapshot: Val, _wanted: i64, slot: Slot) {
             let body = session.as_ref().map_or_else(Vec::new, |s| s.page_body(index));
             let body = if body.is_empty() { None } else { Some(body) };
             if !store_body(&slot, index, body) { break; }
+            if !retain { break; }
         }
+        drop(session);
+        drop(snapshot);
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        // SAFETY: malloc_trim has no pointer arguments and is thread-safe.
+        if !retain { unsafe { libc::malloc_trim(0); } }
         finish(&slot);
     });
     if spawned.is_err() { finish(&fallback); }
@@ -693,7 +833,14 @@ fn start_note_child(exe: &Path, data: Vec<u8>, wanted: i64, slot: Slot, key: Slo
         while let Some(index) = state.pending.pop_front() { let _ = tx.send(index); }
     }
     std::thread::spawn(move || {
+        let large = data.len() > 16 * 1024 * 1024;
         if stdin.write_all(&(data.len() as u64).to_le_bytes()).and_then(|_| stdin.write_all(&data)).is_err() { return; }
+        drop(data);
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        // SAFETY: malloc_trim has no pointer arguments and is thread-safe.
+        if large { unsafe { libc::malloc_trim(0); } }
+        #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+        let _ = large;
         for index in rx {
             if stdin.write_all(&(index as i32).to_le_bytes()).and_then(|_| stdin.flush()).is_err() { break; }
         }
@@ -961,6 +1108,7 @@ fn child_main(args: &[String]) -> i32 {
     }
     prepare::take_prep_times();
     let session = prepare::PreparedSession::new(&snapshot).ok();
+    let retain = session.as_ref().is_some_and(|s| s.retain_between_requests());
     let prep_times = prepare::take_prep_times();
     let inventory_start = Instant::now();
     let inventory = session.as_ref().map_or_else(|| "[]".to_string(), |s| s.inventory());
@@ -993,6 +1141,7 @@ fn child_main(args: &[String]) -> i32 {
             meta.extend_from_slice(&(build.as_micros().min(u64::MAX as u128) as u64).to_le_bytes());
             meta.extend_from_slice(&(write.as_micros().min(u64::MAX as u128) as u64).to_le_bytes());
             if frame(&mut out, -2, &meta).is_err() { break; }
+            if !retain { break; }
         }
         return 0;
     }
@@ -1008,6 +1157,49 @@ fn child_main(args: &[String]) -> i32 {
 #[cfg(test)]
 mod demand_tests {
     use super::*;
+    #[test]
+    fn identity_cache_counts_snapshot_and_serialized_copy() {
+        let ink = NativeInk::new(crate::env::default_project_root(), None);
+        let snapshot = Arc::new(Val::dict(vec![("raw_body", Val::s("x".repeat(35 * 1024 * 1024)))]));
+        let identity = ink.identity(&snapshot).unwrap();
+        assert!(identity.1.len() < 64 * 1024 * 1024);
+        assert!(ink.identities.lock().unwrap().is_empty());
+    }
+    #[test]
+    fn split_composite_preserves_base_and_requires_pdf_underlay() {
+        let native = NativeInk::new(crate::env::default_project_root(), None);
+        if !native.provider_available() { eprintln!("ink renderer not built; skipping split render"); return; }
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/ink_cases.json")).unwrap();
+        let cases = rs_store::val::loads(&text).unwrap();
+        let snapshot = cases.get("fountain18").unwrap().get("snapshot").unwrap();
+        let inputs = prepare::prepare_pages(snapshot, None, true).unwrap();
+        let source = &inputs[0];
+        let page = InkPage { index: source.index, width: source.width, height: source.height, composite: true, ..Default::default() };
+        let renderer = String::from_utf8(source.body.clone()).unwrap();
+        let make = |item: Val| Val::dict(vec![
+            ("composite", Val::Int(1)), ("width", Val::Int(page.width)), ("height", Val::Int(page.height)),
+            ("backgroundArgb", Val::Int(0xffff_ffff)), ("notices", Val::List(vec![])), ("items", Val::List(vec![item])),
+            ("renderer", Val::s(renderer.clone())), ("rendererPlain", Val::Null), ("fallback", Val::s("")),
+        ]);
+        let object = Val::dict(vec![("svg", Val::s("<rect x=\"200\" y=\"200\" width=\"100\" height=\"100\" fill=\"#e61e1e\"/>"))]);
+        let body = rs_store::val::dumps_utf8(&make(object)).unwrap().replacen("\"composite\": 1", "\"composite\":1", 1).into_bytes();
+        let (base, svg, complete) = native.split_prepared_ink_page(page.clone(), body, &|_| None).unwrap();
+        assert!(complete);
+        assert_eq!(crate::test_common::pixel(&base, 250, 250), [230, 30, 30, 255]);
+        let pixels = rs_render::raster::rasterize(&svg, page.width as u32, page.height as u32).unwrap();
+        assert!(pixels.chunks_exact(4).any(|p| p[3] > 0));
+        let pdf = InkPage { over_pdf: true, ..page.clone() };
+        let underlay = Val::dict(vec![("image", Val::dict(vec![
+            ("sha256", Val::s(prepare::PDF_UNDERLAY)),
+            ("rect", Val::List(vec![Val::Int(0), Val::Int(0), Val::Int(page.width), Val::Int(page.height)])),
+        ]))]);
+        let pdf_body = rs_store::val::dumps_utf8(&make(underlay)).unwrap().replacen("\"composite\": 1", "\"composite\":1", 1).into_bytes();
+        assert!(native.split_prepared_ink_page(pdf.clone(), pdf_body.clone(), &|_| None).is_err());
+        let under = px::rgba_png(page.width, page.height, &rs_render::ink_render::background_pixels(page.width, page.height, 0xffe02020)).unwrap();
+        let (base, _, complete) = native.split_prepared_ink_page(pdf, pdf_body, &|key| (key == prepare::PDF_UNDERLAY).then(|| under.clone())).unwrap();
+        assert!(complete);
+        assert_eq!(crate::test_common::pixel(&base, 250, 250), [224, 32, 32, 255]);
+    }
     #[test]
     fn foreground_has_a_distinct_slot_from_background() {
         let key = [173; 32];
@@ -1030,5 +1222,22 @@ mod demand_tests {
         request_body(&slot, 2);
         assert!(matches!(wait_for(&slot, Some(2), Duration::from_secs(5)), Some(Lookup::Body(Some(_)))));
         cancel_note(&slot);
+    }
+
+    #[test]
+    fn oversized_producer_finishes_and_a_later_page_can_restart() {
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/objects_note.json")).unwrap();
+        let fixture = rs_store::val::loads(&text).unwrap();
+        let snapshot = fixture.get("snapshot").unwrap().clone();
+        for index in [0, 2] {
+            let slot: Slot = Arc::new((Mutex::new(NoteBodies::default()), Condvar::new()));
+            request_body(&slot, index);
+            start_note_thread_with_budget(snapshot.clone(), slot.clone(), 0);
+            assert!(matches!(wait_for(&slot, Some(index), Duration::from_secs(5)), Some(Lookup::Body(Some(_)))));
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut state = slot.0.lock().unwrap();
+            while !state.done && Instant::now() < deadline { state = slot.1.wait_timeout(state, Duration::from_millis(50)).unwrap().0; }
+            assert!(state.done, "oversized producer retained the document");
+        }
     }
 }

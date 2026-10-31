@@ -1036,43 +1036,11 @@ type Records = HashMap<String, Option<Rec>>;
 
 /// Decode, bind and admit every stroke part.
 fn decode_records(resource: &[u8], bodies: &[Vec<u8>]) -> P<Records> {
-    use rs_ink::core::binary::{decode_stroke_resource, i32_at, py_slice};
-    use rs_ink::core::xml::Tree;
-    let tree = Tree::parse(resource)?;
-    let root = tree.root;
-    let child = |name: &str| tree.children(root).iter().copied().find(|c| tree.local(*c).to_lowercase() == name);
-    let mut objects: HashMap<String, usize> = HashMap::new();
-    if let Some(list) = child("pagelist") {
-        for page in tree.children(list) {
-            for node in tree.iter(*page) {
-                if tree.tag(node) == "object" {
-                    if let Some(id) = tree.get(node, "id") {
-                        objects.insert(id.to_string(), node);
-                    }
-                }
-            }
-        }
-    }
-    let table = child("attributes").and_then(|a| tree.find(a, "stringIdList")).map(|n| (&tree, n));
-    let mut records = HashMap::new();
-    for body in bodies {
-        let record = decode_stroke_resource(body)?;
-        let base = &record.frames[0];
-        let identity = py_slice(&base.raw, base.fixed_start + 6, Some(base.fixed_start + 42));
-        let identity = match std::str::from_utf8(identity) {
-            Ok(s) if s.is_ascii() => s.to_string(),
-            _ => return fail("'ascii' codec can't decode bytes"),
-        };
-        let Some(&node) = objects.get(&identity) else { return fail("Çizgi kaynağı notla eşleşmiyor.") };
-        if records.contains_key(&identity) {
-            return fail("Çizgi kaynağı notla eşleşmiyor.");
-        }
-        let binding = rs_ink::core::prepare::bind_stroke_metadata(&record.frames, (&tree, node), table)?;
-        let rotation = i32_at(&base.raw, base.flexible_start - 5)?;
-        let ok = admitted(&record, &binding) && rotation == 0;
-        records.insert(identity, Some(Rec { record, binding, admitted: ok }));
-    }
-    Ok(records)
+    let records = rs_ink::core::records::decode_records(resource, bodies).map_err(PrepErr)?;
+    Ok(records.into_iter().map(|(identity, bound)| {
+        let ok = admitted(&bound.record, &bound.binding) && bound.rotation == 0;
+        (identity, Some(Rec { record: bound.record, binding: bound.binding, admitted: ok }))
+    }).collect())
 }
 
 type SourceKey = ([u8; 32], [u8; 32], String, Option<String>, Option<String>);
@@ -1098,18 +1066,104 @@ struct Prepared {
     floating_lost: bool,
 }
 
-static PREPARED: Mutex<VecDeque<(SourceKey, Arc<Prepared>)>> = Mutex::new(VecDeque::new());
+pub(crate) const PREPARED_BYTES: usize = 32 * 1024 * 1024;
+type PreparedEntry = (SourceKey, Arc<Prepared>, usize);
+static PREPARED: Mutex<VecDeque<PreparedEntry>> = Mutex::new(VecDeque::new());
 type PageKey = (SourceKey, Option<i64>, bool);
 static PAGES: Mutex<VecDeque<(PageKey, Arc<Vec<PageInput>>, usize)>> = Mutex::new(VecDeque::new());
 
+/// Prepare static inventory without using or evicting interactive caches. All
+/// full-note data and decoded records are dropped when the worker returns.
+pub(crate) fn inventory_uncached(snapshot: &notes_host::Val) -> P<Vec<PageInput>> {
+    let snapshot = notes_host::snapshot::from_dict(snapshot).map_err(|e| PrepErr(e.message))?;
+    let (parts, root) = match verify(&snapshot)? {
+        Verified::Reason(reason) => return fail(reason),
+        Verified::Ok(parts, root) => (parts, root),
+    };
+    let bodies: Vec<Vec<u8>> = parts.into_iter().filter(|(name, _)| name.as_deref() == Some("strokeResource")).map(|(_, b)| b).collect();
+    let prepared = prepare_verified(&root, &snapshot.resource_xml, &bodies, None, false)?;
+    page_inputs(&prepared, None, false)
+}
+
 fn prepare_source(snapshot: &rs_doc::doc::DocumentSnapshot, key: &SourceKey) -> P<Arc<Prepared>> {
-    if let Some((_, hit)) = PREPARED.lock().unwrap().iter().find(|(k, _)| k == key) {
-        return Ok(hit.clone());
+    {
+        let mut cache = PREPARED.lock().unwrap();
+        if let Some(hit) = cached_prepared(&mut cache, key) { return Ok(hit); }
     }
     let (parts, root) = match measured(1, || verify(snapshot))? {
         Verified::Reason(reason) => return fail(reason),
         Verified::Ok(parts, root) => (parts, root),
     };
+    let bodies: Vec<Vec<u8>> = parts.into_iter().filter(|(name, _)| name.as_deref() == Some("strokeResource")).map(|(_, b)| b).collect();
+    let prepared = Arc::new(prepare_verified(&root, &snapshot.resource_xml, &bodies, None, false)?);
+    let cost = prepared_bytes(&prepared).saturating_add(key.2.capacity()).saturating_add(key.3.as_ref().map_or(0, String::capacity)).saturating_add(key.4.as_ref().map_or(0, String::capacity));
+    cache_prepared(&mut PREPARED.lock().unwrap(), key.clone(), prepared.clone(), cost, PREPARED_BYTES);
+    Ok(prepared)
+}
+
+fn cache_prepared(cache: &mut VecDeque<PreparedEntry>, key: SourceKey, prepared: Arc<Prepared>, cost: usize, budget: usize) {
+    if cost > budget { return; }
+    cache.retain(|entry| entry.0 != key);
+    while cache.iter().fold(cost, |sum, entry| sum.saturating_add(entry.2)) > budget { cache.pop_front(); }
+    cache.push_back((key, prepared, cost));
+}
+
+fn cached_prepared(cache: &mut VecDeque<PreparedEntry>, key: &SourceKey) -> Option<Arc<Prepared>> {
+    let index = cache.iter().position(|entry| &entry.0 == key)?;
+    let entry = cache.remove(index)?;
+    let hit = entry.1.clone();
+    cache.push_back(entry);
+    Some(hit)
+}
+
+// Account for owned allocations, including decoded samples rather than only
+// the original compressed stroke bytes. Hash table overhead is conservative.
+fn prepared_bytes(prepared: &Prepared) -> usize {
+    use std::mem::size_of;
+    fn element(node: &Element) -> usize {
+        let mut n = node.tag.capacity() + node.text.as_ref().map_or(0, String::capacity) + node.tail.as_ref().map_or(0, String::capacity)
+            + node.attrib.capacity() * size_of::<(String, String)>() + node.children.capacity() * size_of::<Element>();
+        for (k,v) in &node.attrib { n = n.saturating_add(k.capacity()).saturating_add(v.capacity()); }
+        for child in &node.children { n = n.saturating_add(element(child)); }
+        n
+    }
+    fn json(value: &J) -> usize {
+        match value {
+            J::RawInt(s) | J::Str(s) => s.capacity(),
+            J::List(items) => items.iter().fold(items.capacity() * size_of::<J>(), |n, v| n.saturating_add(json(v))),
+            J::Obj(items) => items.iter().fold(items.capacity() * size_of::<(String,J)>(), |n, (k,v)| n.saturating_add(k.capacity()).saturating_add(json(v))),
+            _ => 0,
+        }
+    }
+    let mut n = size_of::<Prepared>().saturating_add(element(&prepared.pages))
+        .saturating_add(prepared.records.capacity() * 2 * size_of::<(String, Option<Rec>)>())
+        .saturating_add(prepared.files.capacity() * 2 * size_of::<(String,String)>())
+        .saturating_add(prepared.floating.capacity() * size_of::<Vec<Element>>());
+    for (k,v) in &prepared.files { n = n.saturating_add(k.capacity()).saturating_add(v.capacity()); }
+    for group in &prepared.floating { n = n.saturating_add(group.capacity() * size_of::<Element>()); for child in group { n = n.saturating_add(element(child)); } }
+    if let Some(flow) = &prepared.flow {
+        n = n.saturating_add(flow.capacity() * size_of::<(String,J)>());
+        for (k,v) in flow { n = n.saturating_add(k.capacity()).saturating_add(json(v)); }
+    }
+    for (key, item) in &prepared.records {
+        n = n.saturating_add(key.capacity());
+        if let Some(item) = item {
+            let r = &item.record; let b = &item.binding;
+            n = n.saturating_add(r.raw.capacity()).saturating_add(r.frames.capacity() * size_of::<rs_ink::core::binary::Frame>())
+                .saturating_add(r.samples.points.capacity() * size_of::<(f64,f64)>())
+                .saturating_add((r.samples.pressures.capacity() + r.samples.tilts.capacity() + r.samples.orientations.capacity()) * size_of::<f64>())
+                .saturating_add(r.samples.timestamps.capacity() * size_of::<i64>())
+                .saturating_add(b.object_id.capacity()).saturating_add(b.pen_name.capacity()).saturating_add(b.advanced_settings.as_ref().map_or(0, String::capacity))
+                .saturating_add(b.style.0.capacity() * size_of::<(&'static str,StyleVal)>());
+            for frame in &r.frames { n = n.saturating_add(frame.raw.capacity()).saturating_add(frame.properties.capacity()).saturating_add(frame.fields.capacity()); }
+            for (_,style) in &b.style.0 { if let StyleVal::G(values) = style { n = n.saturating_add(values.capacity() * size_of::<u32>()); } }
+        }
+    }
+    // Allow for allocator and Arc/VecDeque bookkeeping.
+    n.saturating_mul(2)
+}
+
+fn prepare_verified(root: &Element, resource_xml: &[u8], bodies: &[Vec<u8>], page_based_override: Option<bool>, omit_flow: bool) -> P<Prepared> {
     let tree = one(&root, "notetree")?;
     let attrs = one(&root, "attributes")?;
     if attrs.get("formatVersion") != Some("4000") || tree.get("ver") != Some("4000")
@@ -1136,7 +1190,7 @@ fn prepare_source(snapshot: &rs_doc::doc::DocumentSnapshot, key: &SourceKey) -> 
         }
     }
     let (mut flow, mut trailing, mut flow_approximate) = (None, None, false);
-    if !empty_body_for_ink(body)? {
+    if !omit_flow && !empty_body_for_ink(body)? {
         // Body text whose formatting the renderer does not take is shown with
         // that formatting dropped (marked approximate) instead of hiding the note.
         let parsed = match flow_body(body) {
@@ -1152,20 +1206,131 @@ fn prepare_source(snapshot: &rs_doc::doc::DocumentSnapshot, key: &SourceKey) -> 
             trailing = t;
         }
     }
-    let page_based = !floating_list.children.is_empty() || pages.children.iter().any(|p| {
+    let page_based = page_based_override.unwrap_or_else(|| !floating_list.children.is_empty() || pages.children.iter().any(|p| {
         p.iter().any(|n| n.tag == "object" || n.tag == "pdfDataList" || (n.tag == "canvasCacheDataMap" && !n.children.is_empty()))
-    });
-    let bodies: Vec<Vec<u8>> = parts.into_iter().filter(|(name, _)| name.as_deref() == Some("strokeResource")).map(|(_, b)| b).collect();
-    let records = measured(2, || decode_records(&snapshot.resource_xml, &bodies))?;
+    }));
+    let records = measured(2, || decode_records(resource_xml, bodies))?;
     let files = super::objects::content_files(&root);
-    let prepared = Arc::new(Prepared { pages: pages.clone(), flow, flow_approximate, trailing, records, files, page_based, floating,
-                                       floating_lost });
-    let mut guard = PREPARED.lock().unwrap();
-    guard.push_back((key.clone(), prepared.clone()));
-    while guard.len() > 2 {
-        guard.pop_front();
+    Ok(Prepared { pages: pages.clone(), flow, flow_approximate, trailing, records, files, page_based, floating, floating_lost })
+}
+
+/// Build one page from authenticated container material. This deliberately
+/// does not use the full-note PREPARED/PAGES caches. The material is obtained
+/// from the storage adapter, which requires both resource and whole-note
+/// stroke-binding proofs. The selected page still goes through page_inputs,
+/// including its existing renderer admission and composite decisions.
+fn material_prepared(material: &crate::container_input::PageMaterial, omit_flow: bool) -> P<Prepared> {
+    let mut root = if let Some(resource) = &material.projected_resource {
+        resource.element()
+    } else {
+        let document = rs_ops::xml::parse_bytes(&material.global.note_xml).map_err(PrepErr)?;
+        let mut matches = document.iter().filter(|node| node.local() == "noteresource");
+        let root = matches.next().ok_or_else(|| PrepErr("missing note resource".into()))?.clone();
+        if matches.next().is_some() { return fail("multiple note resources"); }
+        root
+    };
+    one(&root, "pagelist")?;
+    let page_list = root.children.iter().position(|node| node.local() == "pagelist").ok_or_else(|| PrepErr("missing page list".into()))?;
+    if !root.children[page_list].children.is_empty() { return fail("global page list is not split"); }
+    let selected = rs_ops::xml::parse_bytes(&material.page_xml).map_err(PrepErr)?;
+    let selected_index = usize::try_from(material.page_index).map_err(|_| PrepErr("invalid page index".into()))?;
+    if material.global.index.pages.get(selected_index).map(|p| p.id.as_str()) != Some(material.page_id.as_str())
+        || selected.get("id") != Some(material.page_id.as_str()) { return fail("page identity changed"); }
+    let mut pages = Vec::with_capacity(material.global.index.pages.len());
+    for (index, fact) in material.global.index.pages.iter().enumerate() {
+        if index == selected_index { pages.push(selected.clone()); continue; }
+        let mut page = Element { tag: "page".into(), attrib: fact.attributes.iter().map(|(k, v)| (k.clone(), v.clone())).collect(), ..Default::default() };
+        // flow_layout uses only object existence on the trailing page; no
+        // placeholder page enters page_inputs, which is filtered to selected.
+        if fact.has_object { page.children.push(Element::new("object", &[])); }
+        pages.push(page);
     }
-    Ok(prepared)
+    root.children[page_list].children = pages;
+    let resource = rs_ops::xml::xml_bytes(&root);
+    let bodies: Vec<Vec<u8>> = material.strokes.iter().map(|stroke| stroke.body.clone()).collect();
+    prepare_verified(&root, &resource, &bodies, Some(material.global.index.page_based), omit_flow)
+}
+
+pub fn prepare_container_page(material: &crate::container_input::PageMaterial, build: bool) -> P<Vec<PageInput>> {
+    let prepared = material_prepared(material, false)?;
+    page_inputs(&prepared, Some(material.page_index), build)
+}
+
+/// Equivalent of forced_composite for a verified single-page material.
+pub fn forced_container_composite(material: &crate::container_input::PageMaterial) -> Vec<u8> {
+    (|| -> P<Vec<u8>> {
+        let prepared = material_prepared(material, false)?;
+        let index = material.page_index;
+        let Some(page) = usize::try_from(index).ok().and_then(|i| prepared.pages.children.get(i)) else { return fail("page") };
+        let (width, height) = (integer(page.get("width"))?, integer(page.get("height"))?);
+        let flow = Some(index) != prepared.trailing;
+        let built = composite_page(&prepared, page, index, width, height, page_color(page).ok(), true, flow)?;
+        Ok(built.map(|p| p.body).unwrap_or_default())
+    })().unwrap_or_default()
+}
+
+/// Build a local composite with the flowing body removed. Page-layer text
+/// boxes are preserved, as are all page objects and the PDF underlay slot.
+pub fn notext_container_page(material: &crate::container_input::PageMaterial) -> P<Option<PageInput>> {
+    let prepared = material_prepared(material, true)?;
+    notext_page(&prepared, material.page_index, false)
+}
+
+fn notext_page(prepared: &Prepared, index: i64, separate_approx_ink: bool) -> P<Option<PageInput>> {
+    let page = usize::try_from(index).ok().and_then(|i| prepared.pages.children.get(i)).ok_or_else(|| PrepErr("page".into()))?;
+    let (width, height) = (integer(page.get("width"))?, integer(page.get("height"))?);
+    if width <= 0 || height <= 0 || width as i128 * height as i128 > MAX_PIXELS as i128 || page.get_or("orientation", "0") != "0" {
+        return fail("Sayfa geometrisi desteklenmiyor.");
+    }
+    let pdf = page.iter().any(|node| node.tag == "pdfDataList" || node.tag == "pdfData");
+    composite_layer(prepared, page, index, width, height, page_color(page).ok(), true, false, pdf, separate_approx_ink)
+}
+
+pub fn notext_snapshot_page(snapshot: &notes_host::Val, index: i64) -> P<Option<PageInput>> {
+    notext_snapshot(snapshot,index,false)
+}
+
+pub fn text_ink_snapshot_page(snapshot: &notes_host::Val, index: i64) -> P<Option<PageInput>> {
+    notext_snapshot(snapshot,index,true)
+}
+
+fn notext_snapshot(snapshot: &notes_host::Val, index: i64, separate_approx_ink: bool) -> P<Option<PageInput>> {
+    let snapshot = notes_host::snapshot::from_dict(snapshot).map_err(|e| PrepErr(e.message))?;
+    let (parts, root) = match verify(&snapshot)? {
+        Verified::Reason(reason) => return fail(reason),
+        Verified::Ok(parts, root) => (parts, root),
+    };
+    let bodies: Vec<Vec<u8>> = parts.into_iter().filter(|(name, _)| name.as_deref() == Some("strokeResource")).map(|(_, body)| body).collect();
+    let prepared = prepare_verified(&root, &snapshot.resource_xml, &bodies, None, true)?;
+    notext_page(&prepared, index, separate_approx_ink)
+}
+
+/// Local full composite for a saved editor model. A pending model is applied
+/// to an in-memory copy using the same writer and anchor rules as the outbox.
+pub fn fulltext_snapshot_page(snapshot: &notes_host::Val, index: i64, model: &notes_host::Val) -> P<Option<PageInput>> {
+    let snapshot = notes_host::snapshot::from_dict(snapshot).map_err(|e| PrepErr(e.message))?;
+    let current = notes_host::areas::editor_projection(&snapshot).map_err(|e| PrepErr(e.message))?;
+    let prepared = if current.get("model").is_some_and(|existing| rs_store::val::py_eq(existing, model)) {
+        let source: SourceKey = (sha256(&snapshot.raw_body), sha256(&snapshot.resource_xml), snapshot.content_type.clone(),
+                                 snapshot.local_id.clone(), snapshot.commit_id.clone());
+        prepare_source(&snapshot, &source)?
+    } else {
+        let edit = notes_cloud::editor::prepare_editor_edit(&snapshot, &snapshot.title, model, i64::MAX).map_err(|e| PrepErr(e.message))?;
+        let (parts, _) = match verify(&snapshot)? {
+            Verified::Reason(reason) => return fail(reason),
+            Verified::Ok(parts, root) => (parts, root),
+        };
+        let bodies: Vec<Vec<u8>> = parts.into_iter().filter(|(name, _)| name.as_deref() == Some("strokeResource")).map(|(_, body)| body).collect();
+        let root = rs_ops::xml::parse_bytes(&edit.full_xml).map_err(PrepErr)?;
+        Arc::new(prepare_verified(&root, &edit.full_xml, &bodies, None, false)?)
+    };
+    let page = usize::try_from(index).ok().and_then(|i| prepared.pages.children.get(i)).ok_or_else(|| PrepErr("page".into()))?;
+    let (width, height) = (integer(page.get("width"))?, integer(page.get("height"))?);
+    if width <= 0 || height <= 0 || width as i128 * height as i128 > MAX_PIXELS as i128 || page.get_or("orientation", "0") != "0" {
+        return fail("Sayfa geometrisi desteklenmiyor.");
+    }
+    let pdf = page.iter().any(|node| node.tag == "pdfDataList" || node.tag == "pdfData");
+    composite_layer(&prepared, page, index, width, height, page_color(page).ok(), true, Some(index) != prepared.trailing, pdf, false)
 }
 
 fn renderer_tail(text: &mut String, inkpen2: bool, marker4: bool) {
@@ -1211,7 +1376,7 @@ fn page_inputs(prepared: &Prepared, only_index: Option<i64>, build: bool) -> P<V
             // objects become a local layer over it (`overPdf`), used when
             // Samsung's canvas overlay is not available.
             if !all_objects.is_empty() || has_floating {
-                if let Some(page) = composite_layer(prepared, page, index, width, height, page_color(page).ok(), build, false, true)? {
+                if let Some(page) = composite_layer(prepared, page, index, width, height, page_color(page).ok(), build, false, true, false)? {
                     output.push(page);
                 }
             }
@@ -1309,7 +1474,7 @@ fn page_inputs(prepared: &Prepared, only_index: Option<i64>, build: bool) -> P<V
 #[allow(clippy::too_many_arguments)]
 fn composite_page(prepared: &Prepared, page: &Element, index: i64, width: i64, height: i64, color: Option<u32>, build: bool,
                   with_flow: bool) -> P<Option<PageInput>> {
-    composite_layer(prepared, page, index, width, height, color, build, with_flow, false)
+    composite_layer(prepared, page, index, width, height, color, build, with_flow, false, false)
 }
 
 /// Composite name of the PDF page image a PDF page's local layer is drawn on.
@@ -1317,7 +1482,7 @@ pub const PDF_UNDERLAY: &str = "pdf-underlay";
 
 #[allow(clippy::too_many_arguments)]
 fn composite_layer(prepared: &Prepared, page: &Element, index: i64, width: i64, height: i64, color: Option<u32>, build: bool,
-                   with_flow: bool, over_pdf: bool) -> P<Option<PageInput>> {
+                   with_flow: bool, over_pdf: bool, separate_approx_ink: bool) -> P<Option<PageInput>> {
     use super::objects::{self, Item};
     let flow = if with_flow { prepared.flow.as_ref() } else { None };
     let records = &prepared.records;
@@ -1361,6 +1526,7 @@ fn composite_layer(prepared: &Prepared, page: &Element, index: i64, width: i64, 
         }
     }
     let mut items: Vec<Item> = Vec::new();
+    let mut editing_ink: Vec<String> = Vec::new();
     if over_pdf {
         items.push(Item::Image { sha256: PDF_UNDERLAY.into(), rect: [0.0, 0.0, width as f64, height as f64], crop: None,
                                  flip_h: false, flip_v: false, degrees: 0.0, opacity: 1.0 });
@@ -1414,6 +1580,7 @@ fn composite_layer(prepared: &Prepared, page: &Element, index: i64, width: i64, 
                     continue;
                 }
                 match polyline {
+                    Some(svg) if separate_approx_ink => editing_ink.push(svg),
                     Some(svg) => items.push(Item::Svg(svg)),
                     None => note(&mut notices, objects::NOTICE_HIDDEN),
                 }
@@ -1487,7 +1654,7 @@ fn composite_layer(prepared: &Prepared, page: &Element, index: i64, width: i64, 
     };
     let full = renderer(true)?;
     let plain = if boxes.is_empty() { None } else { renderer(false)? };
-    let make = |fallback: String| J::obj(vec![
+    let make = |fallback: String| { let mut fields=vec![
         ("composite", J::Int(1)),
         ("width", J::Int(width as i128)),
         ("height", J::Int(height as i128)),
@@ -1497,7 +1664,10 @@ fn composite_layer(prepared: &Prepared, page: &Element, index: i64, width: i64, 
         ("renderer", full.clone().map_or(J::Null, J::Str)),
         ("rendererPlain", plain.clone().map_or(J::Null, J::Str)),
         ("fallback", J::Str(fallback)),
-    ]).dumps(true).map_err(PrepErr);
+    ];
+        if separate_approx_ink { fields.push(("editingInk",J::List(editing_ink.iter().cloned().map(J::Str).collect()))); }
+        J::obj(fields).dumps(true).map_err(PrepErr)
+    };
     let mut body = make(fallback)?;
     if body.len() > MAX_INPUT {
         // Drop the approximated-ink fallback first; then give up.
@@ -1528,6 +1698,15 @@ pub fn prepare_pages(snapshot: &notes_host::Val, only_index: Option<i64>, build:
     }
     let prepared = prepare_source(&snapshot, &source)?;
     let pages = Arc::new(page_inputs(&prepared, only_index, build)?);
+    let uncached = prepared_bytes(&prepared) > PREPARED_BYTES;
+    drop(prepared);
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    if uncached {
+        // SAFETY: malloc_trim accepts no pointers and is thread-safe.
+        unsafe { libc::malloc_trim(0); }
+    }
+    #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+    let _ = uncached;
     let size: usize = pages.iter().map(|p| p.body.len()).sum();
     let mut guard = PAGES.lock().unwrap();
     guard.push_back((key, pages.clone(), size));
@@ -1568,6 +1747,10 @@ impl PreparedSession {
         let pages = page_inputs(&self.0, None, false).unwrap_or_default();
         inventory_from_pages(&pages)
     }
+    /// A large document is useful during the current request, but must not
+    /// remain alive in a demand producer while the user is idle.
+    pub(crate) fn retain_between_requests(&self) -> bool { self.retain_with_budget(PREPARED_BYTES) }
+    pub(crate) fn retain_with_budget(&self, budget: usize) -> bool { prepared_bytes(&self.0) <= budget }
     pub(crate) fn page_body(&self, index: i64) -> Vec<u8> {
         page_inputs(&self.0, Some(index), true).ok().and_then(|pages| pages.into_iter().find(|p| p.index == index))
             .map(|p| p.body).unwrap_or_default()
@@ -1644,6 +1827,52 @@ pub fn pen_templates(snapshot: &notes_host::Val) -> P<String> {
 #[cfg(test)]
 mod session_tests {
     use super::*;
+    #[test]
+    fn prepared_cache_evicts_lru_by_bytes_and_drops_oversized_values() {
+        let make = || Arc::new(Prepared { pages: Element::default(), flow: None, flow_approximate: false, trailing: None, records: HashMap::new(), files: HashMap::new(), page_based: false, floating: Vec::new(), floating_lost: false });
+        let key = |n| ([n; 32], [0; 32], String::new(), None, None);
+        let mut cache = VecDeque::new();
+        let a = make(); let b = make(); let c = make();
+        let weak = Arc::downgrade(&b);
+        cache_prepared(&mut cache, key(1), a, 5, 10);
+        cache_prepared(&mut cache, key(2), b, 5, 10);
+        drop(cached_prepared(&mut cache, &key(1)));
+        cache_prepared(&mut cache, key(3), c, 5, 10);
+        assert!(weak.upgrade().is_none());
+        assert_eq!(cache.iter().map(|v| v.0.0[0]).collect::<Vec<_>>(), vec![1,3]);
+        let oversized = make(); let weak = Arc::downgrade(&oversized);
+        cache_prepared(&mut cache, key(4), oversized, 11, 10);
+        assert!(weak.upgrade().is_none());
+        assert_eq!(cache.len(), 2);
+    }
+    #[test]
+    fn prepared_budget_counts_decoded_point_allocations() {
+        let samples = rs_ink::core::binary::Samples { points: vec![(0.0, 0.0); 8192], ..Default::default() };
+        let record = Record { raw: vec![], frames: vec![], samples, compressed: false, stylus: false, tool_type: 0 };
+        let binding = Binding { object_id: String::new(), modified_time: 0, bounds: [0.0;4], pen_name: String::new(), advanced_settings: None, style: rs_ink::core::binary::Style(vec![]) };
+        let prepared = Arc::new(Prepared { pages: Element::default(), flow: None, flow_approximate: false, trailing: None,
+            records: HashMap::from([("synthetic".into(), Some(Rec { record, binding, admitted: true }))]), files: HashMap::new(), page_based: false, floating: vec![], floating_lost: false });
+        let cost = prepared_bytes(&prepared);
+        assert!(cost >= 8192 * std::mem::size_of::<(f64,f64)>());
+        let weak = Arc::downgrade(&prepared);
+        let mut cache = VecDeque::new();
+        cache_prepared(&mut cache, ([0;32],[0;32],String::new(),None,None), prepared, cost, cost - 1);
+        assert!(weak.upgrade().is_none());
+        assert!(cache.is_empty());
+    }
+    #[test]
+    fn oversized_prepared_session_is_not_retained_between_requests() {
+        let samples = rs_ink::core::binary::Samples { points: vec![(0.0, 0.0); 1_100_000], ..Default::default() };
+        let record = Record { raw: vec![], frames: vec![], samples, compressed: false, stylus: false, tool_type: 0 };
+        let binding = Binding { object_id: String::new(), modified_time: 0, bounds: [0.0;4], pen_name: String::new(), advanced_settings: None, style: rs_ink::core::binary::Style(vec![]) };
+        let prepared = Arc::new(Prepared { pages: Element::default(), flow: None, flow_approximate: false, trailing: None,
+            records: HashMap::from([("synthetic".into(), Some(Rec { record, binding, admitted: true }))]), files: HashMap::new(), page_based: false, floating: vec![], floating_lost: false });
+        let weak = Arc::downgrade(&prepared);
+        let session = PreparedSession(prepared);
+        assert!(!session.retain_between_requests());
+        drop(session);
+        assert!(weak.upgrade().is_none());
+    }
     #[test]
     fn session_reuses_verified_note_and_preserves_page_bodies() {
         let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/objects_note.json")).unwrap();

@@ -193,6 +193,11 @@ def render(rust, npm) -> tuple[str, list[str]]:
         'The UI icons in `desktop/assets-free/windows-assets/` are rendered from',
         'Lucide (ISC; portions MIT from Feather). See `desktop/assets-free/LICENSE`.',
         '',
+        '## Fonts',
+        '',
+        'The page text editor uses Roboto (Apache-2.0) in `desktop/public/page-fonts/`, the same files',
+        'the pinned sdocx crate bundles. See `desktop/public/page-fonts/Roboto-LICENSE.txt`.',
+        '',
     ]
     return '\n'.join(out), problems
 

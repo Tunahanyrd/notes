@@ -103,6 +103,31 @@ fn token_host_and_origin_required() {
 }
 
 #[test]
+fn startup_status_is_available_before_engine_and_requires_authorization() {
+    let t = TempDir::new("starting");
+    let startup = Arc::new(notes_engine::server::StartupBackend::new());
+    startup.progress(7, 50);
+    let server = AppServer::bind_starting(0, startup.clone(), "synthetic-local-secret", t.path(), None).unwrap();
+    let accept = server.spawn();
+    let request = |authorization: bool, path: &str| {
+        let mut stream = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+        let auth = if authorization { "Authorization: Bearer synthetic-local-secret\r\n" } else { "" };
+        write!(stream, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n{auth}Connection: close\r\n\r\n", server.port).unwrap();
+        let mut raw = String::new(); stream.read_to_string(&mut raw).unwrap(); raw
+    };
+    assert!(request(false,"/api/status").starts_with("HTTP/1.0 401"));
+    let status = request(true,"/api/status");
+    assert!(status.starts_with("HTTP/1.0 200"));
+    assert!(status.contains("\"completed\":7,\"total\":50"));
+    assert!(request(true,"/api/notes").starts_with("HTTP/1.0 503"));
+    startup.fail();
+    assert!(request(true,"/api/status").contains("\"state\":\"failed\""));
+    startup.ready(offline_engine(t.path()));
+    assert!(request(true,"/api/status").contains("\"connected\""));
+    server.close(); let _ = accept.join();
+}
+
+#[test]
 fn json_content_type_and_private_file_traversal_rejected() {
     let f = Fixture::new();
     assert_eq!(f.request("POST", "/api/notes", Some("{}"), &[("Content-Type", "text/plain")], true).0, 415);

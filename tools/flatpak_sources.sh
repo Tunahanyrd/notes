@@ -11,22 +11,22 @@
 # be listed with its checksum. Run this after any change to those lockfiles
 # and commit the two JSON files. The generators come from
 # flatpak/flatpak-builder-tools at a pinned commit and run in a throwaway
-# virtualenv (needs network for git/PyPI only; nothing is installed system-wide).
+# virtualenv (needs network for the pinned archive/PyPI; nothing is installed system-wide).
 #
 #   tools/flatpak_sources.sh
 set -eu
 
-TOOLS_URL=https://github.com/flatpak/flatpak-builder-tools
 TOOLS_COMMIT=9d86d336a39b9af38b86f114b6ce5820fe260f91
+TOOLS_SHA256=0b882314fc35e8e6ff6dd1cbc24d7eeedcdbc0dfb81b827fa9b9736c5dfe1cc8
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out="$root/packaging/flatpak"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
 
-git init -q "$work/fbt"
-git -C "$work/fbt" remote add origin "$TOOLS_URL"
-git -C "$work/fbt" fetch -q --depth 1 origin "$TOOLS_COMMIT"
-git -C "$work/fbt" -c advice.detachedHead=false checkout -q --detach "$TOOLS_COMMIT"
+curl -fsSL "https://codeload.github.com/flatpak/flatpak-builder-tools/tar.gz/$TOOLS_COMMIT" -o "$work/fbt.tar.gz"
+printf '%s  %s\n' "$TOOLS_SHA256" "$work/fbt.tar.gz" | sha256sum -c -
+mkdir "$work/fbt"
+tar -xzf "$work/fbt.tar.gz" --strip-components=1 -C "$work/fbt"
 
 python3 -m venv "$work/venv"
 "$work/venv/bin/pip" install -q aiohttp tomlkit

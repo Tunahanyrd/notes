@@ -16,6 +16,7 @@ use pyo3::types::{PyDict, PyList, PyTuple};
 use std::any::Any;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+pub const VERIFIED_RESOURCE_VERSION: &str = "ink-projection-verify/1";
 pub const PROJECTION_RECIPE: &str = "ink-projection-v8:floating-objects";
 pub const MAX_PROJECTION_PAGES: usize = 2048;
 pub const MAX_PROJECTION_STROKES: usize = 20_000;
@@ -163,6 +164,45 @@ pub fn verified_resource(deps: &dyn Deps, snapshot: &dyn Any) -> R<Verified> {
 /// Parsed payload and its single noteResource bound to the snapshot.
 pub fn verify(deps: &dyn Deps, snap: &Snapshot) -> R<Verified> {
     let parsed = deps.parse_payload(&snap.raw_body, &snap.content_type)?;
+    verify_parsed(snap, parsed)
+}
+
+/// Apply the same admission checks to raw snapshot bytes at publication time.
+/// This uses the same bounded pure-Rust parser as notes-host's `PureDeps`.
+pub fn verify_raw_snapshot(raw: &[u8], content_type: &str, resource_xml: &[u8], local_id: Option<&str>, commit_id: Option<&str>) -> R<Verified> {
+    let limits = _doc::mime::Limits::default();
+    let parsed = _doc::payload::parse_payload(raw, content_type, Some(MAX_READONLY_PARTS as i64), &limits, &mut _doc::mime::NoHooks)
+        .map_err(crate::err::from_doc)?;
+    let body = |p: &_doc::mime::Part| raw[p.body.clone()].to_vec();
+    let payload = Payload {
+        locked: parsed.locked,
+        xml_documents: parsed.xml_parts.iter().map(|i| body(&parsed.parts[*i])).collect(),
+        parts: parsed.parts.iter().map(|p| Part {name:p.name.clone(),filename:p.filename.clone(),content_type:p.content_type.clone(),body:body(p)}).collect(),
+        handle:None,
+    };
+    let snap = Snapshot {raw_body:Vec::new(),content_type:content_type.to_string(),resource_xml:resource_xml.to_vec(),local_id:local_id.map(str::to_string),commit_id:commit_id.map(str::to_string),handle:None};
+    verify_parsed(&snap,payload)
+}
+
+/// Container publication only needs the resource admission decision. The
+/// shared verifier examines XML documents and lock state; it does not inspect
+/// binary part bodies. Keep those bodies borrowed in the caller instead of
+/// copying the entire multipart into a second owned payload.
+pub fn verify_raw_snapshot_admission(raw: &[u8], content_type: &str, resource_xml: &[u8], local_id: Option<&str>, commit_id: Option<&str>) -> R<bool> {
+    let limits = _doc::mime::Limits::default();
+    let parsed = _doc::payload::parse_payload(raw, content_type, Some(MAX_READONLY_PARTS as i64), &limits, &mut _doc::mime::NoHooks)
+        .map_err(crate::err::from_doc)?;
+    let payload = Payload {
+        locked: parsed.locked,
+        xml_documents: parsed.xml_parts.iter().map(|i| raw[parsed.parts[*i].body.clone()].to_vec()).collect(),
+        parts: Vec::new(),
+        handle: None,
+    };
+    let snap = Snapshot {raw_body:Vec::new(),content_type:content_type.to_string(),resource_xml:resource_xml.to_vec(),local_id:local_id.map(str::to_string),commit_id:commit_id.map(str::to_string),handle:None};
+    Ok(matches!(verify_parsed(&snap, payload)?, Verified::Ok(_, _)))
+}
+
+fn verify_parsed(snap: &Snapshot, parsed: Payload) -> R<Verified> {
     if parsed.locked {
         return Ok(Verified::Reason(LOCKED));
     }
@@ -201,7 +241,33 @@ fn objectlist(e: &Element) -> R<Vec<&Element>> {
     }
 }
 
-fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Projection> {
+// Migration needs the identical projection, but does not need to retain all
+// decoded records at once. Ordinary interactive callers keep their existing
+// path; the bounded path validates every part in the same order and decodes
+// each record again only while processing its page.
+enum ProjectionRecord<'a> {
+    Retained(Record, Binding, bool),
+    Deferred(&'a Part, bool),
+}
+
+fn migration_profile(stage: &str, points: bool, start: std::time::Instant) {
+    if std::env::var_os("NOTES_MIGRATION_PROFILE").is_none() { return; }
+    #[cfg(target_os = "linux")]
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        let rss = status.lines().find(|line| line.starts_with("VmRSS:")).unwrap_or("VmRSS: unavailable");
+        let peak = status.lines().find(|line| line.starts_with("VmHWM:")).unwrap_or("VmHWM: unavailable");
+        eprintln!("migration-projection stage={stage} points={points} elapsed_ms={} {rss} {peak}", start.elapsed().as_millis());
+    }
+}
+
+fn trim_migration_heap() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    // SAFETY: malloc_trim takes no pointers and is thread-safe.
+    unsafe { libc::malloc_trim(0); }
+}
+
+fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool, bounded: bool) -> R<Projection> {
+    let started = std::time::Instant::now();
     let snap = match deps.snapshot(snapshot)? {
         Some(s) => s,
         None => return ink("snapshot required"),
@@ -210,6 +276,7 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
         Verified::Reason(r) => return Ok(disabled(r)),
         Verified::Ok(p, r) => (p, r),
     };
+    if bounded { migration_profile("verified", include_points, started); }
     let attrs = one(&root, "attributes")?;
     let tree = one(&root, "notetree")?;
     let pages = one(&root, "pagelist")?;
@@ -243,7 +310,7 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
     let by_id: HashMap<&str, &Element> = objects.iter().map(|o| (o.get("id").unwrap(), *o)).collect();
     let basic = deps.basic_pens()?;
     let strings = attrs.find("stringIdList");
-    let mut records: HashMap<String, (Record, Binding, bool)> = HashMap::new();
+    let mut records: HashMap<String, ProjectionRecord<'_>> = HashMap::new();
     let mut point_count = 0usize;
     for part in &parts {
         let record = deps.decode_stroke(&part.body)?;
@@ -274,8 +341,10 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
             && matches!(color, Some(Num::I(c)) if (0..=0xffff_ffff).contains(&c))
             && s.pressures.iter().all(|p| (0.0..=1.0).contains(p))
             && s.timestamps.iter().all(|t| *t >= 0);
-        records.insert(identity, (record, binding, template));
+        let stored = if bounded { ProjectionRecord::Deferred(part, template) } else { ProjectionRecord::Retained(record, binding, template) };
+        records.insert(identity, stored);
     }
+    if bounded { migration_profile("records", include_points, started); }
     let mut result = Vec::new();
     let mut seen: HashSet<String> = object_ids.iter().cloned().collect();
     if let Some(l) = &snap.local_id {
@@ -337,8 +406,18 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
                     continue; // carried image/shape/line/text box (never edited)
                 }
                 let key = o.get("id").unwrap_or("");
-                let (record, binding, template) = records.get(key).ok_or_else(|| Error::new(Kind::Key, format!("'{key}'")))?;
-                let mut template = *template;
+                let stored = records.get(key).ok_or_else(|| Error::new(Kind::Key, format!("'{key}'")))?;
+                let decoded;
+                let (record, binding, mut template) = match stored {
+                    ProjectionRecord::Retained(record, binding, template) => (record, binding, *template),
+                    ProjectionRecord::Deferred(part, template) => {
+                        let record = deps.decode_stroke(&part.body)?;
+                        if record.identity()? != key { return ink("binary/XML inventory mismatch"); }
+                        let binding = deps.bind(&record, o, strings)?;
+                        decoded = (record, binding);
+                        (&decoded.0, &decoded.1, *template)
+                    }
+                };
                 let scale = match deps.coordinate_scale(record, width, height) {
                     Ok(s) => Some(s),
                     Err(e) if e.is(Kind::Ink) => {
@@ -488,13 +567,26 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
         facts.push((page_reason, locked, strokes.len(), page_objects, templates, erasable_count, first_shape, category, marker_shape, marker_category));
         result.push(PageDto { id: pid, index, width, height, pdf: category.0, strokes, ink: PageInk::default() });
     }
+    // Migration-only path: the page DTOs no longer borrow multipart parts.
+    // Release their encoded bodies before the writer capability probes parse
+    // the source again; interactive projection keeps its existing lifetime.
+    if bounded {
+        drop(records);
+        drop(parts);
+        drop(parsed);
+        migration_profile("pages", include_points, started);
+    }
     let probe_errors = [Kind::Ink, Kind::Doc, Kind::Value, Kind::Type, Kind::Overflow];
     let mut allowed = false;
     if let Some((identity, width, height)) = &append_source {
         let attempt = (|| -> R<()> {
             let now = integer(root.get("syncModifiedTime"))? as i128 + 1;
             let now = i64::try_from(now).map_err(|_| Error::new(Kind::Overflow, "now_ms overflow"))?;
-            deps.append_probe(&snap, identity, &uuid4(), *width as f64 / 2.0, *height as f64 / 2.0, now)
+            if bounded {
+                deps.append_probe_for_migration(&snap, identity, &uuid4(), *width as f64 / 2.0, *height as f64 / 2.0, now)
+            } else {
+                deps.append_probe(&snap, identity, &uuid4(), *width as f64 / 2.0, *height as f64 / 2.0, now)
+            }
         })();
         match attempt {
             Ok(()) => allowed = true,
@@ -502,6 +594,7 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
             Err(e) => return Err(e),
         }
     }
+    if bounded { trim_migration_heap(); migration_profile("append_probe", include_points, started); }
     let mut erase = false;
     if let Some((pid, lid, oid)) = &erase_probe {
         let attempt = (|| -> R<()> {
@@ -510,7 +603,11 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
                 Some(h) => h,
                 None => &snap,
             };
-            ink_erase::prepare_ink_delete(deps, handle, Some(pid), Some(lid), &Some(vec![Some(oid.clone())]), Some(now))?;
+            if bounded {
+                ink_erase::prepare_ink_delete_for_migration(deps, handle, Some(pid), Some(lid), &Some(vec![Some(oid.clone())]), Some(now))?;
+            } else {
+                ink_erase::prepare_ink_delete(deps, handle, Some(pid), Some(lid), &Some(vec![Some(oid.clone())]), Some(now))?;
+            }
             Ok(())
         })();
         match attempt {
@@ -519,6 +616,7 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
             Err(e) => return Err(e),
         }
     }
+    if bounded { trim_migration_heap(); migration_profile("erase_probe", include_points, started); }
     let mut first_ok: Vec<((bool, bool, bool), bool)> = Vec::new();
     for (category, (pid, width, height)) in &first_probes {
         let attempt = (|| -> R<()> {
@@ -596,7 +694,16 @@ fn project(deps: &dyn Deps, snapshot: &dyn Any, include_points: bool) -> R<Proje
 
 /// `project_ink`: any inventory/format failure yields a disabled projection.
 pub fn project_ink(deps: &dyn Deps, snapshot: &dyn Any, points: bool) -> R<Projection> {
-    match project(deps, snapshot, points) {
+    project_ink_mode(deps, snapshot, points, false)
+}
+
+/// The same projection for migration hashing, with bounded decoded records.
+pub fn project_ink_for_migration(deps: &dyn Deps, snapshot: &dyn Any, points: bool) -> R<Projection> {
+    project_ink_mode(deps, snapshot, points, true)
+}
+
+fn project_ink_mode(deps: &dyn Deps, snapshot: &dyn Any, points: bool, bounded: bool) -> R<Projection> {
+    match project(deps, snapshot, points, bounded) {
         Err(e)
             if e.any(&[
                 Kind::Ink,

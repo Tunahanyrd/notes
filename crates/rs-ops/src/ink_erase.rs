@@ -127,6 +127,18 @@ pub(crate) fn load(
     stroke_ids: &StrokeIds,
     now_ms: Option<i128>,
 ) -> R<Ctx> {
+    load_mode(deps, snapshot, page_id, layer_id, stroke_ids, now_ms, false)
+}
+
+fn load_mode(
+    deps: &dyn Deps,
+    snapshot: &dyn Any,
+    page_id: Option<&str>,
+    layer_id: Option<&str>,
+    stroke_ids: &StrokeIds,
+    now_ms: Option<i128>,
+    bounded: bool,
+) -> R<Ctx> {
     let snap = match deps.snapshot(snapshot)? {
         Some(s) if s.commit_id.as_deref().is_some_and(|c| !c.is_empty()) => s,
         _ => return ink("committed snapshot required"),
@@ -197,20 +209,25 @@ pub(crate) fn load(
         return ink("duplicate stroke identity");
     }
     let mut records: HashMap<String, (Record, Binding)> = HashMap::new();
+    let mut seen = BTreeSet::new();
+    let mut max_record_time: Option<i64> = None;
     let strings = attrs.find("stringIdList");
     for part in &parts {
         let record = deps.decode_stroke(&part.body)?;
         let identity = record.identity()?;
-        if records.contains_key(&identity) || !by_id.contains_key(&Some(identity.as_str())) {
+        if !seen.insert(identity.clone()) || !by_id.contains_key(&Some(identity.as_str())) {
             return ink("binary/XML inventory differs");
         }
         let binding = deps.bind(&record, by_id[&Some(identity.as_str())], strings)?;
         if part.filename.as_deref() != Some(format!("{}_{}", identity, binding.modified_time).as_str()) {
             return ink("stroke MIME identity/time differs");
         }
-        records.insert(identity, (record, binding));
+        max_record_time = Some(max_record_time.map_or(binding.modified_time, |old| old.max(binding.modified_time)));
+        if !bounded || stroke_ids.iter().any(|id| id == &identity) {
+            records.insert(identity, (record, binding));
+        }
     }
-    let record_ids: BTreeSet<Option<&str>> = records.keys().map(|k| Some(k.as_str())).collect();
+    let record_ids: BTreeSet<Option<&str>> = seen.iter().map(|k| Some(k.as_str())).collect();
     let object_ids: BTreeSet<Option<&str>> = by_id.keys().copied().collect();
     if record_ids != object_ids {
         return ink("binary/XML inventory differs");
@@ -282,7 +299,7 @@ pub(crate) fn load(
         ticks.extend(carried_ticks.iter().copied());
         ticks.extend(floating_ticks.iter().copied());
         let revision = integer(attrs.get("fileRevision"))? as i128 + 1;
-        let max = ticks.into_iter().chain(records.values().map(|(_, b)| b.modified_time)).max().unwrap();
+        let max = ticks.into_iter().chain(max_record_time).max().unwrap();
         let tick = max as i128 + 1;
         if tick >= I63 || revision >= 1 << 31 {
             return ink("ink timestamp/revision overflow");
@@ -396,7 +413,32 @@ pub fn prepare_ink_delete(
     stroke_ids: &StrokeIds,
     now_ms: Option<i128>,
 ) -> R<StrokeEdit> {
-    let mut ctx = load(deps, snapshot, page_id, layer_id, stroke_ids, now_ms)?;
+    prepare_ink_delete_mode(deps, snapshot, page_id, layer_id, stroke_ids, now_ms, false)
+}
+
+/// The migration verifier only needs the selected stroke after validating
+/// every part; retaining all decoded records is unnecessary for this probe.
+pub fn prepare_ink_delete_for_migration(
+    deps: &dyn Deps,
+    snapshot: &dyn Any,
+    page_id: Option<&str>,
+    layer_id: Option<&str>,
+    stroke_ids: &StrokeIds,
+    now_ms: Option<i128>,
+) -> R<StrokeEdit> {
+    prepare_ink_delete_mode(deps, snapshot, page_id, layer_id, stroke_ids, now_ms, true)
+}
+
+fn prepare_ink_delete_mode(
+    deps: &dyn Deps,
+    snapshot: &dyn Any,
+    page_id: Option<&str>,
+    layer_id: Option<&str>,
+    stroke_ids: &StrokeIds,
+    now_ms: Option<i128>,
+    bounded: bool,
+) -> R<StrokeEdit> {
+    let mut ctx = load_mode(deps, snapshot, page_id, layer_id, stroke_ids, now_ms, bounded)?;
     for identity in &ctx.stroke_ids {
         if !stroke_erasable(&ctx.records[identity].0) {
             return ink("stroke is not removable in the delete profile");

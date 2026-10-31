@@ -24,6 +24,24 @@ pub const PROJECTION_RECIPE: &str = rs_ops::ink_projection::PROJECTION_RECIPE;
 /// `ink_projection.MAX_GEOMETRY_POINTS`
 pub const MAX_GEOMETRY_POINTS: f64 = rs_ops::ink_projection::MAX_GEOMETRY_POINTS;
 
+/// Deterministic projection baseline used only for an offline schema-7
+/// migration while the deploy holds the exclusive engine lock.
+pub struct MigrationProjectionVerifier;
+
+impl rs_store::snapshot_migration::ProjectionVerifier for MigrationProjectionVerifier {
+    fn recipe(&self) -> String {
+        format!("migration-projection-v2:{}:{}:summary-and-points", rs_editor::edit::PROJECTION_RECIPE, rs_ops::ink_projection::PROJECTION_RECIPE)
+    }
+
+    fn project(&self, snapshot: &Val) -> rs_store::db::Result<(Val, Val)> {
+        let editor = editor_projection_val(snapshot).map_err(|_| rs_store::db::Error::Value("editor projection failed during migration".into()))?;
+        let ink = Val::List([false, true].into_iter().map(|points| project_ink(snapshot, points)
+            .map_err(|_| rs_store::db::Error::Value("ink projection failed during migration".into())))
+            .collect::<rs_store::db::Result<Vec<_>>>()?);
+        Ok((editor, ink))
+    }
+}
+
 // ---------------------------------------------------------------- editor
 
 fn to_editor(v: &Val) -> E {
@@ -115,7 +133,82 @@ fn projection_val(p: &rs_editor::edit::Projection) -> R<Val> {
     ]))
 }
 
+/// Page-local frames for the top-level flowing body. The renderer lays this
+/// out from pageHorizontalPadding and the text object's density-scaled margins;
+/// the SDK's body rect is commonly the zero-area decoration shell, not the
+/// flow frame. Unsupported geometry is omitted rather than guessed.
+pub fn body_text_areas(resource_xml: &[u8]) -> Option<Val> {
+    use rs_editor::etree::Element;
+    fn child<'a>(node: &'a Element, name: &str) -> Option<&'a Element> {
+        let mut found = node.children.iter().filter(|item| item.local() == name);
+        let first = found.next()?;
+        if found.next().is_some() { None } else { Some(first) }
+    }
+    fn number(node: &Element, key: &str, default: Option<f64>) -> Option<f64> {
+        let value = match node.get(key) { Some(raw) => raw.parse::<f64>().ok()?, None => default? };
+        (value.is_finite() && (0.0..=32768.0).contains(&value)).then_some(value)
+    }
+    let root = rs_editor::etree::parse(resource_xml).ok()?;
+    let attrs = child(&root, "attributes")?;
+    if attrs.get("pageMode") != Some("0") || attrs.get("orientation").unwrap_or("0") != "0" { return None; }
+    let pages = child(&root, "pagelist")?;
+    if pages.children.is_empty() || pages.children.len() > 4096 { return None; }
+    let body = child(child(&root, "bodytext")?, "object")?;
+    if body.get("type") != Some("textBox") { return None; }
+    let pad = number(attrs, "pageHorizontalPadding", None)?;
+    let first = pages.children.first()?;
+    let default_width = number(attrs, "pageDefaultWidth", Some(number(attrs, "width", Some(number(first, "width", None)?))?))?;
+    let density = if default_width > 0.0 { (default_width as f32 / 360.0) as f64 } else { 1.0 };
+    let margins = ["leftMargin", "topMargin", "rightMargin", "bottomMargin"]
+        .map(|key| number(body, key, Some(0.0)).filter(|n| *n <= 1000.0).map(|n| ((n as f32) * density as f32) as f64));
+    let [Some(left), Some(top), Some(right), Some(bottom)] = margins else { return None; };
+    let mut areas = Vec::with_capacity(pages.children.len());
+    for (index, page) in pages.children.iter().enumerate() {
+        if page.local() != "page" || page.get("orientation").unwrap_or("0") != "0" { return None; }
+        let width = number(page, "width", None)?;
+        let height = number(page, "height", None)?;
+        let raw = page.get("bgColor")?.parse::<i64>().ok()?;
+        if !(-2147483648..=4294967295).contains(&raw) { return None; }
+        let color = (raw & 0xffff_ffff) as u32;
+        let rect = [pad + left, if index == 0 { top } else { 0.0 }, width - pad - right, height - bottom];
+        if width <= 0.0 || height <= 0.0 || color >> 24 != 255 || rect[0] >= rect[2] || rect[1] >= rect[3] { return None; }
+        areas.push(Val::dict(vec![
+            ("pageIndex", Val::Int(index as i64)),
+            ("rect", Val::List(rect.into_iter().map(Val::Float).collect())),
+            ("pageWidth", Val::Float(width)), ("pageHeight", Val::Float(height)),
+            ("backgroundArgb", Val::Int(color as i64)),
+        ]));
+    }
+    Some(Val::List(areas))
+}
+
+#[cfg(test)]
+mod body_area_tests {
+    use super::*;
+
+    #[test]
+    fn flow_uses_page_padding_and_density_scaled_body_margins() {
+        let xml = br#"<NoteResource><attributes pageMode="0" orientation="0" width="1080" pageDefaultWidth="1080" pageHorizontalPadding="20"/><pageList><page width="1080" height="1527" bgColor="-1"/><page width="1080" height="1527" bgColor="-16777216"/></pageList><bodyText><object type="textBox" leftMargin="16" topMargin="10" rightMargin="12" bottomMargin="4"><rect l="0" t="0" r="0" b="0"/></object></bodyText></NoteResource>"#;
+        let areas = body_text_areas(xml).unwrap();
+        let Val::List(pages) = areas else { panic!("expected areas") };
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[0].get("rect"), Some(&Val::List(vec![Val::Float(68.0), Val::Float(30.0), Val::Float(1024.0), Val::Float(1515.0)])));
+        assert_eq!(pages[1].get("backgroundArgb"), Some(&Val::Int(0xff000000)));
+        assert_eq!(pages[1].get("pageIndex"), Some(&Val::Int(1)));
+    }
+
+    #[test]
+    fn unsupported_or_nonfinite_geometry_is_not_projected() {
+        let prefix = "<NoteResource><attributes pageMode=\"0\" width=\"1080\" pageHorizontalPadding=\"0\"/><pageList><page width=\"1080\" height=\"1527\" bgColor=\"-1\"/></pageList><bodyText><object type=\"textBox\" leftMargin=\"";
+        let suffix = "\"/></bodyText></NoteResource>";
+        for invalid in ["NaN", "-1", "1001"] {
+            assert!(body_text_areas(format!("{prefix}{invalid}{suffix}").as_bytes()).is_none());
+        }
+    }
+}
+
 fn run_editor_projection(snap: Option<&Snapshot>, resolved: rs_editor::rich::Result<rs_editor::edit::Snapshot>) -> R<Val> {
+    let body_areas = resolved.as_ref().ok().and_then(|s| body_text_areas(&s.resource_xml));
     let backend = rs_editor::edit::DocBackend {
         limits: rs_doc::doc::DocLimits::default(),
         raw_body: snap.map(|s| s.raw_body.clone()).unwrap_or_default(),
@@ -126,7 +219,13 @@ fn run_editor_projection(snap: Option<&Snapshot>, resolved: rs_editor::rich::Res
         Err(_) => rs_editor::edit::editor_projection(Err(resolved.err().unwrap()), &backend),
     }
     .map_err(editor_fail)?;
-    projection_val(&p)
+    let mut value = projection_val(&p)?;
+    if p.text_edit {
+        if let Some(areas) = body_areas {
+            value.set("bodyTextAreas", areas);
+        }
+    }
+    Ok(value)
 }
 
 fn resolve(s: &Snapshot) -> rs_editor::rich::Result<rs_editor::edit::Snapshot> {

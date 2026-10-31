@@ -8,6 +8,7 @@ pub mod num;
 pub mod objects;
 pub mod payload;
 pub mod prepare;
+pub mod records;
 pub mod xml;
 
 /// Error kinds mirror the Python exception classes raised by the oracle.

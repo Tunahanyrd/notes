@@ -85,6 +85,12 @@ pub trait Backend: Send + Sync {
     fn json(&self, call: Call) -> Result<Vec<u8>, Failure>;
     /// A call returning `bytes | None` (preview PNG).
     fn bytes_or_none(&self, call: Call) -> Result<Option<Vec<u8>>, Failure>;
+    fn ink_layer(&self, _call: Call) -> Result<Option<(Vec<u8>, String)>, Failure> {
+        Err(Failure::store("preview_unavailable", "Bu sayfanın çizim katmanı kullanılamıyor.", 404))
+    }
+    fn text_ink_layer(&self, _call: Call) -> Result<Option<(Vec<u8>, String)>, Failure> {
+        Err(Failure::store("preview_unavailable", "Bu sayfanın çizim katmanı kullanılamıyor.", 404))
+    }
     /// `thumbnails.request` -> `(bytes | None, complete)`.
     fn bytes_and_flag(&self, call: Call) -> Result<(Option<Vec<u8>>, bool), Failure>;
     /// `engine.get(id)` -> (`note['title']`, `note['body']`), both `str`.
@@ -610,11 +616,63 @@ pub fn handle_request<B: Backend + ?Sized, R: BufRead, W: Write>(cfg: &Config, b
                 let body = backend.json(call(Previews, "manifest", vec![id()]))?;
                 return conn.json_raw(200, &body);
             }
+            ("POST", Some("pages")) => {
+                let data = conn.body()?;
+                if !data.keys_subset(&[]) {
+                    return Err(Failure::store("invalid_change", "Sayfa yenileme isteği geçersiz.", 400));
+                }
+                let body = backend.json(call(Previews, "retry_inventory", vec![id()]))?;
+                return conn.json_raw(200, &body);
+            }
             ("GET", Some("preview")) => {
-                let params = urlparse::parse_qs(&parsed.query, 2).map_err(|_| Failure::Internal)?;
+                let params = urlparse::parse_qs(&parsed.query, 6).map_err(|_| Failure::store("invalid_preview", "Sayfa isteği geçersiz.", 400))?;
                 let page = qs_get(&params, "page").cloned().unwrap_or_else(|| vec!["0".into()]);
                 if page.len() != 1 || page[0].is_empty() || page[0].len() > 4 || !page[0].bytes().all(|b| b.is_ascii_digit()) {
                     return Err(Failure::store("invalid_page", "Sayfa numarası geçersiz.", 400));
+                }
+                let layer = qs_get(&params, "layer");
+                let variant = qs_get(&params, "variant");
+                if layer.is_some() || variant.is_some() {
+                    let invalid = || Failure::store("invalid_preview", "Sayfa isteği geçersiz.", 400);
+                    let one = |name: &str| -> Result<Option<&str>, Failure> {
+                        match qs_get(&params, name) { None => Ok(None), Some(values) if values.len()==1 => Ok(Some(values[0].as_str())), _ => Err(invalid()) }
+                    };
+                    let is_tile = one("layer")? == Some("ink") && one("variant")?.is_none();
+                    let is_base = one("variant")? == Some("noink") && one("layer")?.is_none();
+                    let is_text_tile = one("layer")? == Some("textink") && one("variant")?.is_none();
+                    let is_text_base = one("variant")? == Some("notextbase") && one("layer")?.is_none();
+                    let is_notext = one("variant")? == Some("notext") && one("layer")?.is_none();
+                    let is_fulltext = one("variant")? == Some("fulltext") && one("layer")?.is_none();
+                    if !is_tile && !is_base && !is_text_tile && !is_text_base && !is_notext && !is_fulltext { return Err(invalid()); }
+                    if params.iter().any(|(key,_)| !["page","revision","layer","scale","tile","variant","snapshot"].contains(&key.as_str())) { return Err(invalid()); }
+                    let revision = if let Some(revision) = one("revision")? {
+                        if revision.is_empty() || revision.len()>19 || !revision.bytes().all(|b|b.is_ascii_digit()) { return Err(invalid()); }
+                        revision.parse::<i64>().map_err(|_| invalid())?
+                    } else { -1 };
+                    let mut args=vec![id(), Arg::Int(page[0].parse().unwrap()), Arg::Int(revision)];
+                    if is_notext || is_fulltext {
+                        if one("scale")?.is_some() || one("tile")?.is_some() || one("snapshot")?.is_some() { return Err(invalid()); }
+                        return match backend.bytes_or_none(call(Previews,if is_fulltext {"fulltext"} else {"notext"},args))? {
+                            None => conn.json_raw(202,b"{\"state\": \"pending\"}"),
+                            Some(raw) => conn.send(200,&raw,"image/png",&[]),
+                        };
+                    }
+                    if is_tile || is_text_tile {
+                        let scale = match one("scale")? { Some("1")=>2,Some("1.5")=>3,Some("2")=>4,Some("3")=>6,Some("4")=>8,_=>return Err(invalid()) };
+                        let tile = one("tile")?.ok_or_else(invalid)?;
+                        let (x,y)=tile.split_once(',').ok_or_else(invalid)?;
+                        let coordinate = |v:&str| -> Result<i64,Failure> { if v.is_empty()||v.len()>5||!v.bytes().all(|b|b.is_ascii_digit()){return Err(invalid())} v.parse().map_err(|_|invalid()) };
+                        args.extend([Arg::Int(scale),Arg::Int(coordinate(x)?),Arg::Int(coordinate(y)?)]);
+                    } else if one("scale")?.is_some() || one("tile")?.is_some() { return Err(invalid()); }
+                    if let Some(value)=one("snapshot")? {
+                        if value.len()!=64||!value.bytes().all(|b|b.is_ascii_hexdigit()) { return Err(invalid()); }
+                        args.push(Arg::Str(value.to_owned()));
+                    }
+                    let result=if is_text_tile||is_text_base {backend.text_ink_layer(call(Previews,"text_ink_layer",args))?} else {backend.ink_layer(call(Previews,"ink_layer",args))?};
+                    return match result {
+                        None => conn.json_raw(202,b"{\"state\": \"pending\"}"),
+                        Some((raw,token)) => conn.send(200,&raw,"image/png",&[("X-Ink-Tiles","1".into()),("X-Ink-Snapshot",token)]),
+                    };
                 }
                 let raw = backend.bytes_or_none(call(Previews, "request", vec![id(), Arg::Int(page[0].parse().unwrap()), Arg::KwFloat("wait", PREVIEW_WAIT_SECONDS)]))?;
                 return match raw {

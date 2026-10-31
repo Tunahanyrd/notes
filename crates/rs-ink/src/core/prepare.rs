@@ -160,11 +160,71 @@ pub struct StyleOverride {
 struct Inventory {
     part_names: Vec<(Option<String>, String)>,
     stroke_count: usize,
-    records: HashMap<String, (Record, Binding)>,
+    records: HashMap<String, InventoryRecord>,
+}
+
+enum InventoryRecord {
+    Decoded(Record, Binding),
+    Encoded(Vec<u8>, Binding),
+}
+impl InventoryRecord {
+    fn binding(&self) -> &Binding {
+        match self { Self::Decoded(_, binding) | Self::Encoded(_, binding) => binding }
+    }
 }
 
 type MemoKey = ([u8; 32], [u8; 32], String);
-static MEMO: Mutex<Vec<(MemoKey, Arc<Inventory>)>> = Mutex::new(Vec::new());
+const MEMO_BYTES: usize = 32 * 1024 * 1024;
+type MemoEntry = (MemoKey, Arc<Inventory>, usize);
+static MEMO: Mutex<Vec<MemoEntry>> = Mutex::new(Vec::new());
+
+// Account for retained decoded frames and samples, rather than bounding only
+// the number of documents. Large notes are used for the current operation
+// but are never kept alive by this cache.
+fn inventory_bytes(inventory: &Inventory) -> usize {
+    use std::mem::size_of;
+    let mut size = size_of::<Inventory>()
+        .saturating_add(inventory.part_names.capacity().saturating_mul(size_of::<(Option<String>, String)>()))
+        .saturating_add(inventory.records.capacity().saturating_mul(2 * size_of::<(String, InventoryRecord)>()));
+    for (name, content_type) in &inventory.part_names {
+        size = size.saturating_add(name.as_ref().map_or(0, String::capacity)).saturating_add(content_type.capacity());
+    }
+    for (identity, item) in &inventory.records {
+        let binding = item.binding();
+        size = size.saturating_add(identity.capacity())
+            .saturating_add(binding.object_id.capacity()).saturating_add(binding.pen_name.capacity())
+            .saturating_add(binding.advanced_settings.as_ref().map_or(0, String::capacity))
+            .saturating_add(binding.style.0.capacity().saturating_mul(size_of::<(&'static str, StyleVal)>()));
+        for (_, value) in &binding.style.0 {
+            if let StyleVal::G(values) = value { size = size.saturating_add(values.capacity().saturating_mul(size_of::<u32>())); }
+        }
+        let InventoryRecord::Decoded(record, _) = item else {
+            if let InventoryRecord::Encoded(bytes, _) = item { size = size.saturating_add(bytes.capacity()); }
+            continue;
+        };
+        size = size.saturating_add(record.raw.capacity())
+            .saturating_add(record.frames.capacity().saturating_mul(size_of::<Frame>()))
+            .saturating_add(record.samples.points.capacity().saturating_mul(size_of::<(f64, f64)>()))
+            .saturating_add(record.samples.pressures.capacity().saturating_mul(size_of::<f64>()))
+            .saturating_add(record.samples.timestamps.capacity().saturating_mul(size_of::<i64>()))
+            .saturating_add(record.samples.tilts.capacity().saturating_mul(size_of::<f64>()))
+            .saturating_add(record.samples.orientations.capacity().saturating_mul(size_of::<f64>()));
+        for frame in &record.frames {
+            size = size.saturating_add(frame.raw.capacity()).saturating_add(frame.properties.capacity()).saturating_add(frame.fields.capacity());
+        }
+    }
+    size
+}
+
+fn memo_insert(memo: &mut Vec<MemoEntry>, key: MemoKey, inventory: &Arc<Inventory>, budget: usize) {
+    let cost = inventory_bytes(inventory).saturating_add(key.2.capacity()).saturating_add(std::mem::size_of::<MemoEntry>());
+    if cost > budget { return; }
+    memo.retain(|(old, _, _)| *old != key);
+    while memo.len() >= 4 || memo.iter().fold(cost, |n, entry| n.saturating_add(entry.2)) > budget {
+        memo.remove(0);
+    }
+    memo.push((key, inventory.clone(), cost));
+}
 
 /// ink_editor._prepare_ink_document. `parse` supplies tools.notes_payload.parse_payload parts.
 #[allow(clippy::too_many_arguments)]
@@ -177,6 +237,37 @@ pub fn prepare_ink_document(
     recipe_version: u8,
     style: Option<&StyleOverride>,
     parse: &dyn Fn(&[u8], &str) -> R<Vec<PartIn>>,
+) -> R<InkAppendEdit> {
+    prepare_ink_document_mode(snapshot, source_stroke_id, new_stroke_id, geometry, now_ms, recipe_version, style, parse, false)
+}
+
+/// Identical dry-run behavior for migration validation, retaining only raw
+/// part bytes and metadata instead of every decoded stroke.
+#[allow(clippy::too_many_arguments)]
+pub fn prepare_ink_document_for_migration(
+    snapshot: &SnapshotIn,
+    source_stroke_id: Option<&str>,
+    new_stroke_id: Option<&str>,
+    geometry: Geometry,
+    now_ms: Val,
+    recipe_version: u8,
+    style: Option<&StyleOverride>,
+    parse: &dyn Fn(&[u8], &str) -> R<Vec<PartIn>>,
+) -> R<InkAppendEdit> {
+    prepare_ink_document_mode(snapshot, source_stroke_id, new_stroke_id, geometry, now_ms, recipe_version, style, parse, true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_ink_document_mode(
+    snapshot: &SnapshotIn,
+    source_stroke_id: Option<&str>,
+    new_stroke_id: Option<&str>,
+    geometry: Geometry,
+    now_ms: Val,
+    recipe_version: u8,
+    style: Option<&StyleOverride>,
+    parse: &dyn Fn(&[u8], &str) -> R<Vec<PartIn>>,
+    bounded: bool,
 ) -> R<InkAppendEdit> {
     let capture = match &geometry {
         Geometry::Capture(c) => Some(*c),
@@ -260,7 +351,15 @@ pub fn prepare_ink_document(
         return ink("unknown resource section");
     }
     let memo_key: MemoKey = (sha256(snapshot.raw_body), sha256(snapshot.resource_xml), snapshot.content_type.to_string());
-    let memo = MEMO.lock().unwrap().iter().find(|(k, _)| *k == memo_key).map(|(_, v)| v.clone());
+    let memo = if bounded { None } else {
+        let mut memo = MEMO.lock().unwrap();
+        memo.iter().position(|(k, _, _)| *k == memo_key).map(|index| {
+            let entry = memo.remove(index);
+            let value = entry.1.clone();
+            memo.push(entry);
+            value
+        })
+    };
     let fresh_parts = if memo.is_none() { Some(parse(snapshot.raw_body, snapshot.content_type)?) } else { None };
     let part_names: Vec<(Option<String>, String)> = match (&memo, &fresh_parts) {
         (Some(m), _) => m.part_names.clone(),
@@ -316,8 +415,8 @@ pub fn prepare_ink_document(
         None => {
             let parts = fresh_parts.unwrap();
             let string_table = t.find(attrs, "stringIdList");
-            let mut records: HashMap<String, (Record, Binding)> = HashMap::new();
-            for part in parts.iter().filter(|p| p.name.as_deref() == Some("strokeResource")) {
+            let mut records: HashMap<String, InventoryRecord> = HashMap::new();
+            for part in parts.into_iter().filter(|p| p.name.as_deref() == Some("strokeResource")) {
                 let record = decode_stroke_resource(&part.body)?;
                 let base = &record.frames[0];
                 let fs = base.fixed_start as usize;
@@ -333,26 +432,27 @@ pub fn prepare_ink_document(
                 if part.filename.as_deref() != Some(format!("{}_{}", identity, binding.modified_time).as_str()) {
                     return ink("stroke MIME identity/time differs");
                 }
-                records.insert(identity, (record, binding));
+                let stored = if bounded { InventoryRecord::Encoded(part.body, binding) } else { InventoryRecord::Decoded(record, binding) };
+                records.insert(identity, stored);
             }
             let inv = Arc::new(Inventory {
                 part_names: part_names.clone(),
                 stroke_count,
                 records,
             });
-            let mut memo = MEMO.lock().unwrap();
-            memo.retain(|(k, _)| *k != memo_key);
-            memo.push((memo_key, inv.clone()));
-            while memo.len() > 4 {
-                memo.remove(0);
-            }
+            if !bounded { memo_insert(&mut MEMO.lock().unwrap(), memo_key, &inv, MEMO_BYTES); }
             inv
         }
     };
     let _ = inventory.stroke_count;
     let records = &inventory.records;
+    let decoded;
     let (record, binding) = match records.get(source_stroke_id) {
-        Some(r) => r,
+        Some(InventoryRecord::Decoded(record, binding)) => (record, binding),
+        Some(InventoryRecord::Encoded(bytes, binding)) => {
+            decoded = decode_stroke_resource(bytes)?;
+            (&decoded, binding)
+        },
         None => return ink("source stroke absent"),
     };
     let base = &record.frames[0];
@@ -441,8 +541,8 @@ pub fn prepare_ink_document(
     tick = tick.max(doc_integer(t.get(attrs, "modifiedTime"))? as i128);
     tick = tick.max(doc_integer(t.get(page, "modifiedTime"))? as i128);
     tick = tick.max(doc_integer(t.get(layer, "modifiedTime"))? as i128);
-    for (_, b) in records.values() {
-        tick = tick.max(b.modified_time as i128);
+    for item in records.values() {
+        tick = tick.max(item.binding().modified_time as i128);
     }
     for t in &passthrough_ticks {
         tick = tick.max(*t as i128);
@@ -761,6 +861,25 @@ mod api_tests {
     //! Oracle fixtures: set INK_API_CASES to a JSON file dumped from the Python implementation.
     use super::*;
     use base64::Engine;
+    #[test]
+    fn decoded_inventory_cache_is_bounded_by_retained_bytes() {
+        fn inventory(bytes: usize) -> Arc<Inventory> {
+            let record = Record { raw: vec![0; bytes], frames: vec![], samples: Samples::default(), compressed: false, stylus: false, tool_type: 0 };
+            let binding = Binding { object_id: "stroke".into(), modified_time: 1, bounds: [0.0; 4], pen_name: "pen".into(), advanced_settings: None, style: Style::default() };
+            Arc::new(Inventory { part_names: vec![], stroke_count: 1, records: HashMap::from([("stroke".into(), InventoryRecord::Decoded(record, binding))]) })
+        }
+        let first = inventory(1024);
+        let cost = inventory_bytes(&first) + std::mem::size_of::<MemoEntry>();
+        let mut cache = Vec::new();
+        memo_insert(&mut cache, ([1; 32], [2; 32], String::new()), &first, cost * 2 - 1);
+        memo_insert(&mut cache, ([3; 32], [4; 32], String::new()), &first, cost * 2 - 1);
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache[0].0.0, [3; 32]);
+        let large = inventory(cost * 3);
+        memo_insert(&mut cache, ([5; 32], [6; 32], String::new()), &large, cost * 2 - 1);
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache[0].0.0, [3; 32]);
+    }
     #[test]
     fn public_append_matches_python_oracle() {
         let Ok(path) = std::env::var("INK_API_CASES") else { return };

@@ -143,6 +143,7 @@ impl RustBackend {
             (Target::Engine, "export_file") => e.export_file(&s(0)?, &v(1)),
             (Target::Engine, "request_sync") => Ok(Val::Bool(e.request_sync())),
             (Target::Previews, "manifest") => e.previews.manifest(&s(0)?),
+            (Target::Previews, "retry_inventory") => e.previews.retry_inventory(&s(0)?),
             (Target::Sessions, "start_login") => e.sessions.start_login(),
             (Target::Sessions, "disconnect") => e.sessions.disconnect(),
             (target, method) => Err(Fail::new(Kind::Attribute, format!("{:?}.{}", target, method))),
@@ -160,10 +161,42 @@ impl Backend for RustBackend {
         let run = || -> R<Option<Vec<u8>>> {
             let id = arg_str(call.args.first())?;
             let page = arg_int(call.args.get(1))?;
+            if call.method == "notext" {
+                return self.engine.previews.notext(&id, page, arg_int(call.args.get(2))?);
+            }
+            if call.method == "fulltext" {
+                return self.engine.previews.fulltext(&id, page, arg_int(call.args.get(2))?);
+            }
             let wait = call.args.iter().find_map(|a| if let Arg::KwFloat("wait", w) = a { Some(*w) } else { None }).unwrap_or(0.0);
             self.engine.previews.request(&id, page, 0, wait)
         };
         run().map_err(|e| failure(&e))
+    }
+
+    fn ink_layer(&self, call: Call) -> Result<Option<(Vec<u8>, String)>, Failure> {
+        let run = || -> R<Option<(Vec<u8>, String)>> {
+            let id = arg_str(call.args.first())?;
+            let page = arg_int(call.args.get(1))?;
+            let revision = arg_int(call.args.get(2))?;
+            let tile = if call.args.len() >= 6 {
+                Some((u8::try_from(arg_int(call.args.get(3))?).map_err(|_| Fail::value("invalid scale"))?,
+                    u32::try_from(arg_int(call.args.get(4))?).map_err(|_| Fail::value("invalid tile"))?,
+                    u32::try_from(arg_int(call.args.get(5))?).map_err(|_| Fail::value("invalid tile"))?))
+            } else { None };
+            let expected = match call.args.get(if tile.is_some() { 6 } else { 3 }) { Some(Arg::Str(value)) => Some(value.as_str()), _ => None };
+            self.engine.previews.ink_layer(&id, page, revision, tile, expected)
+        };
+        run().map_err(|e| failure(&e))
+    }
+
+    fn text_ink_layer(&self, call: Call) -> Result<Option<(Vec<u8>, String)>, Failure> {
+        let run = || -> R<Option<(Vec<u8>, String)>> {
+            let id=arg_str(call.args.first())?;let page=arg_int(call.args.get(1))?;let revision=arg_int(call.args.get(2))?;
+            let tile=if call.args.len()>=6 {Some((u8::try_from(arg_int(call.args.get(3))?).map_err(|_|Fail::value("invalid scale"))?,u32::try_from(arg_int(call.args.get(4))?).map_err(|_|Fail::value("invalid tile"))?,u32::try_from(arg_int(call.args.get(5))?).map_err(|_|Fail::value("invalid tile"))?))} else {None};
+            let expected=match call.args.get(if tile.is_some(){6}else{3}) {Some(Arg::Str(value))=>Some(value.as_str()),_=>None};
+            self.engine.previews.text_ink_layer(&id,page,revision,tile,expected)
+        };
+        run().map_err(|e|failure(&e))
     }
 
     fn bytes_and_flag(&self, call: Call) -> Result<(Option<Vec<u8>>, bool), Failure> {

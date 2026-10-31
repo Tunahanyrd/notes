@@ -451,6 +451,7 @@ impl StoreCore {
     }
 
     pub fn save_ink_erase<H: Host>(&self, h: &H, identity: &str, erase: &Val, expected_revision: &Val) -> Result<Val> {
+        self.with_container_read(|| {
         if !expected_revision.is_exact_int() {
             return fail("revision_required", "Not sürümü eksik.", 400);
         }
@@ -493,7 +494,7 @@ impl StoreCore {
             if !sql_eq(row.raw("revision"), expected_revision) {
                 return fail("revision_conflict", "Not değişti; silme işaretleri korunuyor.", 409);
             }
-            if row.truthy("deleted_remote") || row.truthy("trashed") || !row.truthy("server_id") || !row.truthy("base_document") {
+            if row.truthy("deleted_remote") || row.truthy("trashed") || !row.truthy("server_id") || matches!(Self::base_ref(&row), SqlVal::Null) {
                 return fail("read_only", "Bu notta çizgi silinemiyor.", 422);
             }
             if row.text("sync_state") != Some("synced")
@@ -503,7 +504,7 @@ impl StoreCore {
                 return fail("sync_pending", "Önce bu notun eşitlenmesini bekleyin.", 409);
             }
             for g in &groups {
-                let base = loads_sql(row.raw("base_document"))?;
+                let base = self.load_snapshot_sql(Self::base_ref(&row))?;
                 match h.prepare_ink_delete(&base, key(g, "pageId")?, key(g, "layerId")?, key(g, "strokeIds")?) {
                     Ok(()) => {}
                     Err(f) if f.ink || f.document || f.value || f.type_ => {
@@ -516,12 +517,12 @@ impl StoreCore {
             let job = uuid4();
             db.exec(
                 "INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?)",
-                &p![&job, identity, "erase_ink", revision, row.raw("title"), row.raw("body"), row.raw("base_document"), "queued", null(), now_ms()],
+                &p![&job, identity, "erase_ink", revision, row.raw("title"), row.raw("body"), Self::base_ref(&row), "queued", null(), now_ms()],
             )?;
             let model = Val::dict(vec![("schemaVersion", Val::Int(1)), ("groups", Val::List(groups.clone()))]);
             db.exec(
                 "INSERT INTO ink_erase_jobs VALUES (?,?,?,?)",
-                &p![&job, dumps_ascii(&model)?, 0, row.raw("base_document")],
+                &p![&job, dumps_ascii(&model)?, 0, Self::base_ref(&row)],
             )?;
             db.exec(
                 "UPDATE notes SET revision=?,modified_ms=?,sync_state='pending',error=NULL WHERE id=?",
@@ -530,11 +531,13 @@ impl StoreCore {
             Ok(())
         })?;
         self.get(identity)
+        })
     }
 
     /// InkStore.save_ink_move: queue a whole-stroke move (one Cloud write per
     /// page/layer group, every stroke of a group shifted by the same dx/dy).
     pub fn save_ink_move<H: Host>(&self, h: &H, identity: &str, moves: &Val, expected_revision: &Val) -> Result<Val> {
+        self.with_container_read(|| {
         if !expected_revision.is_exact_int() {
             return fail("revision_required", "Not sürümü eksik.", 400);
         }
@@ -582,7 +585,7 @@ impl StoreCore {
             if !sql_eq(row.raw("revision"), expected_revision) {
                 return fail("revision_conflict", "Not değişti; çizgiler taşınmadı.", 409);
             }
-            if row.truthy("deleted_remote") || row.truthy("trashed") || !row.truthy("server_id") || !row.truthy("base_document") {
+            if row.truthy("deleted_remote") || row.truthy("trashed") || !row.truthy("server_id") || matches!(Self::base_ref(&row), SqlVal::Null) {
                 return fail("read_only", "Bu notta çizgi taşınamıyor.", 422);
             }
             if row.text("sync_state") != Some("synced")
@@ -592,7 +595,7 @@ impl StoreCore {
                 return fail("sync_pending", "Önce bu notun eşitlenmesini bekleyin.", 409);
             }
             for g in &groups {
-                let base = loads_sql(row.raw("base_document"))?;
+                let base = self.load_snapshot_sql(Self::base_ref(&row))?;
                 let dx = g.get("dx").and_then(|v| v.as_f64()).unwrap_or(f64::NAN);
                 let dy = g.get("dy").and_then(|v| v.as_f64()).unwrap_or(f64::NAN);
                 match h.prepare_ink_move(&base, key(g, "pageId")?, key(g, "layerId")?, key(g, "strokeIds")?, dx, dy) {
@@ -607,12 +610,12 @@ impl StoreCore {
             let job = uuid4();
             db.exec(
                 "INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?)",
-                &p![&job, identity, "move_ink", revision, row.raw("title"), row.raw("body"), row.raw("base_document"), "queued", null(), now_ms()],
+                &p![&job, identity, "move_ink", revision, row.raw("title"), row.raw("body"), Self::base_ref(&row), "queued", null(), now_ms()],
             )?;
             let model = Val::dict(vec![("schemaVersion", Val::Int(1)), ("groups", Val::List(groups.clone()))]);
             db.exec(
                 "INSERT INTO ink_move_jobs VALUES (?,?,?,?)",
-                &p![&job, dumps_ascii(&model)?, 0, row.raw("base_document")],
+                &p![&job, dumps_ascii(&model)?, 0, Self::base_ref(&row)],
             )?;
             db.exec(
                 "UPDATE notes SET revision=?,modified_ms=?,sync_state='pending',error=NULL WHERE id=?",
@@ -621,6 +624,7 @@ impl StoreCore {
             Ok(())
         })?;
         self.get(identity)
+        })
     }
 
     pub fn ink_move_job(&self, job: &Val) -> Result<(Val, i64, Val)> {
@@ -643,10 +647,12 @@ impl StoreCore {
     }
 
     fn batch_row(&self, table: &str, job: &Val, missing: (&str, &str)) -> Result<(Val, i64, Val)> {
+        self.with_container_read(|| {
         let id = b(key(job, "id")?)?;
         let cur = self.with_db(|db| db.query(&format!("SELECT * FROM {} WHERE job_id=?", table), &[id]))?;
         let Some(row) = cur.one() else { return fail(missing.0, missing.1, 409) };
-        Ok((loads_sql(row.raw("model"))?, row.int("next_index"), loads_sql(row.raw("current_snapshot"))?))
+        Ok((loads_sql(row.raw("model"))?, row.int("next_index"), self.load_snapshot_sql(row.raw("current_snapshot"))?))
+        })
     }
 
     pub fn ink_erase_job(&self, job: &Val) -> Result<(Val, i64, Val)> {
@@ -668,20 +674,28 @@ impl StoreCore {
         let Val::Int(i) = index else {
             return Err(Error::Type(format!("can only concatenate {} (not \"int\") to {}", index.type_name(), index.type_name())));
         };
-        let encoded = dumps_utf8(snapshot)?;
         let id = b(key(job, "id")?)?;
-        self.with_db(|db| {
+        let write = |encoded: &str| self.with_db(|db| {
             let n = db
                 .exec(
                     &format!("UPDATE {} SET next_index=?,current_snapshot=? WHERE job_id=? AND next_index=?", table),
-                    &vec![int(i + 1), text(&encoded), id, int(*i)],
+                    &vec![int(i + 1), text(encoded), id.clone(), int(*i)],
                 )?
                 .rowcount;
             if n != 1 {
                 return fail(changed.0, changed.1, 409);
             }
             Ok(())
-        })
+        });
+        if self.with_db(|db| Self::schema7(db))? {
+            let store = crate::document_store::DocumentStore::open(&self.directory)?;
+            store.with_write(|writer| {
+                let reference = crate::snapshot_store::store_snapshot(writer, snapshot, None)?;
+                write(&dumps_utf8(&reference)?)
+            })
+        } else {
+            write(&dumps_utf8(snapshot)?)
+        }
     }
 
     pub fn checkpoint_ink_erase(&self, job: &Val, index: &Val, snapshot: &Val) -> Result<()> {
@@ -781,6 +795,10 @@ impl StoreCore {
             _ => false,
         };
         let base = row.get_or_null("base_document");
+        let base_reference = match row.get("container_metadata") {
+            Some(value) if value.truthy() => value.clone(),
+            _ => base.clone(),
+        };
         if row.get_or_null("trashed").truthy()
             || row.get_or_null("deleted_remote").truthy()
             || !base.truthy()
@@ -806,7 +824,7 @@ impl StoreCore {
             // Projection/validation ran outside the transaction. Compare the
             // snapshot too: a refreshed Cloud commit must never borrow its gate.
             if !sql_eq(current.raw("revision"), expected_revision)
-                || !sql_eq(current.raw("base_document"), &base)
+                || !sql_eq(Self::base_ref(&current), &base_reference)
                 || current.text("sync_state") != Some("synced")
                 || current.text("org_state") != Some("synced")
                 || current.truthy("trashed")
@@ -826,13 +844,13 @@ impl StoreCore {
                     int(revision),
                     b(&row.get_or_null("title"))?,
                     b(&row.get_or_null("body"))?,
-                    b(&base)?,
+                    b(&base_reference)?,
                     text("queued"),
                     null(),
                     int(stamp),
                 ],
             )?;
-            db.exec("INSERT INTO ink_jobs VALUES (?,?,?,?)", &vec![text(&job_id), text(&dumps_utf8(&model)?), int(0), b(&base)?])?;
+            db.exec("INSERT INTO ink_jobs VALUES (?,?,?,?)", &vec![text(&job_id), text(&dumps_utf8(&model)?), int(0), b(&base_reference)?])?;
             db.exec(
                 "UPDATE notes SET revision=?,modified_ms=?,sync_state='pending',error=NULL WHERE id=?",
                 &p![revision, stamp, identity],

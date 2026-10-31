@@ -31,7 +31,7 @@ pub trait Backend {
 /// (`rs_doc::objects::floating_inventory`, e.g. a picture inserted on a phone).
 /// v4: body text that anchors such an object with `objectSpan` (U+FFFC);
 /// the model names each anchor (`objects`), the anchors stay in place.
-pub const PROJECTION_RECIPE: &str = "editor-projection-v4";
+pub const PROJECTION_RECIPE: &str = "editor-projection-v5";
 
 pub const ANCHOR_MISSING: &str = "Metne yerleşik bir nesne notta bulunamadı; metin güvenle düzenlenemiyor.";
 pub const ANCHOR_IN_TITLE: &str = "Başlığa yerleşik nesne içeren notlar henüz düzenlenemiyor.";

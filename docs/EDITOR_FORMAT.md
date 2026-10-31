@@ -231,6 +231,12 @@ every one of them; the upload never contains the list. Since v4 the body text
 that anchors such a picture with `objectSpan` is editable too (section
 "Text-anchored objects" above).
 
+Editor projection v5 adds `bodyTextAreas` for supported flowing page notes.
+Each entry carries the page index, content rectangle, page dimensions and
+opaque background colour in page coordinates. The flow frame uses the page's
+horizontal padding and the body's density-scaled margins; the zero-sized SDK
+body `rect` is not a positioned page text box. Unknown geometry is omitted.
+
 Still read-only, with plain-language reasons: free-floating objects the rule
 does not admit, voice/attachment/extra-bundle nodes,
 objects outside the page list, page objects whose ids disagree with the note

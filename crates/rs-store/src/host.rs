@@ -57,11 +57,11 @@ pub trait Host: Sync {
     type Snapshot;
 
     // ---- store methods a caller may override (Python: instance/subclass attribute)
-    fn apply_document_tx(&self, store: &StoreCore, db: &dyn Sql, identity: &str, document: &Val, expected_job: Option<&Val>) -> Result<bool>
+    fn apply_document_tx(&self, store: &StoreCore, db: &dyn Sql, identity: &str, document: &Val, expected_job: Option<&Val>, prepared: Option<&crate::storage::PreparedSnapshot>) -> Result<bool>
     where
         Self: Sized,
     {
-        store.apply_document_tx(self, db, identity, document, expected_job)
+        store.apply_document_tx(self, db, identity, document, expected_job, prepared)
     }
     fn apply_favorite_tx(&self, _store: &StoreCore, db: &dyn Sql, identity: &str, document: &Val) -> Result<()> {
         crate::storage::apply_favorite_tx(db, identity, document)

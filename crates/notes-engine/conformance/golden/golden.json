@@ -1,20 +1,20 @@
 {
- "note": "Frozen responses of the historical Python reference (NOTES_IMPL=rust python3 -m samsung_notes) over the synthetic library in library/ (reference/python/conformance/gen_library.py). Synthetic data only. Replay: run.py --replay --candidate target/debug/notes-engine",
- "recordedOn": "2026-10-29",
+ "note": "Frozen reference responses over the synthetic library in library/. Synthetic data only. Replay: run.py --replay --candidate target/debug/notes-engine",
+ "recordedOn": "2026-10-30",
  "reference": "target/debug/notes-engine",
  "rootLength": 160,
  "scenarios": {
   "main": {
    "file": "main.json.gz",
-   "files": 95,
+   "files": 285,
    "responses": 1693,
-   "tables": 18
+   "tables": 21
   },
   "uninit": {
    "file": "uninit.json.gz",
-   "files": 5,
+   "files": 17,
    "responses": 275,
-   "tables": 18
+   "tables": 21
   }
  },
  "schemaVersion": 1,

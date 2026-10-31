@@ -121,6 +121,40 @@ test('a missing WebAssembly module falls back silently to the SVG preview',async
   await expect(page.getByRole('alert')).toHaveCount(0);expect(errors).toEqual([]);
 });
 
+test('the finished raster remains registered to the page while zoom changes',async({page})=>{
+  // Delay resize notifications as can happen when the main thread is busy:
+  // the old bitmap must still scale with the page while its replacement waits.
+  await page.addInitScript(()=>{
+    const Native=window.ResizeObserver;
+    window.ResizeObserver=class extends Native {
+      constructor(callback:ResizeObserverCallback){super((entries,observer)=>{if(!(window as any).__pauseResize)callback(entries,observer);});}
+    };
+  });
+  await fixture(page);const points=ramp(30,400);
+  const release=await penStroke(page,points,{release:false});
+  await expect.poll(()=>exactFrames(page,points.length),{timeout:30000}).toBeGreaterThan(0);
+  await release();
+  await expect(page.locator('.ink-raster[data-ink-stroke]')).toHaveCount(1);
+  const samples=await page.evaluate(async()=>{
+    (window as any).__pauseResize=true;
+    const measure=()=>{
+      const image=document.querySelector<HTMLImageElement>('.page-image')!;
+      const raster=document.querySelector<HTMLCanvasElement>('.ink-raster')!;
+      const p=image.getBoundingClientRect(),r=raster.getBoundingClientRect();
+      const alpha=raster.getContext('2d')!.getImageData(0,0,raster.width,raster.height).data;
+      return {x:(r.left-p.left)/p.width,y:(r.top-p.top)/p.height,w:r.width/p.width,h:r.height/p.height,ink:alpha.some((v,i)=>i%4===3&&v>0)};
+    };
+    const values=[measure()];
+    for(const name of [...Array(5).fill('Yakınlaştır'),...Array(5).fill('Uzaklaştır')]){
+      document.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)!.click();
+      await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
+      values.push(measure());
+    }
+    return values;
+  });
+  for(const sample of samples){expect(sample.ink).toBe(true);for(const key of ['x','y','w','h'] as const)expect(Math.abs(sample[key]-samples[0][key]),key).toBeLessThan(.0002);}
+});
+
 test('headless timing: input to tip paint and input to exact renderer paint',async({page})=>{
   await fixture(page);
   for(const [n,y] of [[24,250],[60,500],[120,750]] as const){

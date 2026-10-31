@@ -19,12 +19,21 @@ pub struct TempDir(pub PathBuf);
 impl TempDir {
     pub fn new(tag: &str) -> TempDir {
         static N: AtomicUsize = AtomicUsize::new(0);
-        let base = std::env::temp_dir().join(format!("notes-engine-test-{}-{}-{}", tag, std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+        let base = std::env::temp_dir().join(format!(
+            "notes-engine-test-{}-{}-{}",
+            tag,
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
         // tempfile.TemporaryDirectory() is private (0700).
-        std::os::unix::fs::PermissionsExt::set_mode(&mut std::fs::metadata(&base).unwrap().permissions(), 0o700);
-        std::fs::set_permissions(&base, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+        std::os::unix::fs::PermissionsExt::set_mode(
+            &mut std::fs::metadata(&base).unwrap().permissions(),
+            0o700,
+        );
+        std::fs::set_permissions(&base, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .unwrap();
         TempDir(base)
     }
     pub fn path(&self) -> &Path {
@@ -39,13 +48,23 @@ impl Drop for TempDir {
 
 /// tests/test_engine_review.py `document()`
 pub fn document(body: &str, commit: &str, server: &str) -> Snapshot {
-    let (_, raw) = rs_doc::doc::new_document("Title", body, Some(LOCAL_ID), rs_doc::doc::NowArg::Int(NOW), rs_doc::doc::MAX_TEXT).unwrap();
+    let (_, raw) = rs_doc::doc::new_document(
+        "Title",
+        body,
+        Some(LOCAL_ID),
+        rs_doc::doc::NowArg::Int(NOW),
+        rs_doc::doc::MAX_TEXT,
+    )
+    .unwrap();
     let text = String::from_utf8(raw).unwrap();
     let inner = match text.find("?>") {
         Some(at) if text.starts_with("<?xml") => text[at + 2..].trim_start().to_string(),
         _ => text,
     };
-    let wrapped = format!("<CompareNoteView>{}<commitId>{}</commitId></CompareNoteView>", inner, commit);
+    let wrapped = format!(
+        "<CompareNoteView>{}<commitId>{}</commitId></CompareNoteView>",
+        inner, commit
+    );
     snapshot::parse_document(wrapped.as_bytes(), "application/xml", Some(server)).unwrap()
 }
 
@@ -81,7 +100,10 @@ fn unsupported() -> Fail {
 
 impl Cloud for ReviewCloud {
     fn auth_status(&self) -> R<Val> {
-        Ok(Val::dict(vec![("valid", Val::Bool(true)), ("renewable", Val::Bool(true))]))
+        Ok(Val::dict(vec![
+            ("valid", Val::Bool(true)),
+            ("renewable", Val::Bool(true)),
+        ]))
     }
     fn initial_cursor(&self) -> Val {
         Val::s("initial")
@@ -105,7 +127,11 @@ impl Cloud for ReviewCloud {
                 })
                 .collect()
         };
-        Ok(Val::dict(vec![("changes", Val::List(changes)), ("has_next", Val::Bool(false)), ("last_change_point", Val::s("after-page"))]))
+        Ok(Val::dict(vec![
+            ("changes", Val::List(changes)),
+            ("has_next", Val::Bool(false)),
+            ("last_change_point", Val::s("after-page")),
+        ]))
     }
     fn get_note(&self, server_id: &Val) -> R<Snapshot> {
         let server = server_id.as_str().unwrap().to_string();
@@ -117,7 +143,10 @@ impl Cloud for ReviewCloud {
             let mut fail = self.fail_once.lock().unwrap();
             if *fail {
                 *fail = false;
-                return Err(Fail::api("unsupported_payload", "Synthetic temporary incomplete payload"));
+                return Err(Fail::api(
+                    "unsupported_payload",
+                    "Synthetic temporary incomplete payload",
+                ));
             }
         }
         let (body, commit) = self.current.lock().unwrap().clone();
@@ -132,12 +161,23 @@ impl Cloud for ReviewCloud {
     fn create_editor(&self, _: &Val, _: &Val, _: &Val, _: &Val) -> R<Val> {
         Err(unsupported())
     }
-    fn update(&self, server_id: &Val, _snapshot: &Snapshot, _title: &Val, body: &Val, _operation_id: &Val) -> R<Val> {
+    fn update(
+        &self,
+        server_id: &Val,
+        _snapshot: &Snapshot,
+        _title: &Val,
+        body: &Val,
+        _operation_id: &Val,
+    ) -> R<Val> {
         if let Some(e) = self.update_error.lock().unwrap().take() {
             return Err(e);
         }
         self.writes.fetch_add(1, Ordering::SeqCst);
-        let fresh = document(body.as_str().unwrap(), "commit-2", server_id.as_str().unwrap());
+        let fresh = document(
+            body.as_str().unwrap(),
+            "commit-2",
+            server_id.as_str().unwrap(),
+        );
         Ok(Val::dict(vec![
             ("verified", Val::Bool(true)),
             ("server_id", server_id.clone()),
@@ -155,19 +195,67 @@ impl Cloud for ReviewCloud {
     fn update_page_background(&self, _: &Val, _: &Snapshot, _: &Val, _: &Val) -> R<Val> {
         Err(unsupported())
     }
-    fn add_pdf_pages(&self, _: &Val, _: &Snapshot, _: &[u8], _: &Val, _: &Val, _: &Val, _: &Val, _: &Val) -> R<Val> {
+    fn add_pdf_pages(
+        &self,
+        _: &Val,
+        _: &Snapshot,
+        _: &[u8],
+        _: &Val,
+        _: &Val,
+        _: &Val,
+        _: &Val,
+        _: &Val,
+    ) -> R<Val> {
         Err(unsupported())
     }
-    fn append_ink_stroke(&self, _: i64, _: &Val, _: &Snapshot, _: &Val, _: &Val, _: &Val, _: &str, _: Option<(&Val, &Val)>) -> R<Val> {
+    fn append_ink_stroke(
+        &self,
+        _: i64,
+        _: &Val,
+        _: &Snapshot,
+        _: &Val,
+        _: &Val,
+        _: &Val,
+        _: &str,
+        _: Option<(&Val, &Val)>,
+    ) -> R<Val> {
         Err(unsupported())
     }
-    fn append_first_stroke(&self, _: &Val, _: &Snapshot, _: &Val, _: &Val, _: &Val, _: &Val, _: &Val, _: &str) -> R<Val> {
+    fn append_first_stroke(
+        &self,
+        _: &Val,
+        _: &Snapshot,
+        _: &Val,
+        _: &Val,
+        _: &Val,
+        _: &Val,
+        _: &Val,
+        _: &str,
+    ) -> R<Val> {
         Err(unsupported())
     }
-    fn erase_ink_strokes(&self, _: &Val, _: &Snapshot, _: &Val, _: &Val, _: &Val, _: &str) -> R<Val> {
+    fn erase_ink_strokes(
+        &self,
+        _: &Val,
+        _: &Snapshot,
+        _: &Val,
+        _: &Val,
+        _: &Val,
+        _: &str,
+    ) -> R<Val> {
         Err(unsupported())
     }
-    fn move_ink_strokes(&self, _: &Val, _: &Snapshot, _: &Val, _: &Val, _: &Val, _: &Val, _: &Val, _: &str) -> R<Val> {
+    fn move_ink_strokes(
+        &self,
+        _: &Val,
+        _: &Snapshot,
+        _: &Val,
+        _: &Val,
+        _: &Val,
+        _: &Val,
+        _: &Val,
+        _: &str,
+    ) -> R<Val> {
         Err(unsupported())
     }
     fn page_op(&self, _: &str, _: &Val, _: &Snapshot, _: &Val, _: &Val) -> R<Val> {
@@ -203,11 +291,17 @@ pub fn review_engine(root: &Path, api: &Arc<ReviewCloud>) -> Arc<Engine> {
     )
     .unwrap();
     engine.sessions.set_offline(false);
-    engine.sessions.set_path(Some(root.join("synthetic-session")));
+    engine
+        .sessions
+        .set_path(Some(root.join("synthetic-session")));
     engine.apis.api().unwrap();
     engine
 }
 
 pub fn offline_engine(root: &Path) -> Arc<Engine> {
-    Engine::new(root, notes_engine::launcher::engine_options(true, None, true)).unwrap()
+    Engine::new(
+        root,
+        notes_engine::launcher::engine_options(true, None, true),
+    )
+    .unwrap()
 }

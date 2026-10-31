@@ -39,6 +39,7 @@ pub struct ApiCache {
     pub sessions: Arc<Sessions>,
     factory: Arc<dyn CloudFactory>,
     work_dir: PathBuf,
+    container_directory: Option<PathBuf>,
     current: Mutex<(Option<Arc<dyn Cloud>>, Option<PathBuf>)>,
 }
 
@@ -51,7 +52,7 @@ impl ApiCache {
         };
         let mut current = self.current.lock().unwrap();
         if current.0.is_none() || current.1.as_deref() != Some(path.as_path()) {
-            let api = self.factory.open(&path, &self.work_dir)?;
+            let api = self.factory.open_for_library(&path, &self.work_dir, self.container_directory.as_deref())?;
             *current = (Some(api), Some(path));
         }
         Ok(current.0.clone().unwrap())
@@ -128,14 +129,24 @@ fn with_revision(projection: &Val, revision: &Val) -> Val {
 }
 
 impl Engine {
+    fn notify_snapshot_changed(&self) {
+        if let Err(error) = self.previews.snapshot_changed() {
+            eprintln!("notes-engine: preview inventory scheduling failed: {error}");
+        }
+    }
     /// `Engine(directory, offline=, session=, auto_sync=, api_factory=, interval=, metadata_factory=)`
     pub fn new(directory: &Path, options: Options) -> R<Arc<Engine>> {
         let store = Arc::new(StoreCore::open(directory)?);
+        if let Err(error) = store.maintain_containers() {
+            eprintln!("notes-engine: container maintenance failed: {error}");
+        }
         let sessions = Sessions::new(Arc::clone(&store), options.offline, options.session.as_deref(), Arc::clone(&options.login))?;
+        let container_directory = (store.meta("schema_version")?.as_ref().and_then(Val::as_i64) == Some(7)).then(|| store.directory.clone());
         let apis = Arc::new(ApiCache {
             sessions: Arc::clone(&sessions),
             factory: options.cloud,
             work_dir: store.directory.join("cloud"),
+            container_directory,
             current: Mutex::new((None, None)),
         });
         let initial = SyncState { state: if options.offline { "offline" } else { "idle" }.into(), error: None, processed: 0, total: None };
@@ -313,6 +324,7 @@ impl Engine {
             match fetched {
                 Ok(snapshot) => {
                     self.store.apply_document(&self.host, &server_id, &snapshot::to_dict(&snapshot), None)?;
+                    self.notify_snapshot_changed();
                 }
                 Err(e) if e.is_api() => self.store.content_error(identity, &Val::s(e.message.clone()))?,
                 Err(e) => return Err(e),
@@ -321,9 +333,14 @@ impl Engine {
         }
         // Polling an open note must not deserialize its potentially large
         // binary snapshot. Inspect it only once for each loaded Cloud version.
+        let schema7 = self.store.meta("schema_version")?.as_ref().and_then(Val::as_i64) == Some(7);
         let needs_capability = self.store.with_db(|db| {
             let cur = db.query(
-                "SELECT loaded=1 AND base_document IS NOT NULL\n                AND title_editable IS NULL FROM notes WHERE id=?",
+                if schema7 {
+                    "SELECT loaded=1 AND container_metadata IS NOT NULL\n                AND title_editable IS NULL FROM notes WHERE id=?"
+                } else {
+                    "SELECT loaded=1 AND base_document IS NOT NULL\n                AND title_editable IS NULL FROM notes WHERE id=?"
+                },
                 &rs_store::p![identity],
             )?;
             Ok(cur.scalar().map(rs_store::db::sql_truthy))
@@ -537,9 +554,14 @@ impl Engine {
     /// `Engine.templates(note_id=None)`: per-note scan cached by revision;
     /// with `note_id`, entries get `inNote`.
     pub fn templates(&self, note_id: Option<&str>) -> R<Val> {
+        let schema7 = self.store.meta("schema_version")?.as_ref().and_then(Val::as_i64) == Some(7);
         let rows = self.store.with_db(|db| {
             db.query(
-                "SELECT id,revision,json_extract(base_document,'$.resource_xml') AS xml FROM notes WHERE base_document IS NOT NULL AND trashed=0 AND deleted_remote=0",
+                if schema7 {
+                    "SELECT id,revision,NULL AS xml FROM notes WHERE container_metadata IS NOT NULL AND trashed=0 AND deleted_remote=0"
+                } else {
+                    "SELECT id,revision,json_extract(base_document,'$.resource_xml') AS xml FROM notes WHERE base_document IS NOT NULL AND trashed=0 AND deleted_remote=0"
+                },
                 &[],
             )
         })?;
@@ -556,7 +578,13 @@ impl Engine {
             let cached = match cached {
                 Some(c) => c,
                 None => {
-                    let (entries, ids) = scan_templates(&row.val("xml"))?;
+                    let xml = if schema7 {
+                        let document = loads(key(&self.store.raw(&key_id)?, "base_document")?)?;
+                        document.get_or_null("resource_xml")
+                    } else {
+                        row.val("xml")
+                    };
+                    let (entries, ids) = scan_templates(&xml)?;
                     let value = (revision.clone(), entries, ids);
                     self.template_cache.lock().unwrap().insert(key_id.clone(), value.clone());
                     value
@@ -689,6 +717,35 @@ impl Engine {
             projection = Some(value);
         }
         let mut projection = projection.unwrap();
+        // A saved model is cached separately from the source snapshot. The
+        // body's page geometry belongs to that source, so retain it across a
+        // local save without changing the saved model or outbox contract.
+        if projection.get("bodyTextAreas").is_none() && !key(&note, "editable")?.truthy() {
+            let row = self.store.raw(identity)?;
+            if let Some(base) = row.get("base_document").and_then(Val::as_str) {
+                if let Ok(document) = snapshot::loads(base).and_then(|v| snapshot::from_dict(&v)) {
+                    if let Some(areas) = areas::body_text_areas(&document.resource_xml) { projection.set("bodyTextAreas", areas); }
+                }
+            }
+        }
+        // Body-only edits do not invalidate Samsung's page canvas. On later
+        // opens keep using a local full-text composite for notes this client
+        // has edited, rather than displaying a stale canvas after restart.
+        let edited = self.store.with_db(|db| db.query(
+            "SELECT 1 FROM jobs WHERE note_id=? AND kind='update_editor' AND state IN ('queued','running','done') LIMIT 1",
+            &rs_store::p![identity],
+        ))?.one().is_some();
+        let pending_text = if !edited && !key(&note, "editable")?.truthy() && is_str(key(&note, "syncState")?, "pending") {
+            let row = self.store.raw(identity)?;
+            row.get("base_document").and_then(Val::as_str)
+                .and_then(|base| snapshot::loads(base).ok())
+                .and_then(|value| snapshot::from_dict(&value).ok())
+                .and_then(|snapshot| areas::editor_projection(&snapshot).ok())
+                .is_some_and(|source| matches!((source.get("model"),projection.get("model")),(Some(a),Some(b)) if !rs_store::val::py_eq(a,b)))
+        } else { false };
+        if edited || pending_text {
+            projection.set("localTextPreview", Val::Bool(true));
+        }
         if key(&note, "trashed")?.truthy() || key(&self.store.raw_state(identity)?, "deleted_remote")?.truthy() {
             projection = all_capabilities_false(&projection)?;
         }
@@ -894,6 +951,7 @@ impl Engine {
             let snapshot = api.get_note(&server_id)?;
             self.store.apply_folder_graph(&inventory)?;
             self.store.apply_document(&self.host, &server_id, &snapshot::to_dict(&snapshot), None)?;
+            self.notify_snapshot_changed();
             return Ok(self.store.accept_remote_organization(identity)?);
         }
         // Refresh remote before a resolution, never silently discard the local
@@ -901,7 +959,10 @@ impl Engine {
         if key(&row, "server_id")?.truthy() && !key(&row, "deleted_remote")?.truthy() {
             let server_id = key(&row, "server_id")?.clone();
             let refreshed = self.api().and_then(|api| api.get_note(&server_id)).and_then(|snapshot| {
-                self.store.apply_document(&self.host, &server_id, &snapshot::to_dict(&snapshot), None).map_err(Fail::from)
+                self.store.apply_document(&self.host, &server_id, &snapshot::to_dict(&snapshot), None).map(|value| {
+                    self.notify_snapshot_changed();
+                    value
+                }).map_err(Fail::from)
             });
             if let Err(e) = refreshed {
                 if e.is_api() || e.is_store() {
@@ -914,6 +975,7 @@ impl Engine {
             }
         }
         let result = self.store.resolve(&self.host, identity, strategy)?;
+        self.notify_snapshot_changed();
         self.request_sync();
         Ok(result)
     }
@@ -1145,6 +1207,7 @@ impl Engine {
                     return Err(Fail::ambiguous("write_uncertain", "Bulut kaydı henüz doğrulanamadı."));
                 }
                 self.store.complete_job(&self.host, &job, &result)?;
+                self.notify_snapshot_changed();
                 if self.folder_initialized()? {
                     self.store.register_note_graph(key(&job, "note_id")?)?;
                 }
@@ -1157,6 +1220,7 @@ impl Engine {
                     match api.get_note(&server_id) {
                         Ok(fresh) => {
                             self.store.apply_document(&self.host, &server_id, &snapshot::to_dict(&fresh), None)?;
+                            self.notify_snapshot_changed();
                         }
                         Err(e) if e.is_api() => {}
                         Err(e) => return Err(e),
@@ -1257,6 +1321,7 @@ impl Engine {
             Err(error) => Err(error),
             Ok(snapshot) => {
                 self.store.apply_document(&self.host, server_id, &snapshot::to_dict(&snapshot), None)?;
+                self.notify_snapshot_changed();
                 Ok(true)
             }
         }
@@ -1348,6 +1413,7 @@ impl Engine {
                     return Err(Fail::ambiguous("write_uncertain", "Bulut işleminin sonucu doğrulanamadı."));
                 }
                 self.store.apply_document(&self.host, key(&row, "server_id")?, key(&result, "snapshot")?, None)?;
+                self.notify_snapshot_changed();
                 if result.get("node").map(Val::truthy).unwrap_or(false) {
                     self.store.apply_organization_node(key(&result, "node")?)?;
                 }
@@ -1535,6 +1601,9 @@ impl Engine {
         }
         if complete {
             self.store.set_meta("last_synced_at", &Val::Int(rs_store::db::now_ms()))?;
+            if let Err(error) = self.store.maintain_containers() {
+                eprintln!("notes-engine: container maintenance failed: {error}");
+            }
             // Warm first-page previews so opening a note is immediate.
             let mut warmup = self.warmup.lock().unwrap();
             let alive = warmup.as_ref().map(|h| !h.is_finished()).unwrap_or(false);

@@ -86,16 +86,7 @@ pub fn fail_of_ops(e: Error) -> Fail {
 
 /// rs-doc error → rs-ops error (bridge.rs `from_doc`).
 pub fn from_doc(e: rs_doc::Error) -> Error {
-    use rs_doc::Error as D;
-    match e {
-        D::Payload(m) => Error::new(Kind::Payload, m),
-        D::Document(m) => Error::new(Kind::Doc, m.to_string()),
-        D::Value(m) => Error::new(Kind::Value, m.to_string()),
-        D::Type(m) => Error::new(Kind::Type, m.to_string()),
-        D::XmlParse(m) => Error::new(Kind::Parse, m),
-        D::Io(e) => Error::new(Kind::Other, e.to_string()),
-        D::External(_) => Error::new(Kind::Other, "external error"),
-    }
+    rs_ops::err::from_doc(e)
 }
 
 /// rs-ink error → rs-ops error (bridge.rs `from_ink`).
@@ -353,6 +344,36 @@ impl PureDeps {
         }
         Ok(None)
     }
+
+    fn append_probe_mode(&self, snapshot: &rs_ops::deps::Snapshot, source: &str, new_id: &str, x: f64, y: f64, now_ms: i64, bounded: bool) -> R<()> {
+        let raw = inkcore::binary::RawSamples {
+            points: vec![Some([IVal::Float(x), IVal::Float(y)])], pressures: vec![IVal::Float(0.5)],
+            timestamps: vec![IVal::Int(0)], tilts: vec![], orientations: vec![],
+        };
+        let capture = ink_r(inkcore::capture::normalize_capture(&raw, false))?;
+        let foreign: RefCell<Option<Error>> = RefCell::new(None);
+        let parse = |body: &[u8], ct: &str| -> inkcore::R<Vec<inkcore::prepare::PartIn>> {
+            let parsed = payload(body, ct, &self.limits).map_err(|e| {
+                *foreign.borrow_mut() = Some(e);
+                inkcore::InkErr::Foreign
+            })?;
+            Ok(parsed.parts.into_iter().map(|p| inkcore::prepare::PartIn { name: p.name, filename: p.filename, content_type: p.content_type, body: p.body }).collect())
+        };
+        let snap = inkcore::prepare::SnapshotIn { resource_xml: &snapshot.resource_xml, raw_body: &snapshot.raw_body, content_type: &snapshot.content_type };
+        if snapshot.commit_id.as_deref().is_none_or(|c| c.is_empty()) {
+            return Err(Error::new(Kind::Ink, "committed snapshot required"));
+        }
+        let edit = if bounded {
+            inkcore::prepare::prepare_ink_document_for_migration(&snap, Some(source), Some(new_id), inkcore::prepare::Geometry::Capture(&capture), IVal::Int(now_ms as i128), 2, None, &parse)
+        } else {
+            inkcore::prepare::prepare_ink_document(&snap, Some(source), Some(new_id), inkcore::prepare::Geometry::Capture(&capture), IVal::Int(now_ms as i128), 2, None, &parse)
+        };
+        match edit {
+            Ok(_) => Ok(()),
+            Err(inkcore::InkErr::Foreign) => Err(foreign.borrow_mut().take().unwrap_or_else(|| Error::new(Kind::Other, "foreign error"))),
+            Err(e) => Err(from_ink(e)),
+        }
+    }
 }
 
 impl Deps for PureDeps {
@@ -448,44 +469,11 @@ impl Deps for PureDeps {
     }
 
     fn append_probe(&self, snapshot: &rs_ops::deps::Snapshot, source: &str, new_id: &str, x: f64, y: f64, now_ms: i64) -> R<()> {
-        let raw = inkcore::binary::RawSamples {
-            points: vec![Some([IVal::Float(x), IVal::Float(y)])],
-            pressures: vec![IVal::Float(0.5)],
-            timestamps: vec![IVal::Int(0)],
-            tilts: vec![],
-            orientations: vec![],
-        };
-        let capture = ink_r(inkcore::capture::normalize_capture(&raw, false))?;
-        let foreign: RefCell<Option<Error>> = RefCell::new(None);
-        let parse = |body: &[u8], ct: &str| -> inkcore::R<Vec<inkcore::prepare::PartIn>> {
-            let parsed = payload(body, ct, &self.limits).map_err(|e| {
-                *foreign.borrow_mut() = Some(e);
-                inkcore::InkErr::Foreign
-            })?;
-            Ok(parsed
-                .parts
-                .into_iter()
-                .map(|p| inkcore::prepare::PartIn { name: p.name, filename: p.filename, content_type: p.content_type, body: p.body })
-                .collect())
-        };
-        let snap = inkcore::prepare::SnapshotIn { resource_xml: &snapshot.resource_xml, raw_body: &snapshot.raw_body, content_type: &snapshot.content_type };
-        if snapshot.commit_id.as_deref().is_none_or(|c| c.is_empty()) {
-            return Err(Error::new(Kind::Ink, "committed snapshot required"));
-        }
-        match inkcore::prepare::prepare_ink_document(
-            &snap,
-            Some(source),
-            Some(new_id),
-            inkcore::prepare::Geometry::Capture(&capture),
-            IVal::Int(now_ms as i128),
-            2,
-            None,
-            &parse,
-        ) {
-            Ok(_) => Ok(()),
-            Err(inkcore::InkErr::Foreign) => Err(foreign.borrow_mut().take().unwrap_or_else(|| Error::new(Kind::Other, "foreign error"))),
-            Err(e) => Err(from_ink(e)),
-        }
+        self.append_probe_mode(snapshot, source, new_id, x, y, now_ms, false)
+    }
+
+    fn append_probe_for_migration(&self, snapshot: &rs_ops::deps::Snapshot, source: &str, new_id: &str, x: f64, y: f64, now_ms: i64) -> R<()> {
+        self.append_probe_mode(snapshot, source, new_id, x, y, now_ms, true)
     }
 
     fn first_stroke_probe(&self, snapshot: &rs_ops::deps::Snapshot, page_id: &str, x: f64, y: f64, now_ms: i64) -> R<()> {

@@ -148,6 +148,10 @@ pub trait Deps {
     fn release_page_cache(&self, root: &mut Element, page_id: &str, tick: i64) -> R<Vec<String>>;
     /// Discarded `prepare_ink_append_v2` dry run with one centre sample.
     fn append_probe(&self, snapshot: &Snapshot, source: &str, new_id: &str, x: f64, y: f64, now_ms: i64) -> R<()>;
+    /// Storage migration may override this with an equivalent bounded probe.
+    fn append_probe_for_migration(&self, snapshot: &Snapshot, source: &str, new_id: &str, x: f64, y: f64, now_ms: i64) -> R<()> {
+        self.append_probe(snapshot, source, new_id, x, y, now_ms)
+    }
     /// Discarded `prepare_first_stroke` dry run (one centre sample, black, size 1).
     fn first_stroke_probe(&self, snapshot: &Snapshot, page_id: &str, x: f64, y: f64, now_ms: i64) -> R<()>;
     /// Discarded `prepare_highlighter_stroke` dry run (one centre sample, DEFAULT_COLOR, size 1).

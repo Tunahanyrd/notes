@@ -177,6 +177,11 @@ fn main() {
         std::process::exit(1);
     }
     let context = tauri::generate_context!();
+    // Before GTK starts: the Wayland app id (and X11 WM_CLASS) is the program
+    // name, which docks and window switchers match to the desktop file
+    // `<identifier>.desktop` and its icon.
+    #[cfg(target_os = "linux")]
+    gtk::glib::set_prgname(Some(context.config().identifier.as_str()));
     let app = tauri::Builder::default().setup(|app| {
         let resources = app.path().resource_dir().ok();
         let (engine, url) = launch(resources.as_deref())?;
