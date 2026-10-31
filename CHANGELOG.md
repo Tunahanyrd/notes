@@ -11,10 +11,33 @@ result was also checked in the official app on a phone or tablet.
 
 ## [Unreleased]
 
+### Changed
+
+- Notes are stored like the mobile app: one .sdocx-style container per note
+  (pages and the Cloud document kept byte-exact), images and PDFs in a shared
+  content store, and only metadata in SQLite. The first start migrates the
+  library with a progress screen; an interrupted migration rolls back cleanly.
+  On the author's library the database went from 270 MB to 6.5 MB and the note
+  list opens much faster. Older versions cannot open a migrated library.
+- Text in handwriting notes is edited in place on the page; the separate
+  "Metni düzenle" view is gone.
+
 ### Fixed
 
+- Strokes no longer change slightly a few seconds after drawing: saved ink is
+  drawn in crisp tiles at the screen's resolution and the draft is swapped
+  only when they are ready (synthetic test at 144 % scaling: 2/255 difference).
 - Keep finished pen strokes aligned with the page while zooming, even when
   the new raster is still being prepared.
+- "Çizimler kaydedilemedi" when drawing while the previous strokes were still
+  syncing; the save now waits quietly and finishes by itself.
+- Note thumbnails that hit a busy engine (for example right after the
+  migration) are retried instead of staying blank.
+- The window's app id matches the desktop file, so docks show the app icon.
+
+## [0.0.3-alpha] - 2026-10-30
+
+### Fixed
 
 - AppImage on Arch, Fedora and openSUSE: sync failed with "Cloud yanıtı
   alınamadı" because the bundled OpenSSL looked for CA certificates in
@@ -119,6 +142,7 @@ The user interface is in Turkish.
 - Previews of pictures, shapes and text boxes are drawn by this client and are
   close to, not identical with, the official renderer.
 
-[Unreleased]: https://github.com/Tunahanyrd/notes/compare/v0.0.2-alpha...HEAD
+[Unreleased]: https://github.com/Tunahanyrd/notes/compare/v0.0.3-alpha...HEAD
+[0.0.3-alpha]: https://github.com/Tunahanyrd/notes/compare/v0.0.2-alpha...v0.0.3-alpha
 [0.0.2-alpha]: https://github.com/Tunahanyrd/notes/compare/v0.0.1-alpha...v0.0.2-alpha
 [0.0.1-alpha]: https://github.com/Tunahanyrd/notes/releases/tag/v0.0.1-alpha
