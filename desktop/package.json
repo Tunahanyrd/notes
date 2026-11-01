@@ -14,11 +14,11 @@
     "test:native": "python3 tests/native-lifecycle.py"
   },
   "dependencies": {
-    "@tiptap/core": "3.32.0",
-    "@tiptap/pm": "3.32.0",
-    "@tiptap/react": "3.32.0",
-    "@tiptap/starter-kit": "3.32.0",
-    "lucide-react": "^1.61.0",
+    "@tiptap/core": "3.32.1",
+    "@tiptap/pm": "3.32.1",
+    "@tiptap/react": "3.32.1",
+    "@tiptap/starter-kit": "3.32.1",
+    "lucide-react": "^1.64.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
