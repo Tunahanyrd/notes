@@ -103,3 +103,19 @@ test('custom select supports keyboard, dismissal, ARIA and dark theme',async({pa
   await combo.click();await page.getByText('Uygulamanın görünümünü seçin.').click();await expect(popup).toHaveCount(0);
   await combo.click();await combo.press('Tab');await expect(popup).toHaveCount(0);
 });
+test('language switch applies immediately and persists',async({page})=>{
+  const {errors}=await setup(page);
+  await expect(page.getByLabel('Dil',{exact:true})).toHaveAttribute('data-value','tr');
+  await chooseOption(page,'Dil','en');
+  await expect(page.getByRole('button',{name:'New note',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Ayarlar',exact:true})).toHaveCount(0);
+  expect(await page.evaluate(()=>localStorage.getItem('samsung-notes.language.v1'))).toBe('en');
+  await page.reload();
+  await expect(page.getByRole('button',{name:'Settings',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await expect(page.getByRole('dialog',{name:'Settings',exact:true})).toBeVisible();
+  await chooseOption(page,'Language','tr');
+  await expect(page.getByRole('button',{name:'Ayarlar',exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>localStorage.getItem('samsung-notes.language.v1'))).toBe('tr');
+  expect(errors).toEqual([]);
+});

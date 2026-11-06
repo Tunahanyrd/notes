@@ -925,9 +925,9 @@ Lock file: `crates/notes-ink-live/Cargo.lock` (101 packages)
 
 ## npm: desktop UI
 
-Lock file: `desktop/package-lock.json` (135 packages)
+Lock file: `desktop/package-lock.json` (152 packages)
 
-- MIT: 83
+- MIT: 100
 - Apache-2.0: 25
 - Apache-2.0 OR MIT: 12
 - MPL-2.0: 12
@@ -936,9 +936,22 @@ Lock file: `desktop/package-lock.json` (135 packages)
 
 | Package | Version | License | Origin |
 |---|---|---|---|
+| @babel/code-frame | 8.0.6 | MIT | dev |
+| @babel/generator | 8.1.0 | MIT | dev |
+| @babel/helper-globals | 8.0.6 | MIT | dev |
+| @babel/helper-string-parser | 8.0.8 | MIT | dev |
+| @babel/helper-validator-identifier | 8.0.6 | MIT | dev |
+| @babel/parser | 8.1.0 | MIT | dev |
+| @babel/template | 8.0.0 | MIT | dev |
+| @babel/traverse | 8.1.0 | MIT | dev |
+| @babel/types | 8.1.0 | MIT | dev |
 | @floating-ui/core | 1.8.0 | MIT | runtime (bundled into the UI), optional/platform |
 | @floating-ui/dom | 1.8.0 | MIT | runtime (bundled into the UI), optional/platform |
 | @floating-ui/utils | 0.2.12 | MIT | runtime (bundled into the UI), optional/platform |
+| @jridgewell/gen-mapping | 0.4.0-beta.0 | MIT | dev |
+| @jridgewell/resolve-uri | 3.1.2 | MIT | dev |
+| @jridgewell/sourcemap-codec | 1.6.0 | MIT | dev |
+| @jridgewell/trace-mapping | 0.3.31 | MIT | dev |
 | @oxc-project/types | 0.155.0 | MIT | dev |
 | @playwright/test | 1.64.1 | Apache-2.0 | dev |
 | @rolldown/binding-android-arm-eabi | 1.2.15 | MIT | dev, optional/platform |
@@ -997,6 +1010,7 @@ Lock file: `desktop/package-lock.json` (135 packages)
 | @tiptap/pm | 3.32.0 | MIT | runtime (bundled into the UI) |
 | @tiptap/react | 3.32.0 | MIT | runtime (bundled into the UI) |
 | @tiptap/starter-kit | 3.32.0 | MIT | runtime (bundled into the UI) |
+| @types/jsesc | 2.5.1 | MIT | dev |
 | @types/react | 19.3.0 | MIT | runtime (bundled into the UI) |
 | @types/react-dom | 19.3.0 | MIT | runtime (bundled into the UI) |
 | @types/use-sync-external-store | 0.0.6 | MIT | runtime (bundled into the UI) |
@@ -1026,6 +1040,8 @@ Lock file: `desktop/package-lock.json` (135 packages)
 | fast-equals | 5.4.5 | MIT | runtime (bundled into the UI) |
 | fdir | 6.5.0 | MIT | dev |
 | fsevents | 2.3.3 | MIT | dev, optional/platform |
+| js-tokens | 10.0.0 | MIT | dev |
+| jsesc | 3.1.0 | MIT | dev |
 | lightningcss | 1.33.0 | MPL-2.0 | dev |
 | lightningcss-android-arm64 | 1.33.0 | MPL-2.0 | dev, optional/platform |
 | lightningcss-darwin-arm64 | 1.33.0 | MPL-2.0 | dev, optional/platform |
@@ -1041,6 +1057,7 @@ Lock file: `desktop/package-lock.json` (135 packages)
 | linkifyjs | 4.4.0 | MIT | runtime (bundled into the UI) |
 | lucide-react | 1.61.0 | ISC | runtime (bundled into the UI) |
 | nanoid | 3.3.20 | MIT | dev |
+| obug | 3.0.0 | MIT | dev |
 | orderedmap | 2.1.1 | MIT | runtime (bundled into the UI) |
 | picocolors | 1.1.1 | ISC | dev |
 | picomatch | 4.0.7 | MIT | dev |

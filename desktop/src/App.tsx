@@ -757,7 +757,7 @@ function Workspace() {
         onDelete={ids=>pageOp({op:'delete',pageIds:ids})}
         onAdd={after=>pageOp({op:'add',afterIndex:after})}
         close={()=>setSorter(null)}/>}
-    {settings&&<SettingsPanel status={status} foldersInitialized={foldersInitialized} offlineView={offlineView} busy={!!busy} error={syncError} preferenceError={preferenceError} onClose={()=>setSettings(false)} onSync={sync} sectionRef={modalRef} preferences={preferences} onPreferencesChange={changePreferences} shortcutSlot={<KeyboardShortcuts controller={shortcuts}/>} accountSlot={<AccountPanel status={status} busy={!!busy} error={accountError} onLogin={login} onDisconnect={disconnect}/>}/>}
+    {settings&&<SettingsPanel status={status} foldersInitialized={foldersInitialized} offlineView={offlineView} busy={!!busy} error={syncError} preferenceError={preferenceError} unsavedChanges={dirtyCount>0} onClose={()=>setSettings(false)} onSync={sync} sectionRef={modalRef} preferences={preferences} onPreferencesChange={changePreferences} shortcutSlot={<KeyboardShortcuts controller={shortcuts}/>} accountSlot={<AccountPanel status={status} busy={!!busy} error={accountError} onLogin={login} onDisconnect={disconnect}/>}/>}
     {noteDrag.ghost}
   </div>;
 }

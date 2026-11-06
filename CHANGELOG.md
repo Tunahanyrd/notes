@@ -11,6 +11,15 @@ result was also checked in the official app on a phone or tablet.
 
 ## [Unreleased]
 
+### Added
+
+- English interface with an in-app switch: Settings → General → Language
+  offers English and Türkçe, and the choice survives restarts. The source
+  strings stay Turkish and are translated at runtime, so switching needs no
+  rebuild; note text, titles and folder names are never translated. The
+  webview reloads when the language changes, and switching is blocked while
+  there are unsaved edits. Turkish remains the default.
+
 ## [0.0.4-alpha] - 2026-11-01
 
 ### Added
