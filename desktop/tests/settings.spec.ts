@@ -4,7 +4,7 @@ import {DEFAULT_SHORTCUTS} from '../src/useShortcuts';
 const TOKEN='settings_synthetic_session_123456789';
 async function setup(page:Page,options:{connected?:boolean;badStorage?:boolean}={}) {
   const writes:string[]=[];
-  let preferences:{version:number;theme?:string;darkPages?:boolean;galleryMode:string;sortAscending:boolean;toolsOpen:boolean;defaultZoom:number}={version:1,galleryMode:'grid',sortAscending:true,toolsOpen:true,defaultZoom:100};
+  let preferences:{version:number;theme?:string;darkPages?:boolean;language?:string;galleryMode:string;sortAscending:boolean;toolsOpen:boolean;defaultZoom:number}={version:1,galleryMode:'grid',sortAscending:true,toolsOpen:true,defaultZoom:100};
   const errors:string[]=[];
   page.on('pageerror',e=>errors.push(e.message));
   if(options.badStorage)await page.addInitScript(()=>localStorage.setItem('samsung-notes.preferences.v1','{broken'));
@@ -102,4 +102,24 @@ test('custom select supports keyboard, dismissal, ARIA and dark theme',async({pa
   await combo.click();await combo.press('Escape');await expect(combo).toBeFocused();await expect(popup).toHaveCount(0);
   await combo.click();await page.getByText('Uygulamanın görünümünü seçin.').click();await expect(popup).toHaveCount(0);
   await combo.click();await combo.press('Tab');await expect(popup).toHaveCount(0);
+});
+test('language is a device preference: saved by the engine, it survives a new origin',async({page,context})=>{
+  const {errors,getPreferences}=await setup(page);
+  await expect(page.getByLabel('Dil',{exact:true})).toHaveAttribute('data-value','tr');
+  await chooseOption(page,'Dil','en');
+  await expect.poll(()=>getPreferences().language).toBe('en');
+  await expect(page.getByRole('button',{name:'New note',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Ayarlar',exact:true})).toHaveCount(0);
+  // The native app gets a new 127.0.0.1 port on every launch: nothing the
+  // page stored survives, only the engine's preference does.
+  await context.clearCookies();await page.evaluate(()=>{localStorage.clear();sessionStorage.clear();});
+  await page.goto('about:blank');await page.goto('/#token='+TOKEN);
+  await expect(page.getByRole('button',{name:'Settings',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await expect(page.getByRole('dialog',{name:'Settings',exact:true})).toBeVisible();
+  await expect(page.getByLabel('Language',{exact:true})).toHaveAttribute('data-value','en');
+  await chooseOption(page,'Language','tr');
+  await expect.poll(()=>getPreferences().language).toBe('tr');
+  await expect(page.getByRole('button',{name:'Ayarlar',exact:true})).toBeVisible();
+  expect(errors).toEqual([]);
 });

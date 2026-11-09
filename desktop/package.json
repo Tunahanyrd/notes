@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
+    "build:en": "NOTLAR_LANG=en npm run build",
+    "i18n:check": "node i18n/check.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "test": "playwright test",
     "tauri": "tauri",
@@ -23,6 +25,10 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@babel/generator": "^8.1.0",
+    "@babel/parser": "^8.1.0",
+    "@babel/traverse": "^8.1.0",
+    "@babel/types": "^8.1.0",
     "@playwright/test": "^1.58.0",
     "@tauri-apps/cli": "^2.11.0",
     "@types/react": "^19.2.0",

@@ -1,4 +1,5 @@
 import {Select} from './Select';
+import {getLanguage,type Language} from './i18n-runtime';
 import {useRef, useState, type ReactNode, type Ref} from 'react';
 import {ArrowLeft, Check,  Grid2X2, List, RefreshCw} from 'lucide-react';
 import type {Status} from './types';
@@ -21,6 +22,8 @@ export interface SettingsPreferences {
   sortAscending:boolean;
   toolsOpen:boolean;
   defaultZoom:75|100|125|150;
+  /** Absent until chosen: the build default applies. */
+  language?:Language;
 }
 export const SETTINGS_STORAGE_KEY='samsung-notes.preferences.v1';
 export const DEFAULT_SETTINGS:Readonly<SettingsPreferences>={theme:'system',darkPages:false,galleryMode:'grid',sortAscending:true,toolsOpen:true,defaultZoom:100};
@@ -30,7 +33,7 @@ function loadLocalSettingsPreferences():SettingsPreferences {
     const saved:unknown=JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY)||'null');
     if(!saved||typeof saved!=='object'||!('version' in saved)||saved.version!==1)return {...DEFAULT_SETTINGS};
     const p=saved as Record<string,unknown>;
-    return {theme:p.theme==='light'||p.theme==='dark'?p.theme:'system',darkPages:p.darkPages===true,galleryMode:p.galleryMode==='list'?'list':'grid',sortAscending:typeof p.sortAscending==='boolean'?p.sortAscending:DEFAULT_SETTINGS.sortAscending,toolsOpen:typeof p.toolsOpen==='boolean'?p.toolsOpen:DEFAULT_SETTINGS.toolsOpen,defaultZoom:[75,100,125,150].includes(p.defaultZoom as number)?p.defaultZoom as SettingsPreferences['defaultZoom']:100};
+    return {theme:p.theme==='light'||p.theme==='dark'?p.theme:'system',darkPages:p.darkPages===true,galleryMode:p.galleryMode==='list'?'list':'grid',sortAscending:typeof p.sortAscending==='boolean'?p.sortAscending:DEFAULT_SETTINGS.sortAscending,toolsOpen:typeof p.toolsOpen==='boolean'?p.toolsOpen:DEFAULT_SETTINGS.toolsOpen,defaultZoom:[75,100,125,150].includes(p.defaultZoom as number)?p.defaultZoom as SettingsPreferences['defaultZoom']:100,...(p.language==='en'||p.language==='tr'?{language:p.language}:{})};
   } catch {return {...DEFAULT_SETTINGS};}
 }
 export function loadSettingsPreferences():SettingsPreferences {
@@ -56,11 +59,13 @@ export interface SettingsPanelProps {
   shortcutSlot?:ReactNode;
   preferences:SettingsPreferences;
   onPreferencesChange:(preferences:SettingsPreferences,patch?:Partial<SettingsPreferences>)=>void;
+  unsavedChanges?:boolean;
 }
 
-export function SettingsPanel({status,busy,error,preferenceError,onClose,onSync,sectionRef,accountSlot,shortcutSlot,preferences,onPreferencesChange}:SettingsPanelProps) {
+export function SettingsPanel({status,busy,error,preferenceError,onClose,onSync,sectionRef,accountSlot,shortcutSlot,preferences,onPreferencesChange,unsavedChanges}:SettingsPanelProps) {
   const [syncBusy,setSyncBusy]=useState(false);
   const [syncError,setSyncError]=useState('');
+  const [languageError,setLanguageError]=useState('');
   const requestInFlight=useRef(false);
   const syncing=syncBusy||status?.sync.state==='syncing';
   const change=(patch:Partial<SettingsPreferences>)=>onPreferencesChange({...preferences,...patch},patch);
@@ -81,6 +86,8 @@ export function SettingsPanel({status,busy,error,preferenceError,onClose,onSync,
           </div>
         </section>
         <section className="settings-group" aria-labelledby="settings-general-heading"><h3 id="settings-general-heading">Genel</h3>{preferenceError&&<p className="settings-inline-error" role="alert">{preferenceError}</p>}<div className="settings-card">
+          <div className="settings-option"><span><span className="settings-option-title">Dil</span><span className="settings-option-description">Arayüz dilini seçin. Dil değiştirildiğinde uygulama yeniden yüklenir.</span></span><Select label="Dil" value={preferences.language??getLanguage()} onChange={value=>{if(value===getLanguage())return;if(unsavedChanges){setLanguageError('Dili değiştirmeden önce değişikliklerinizi kaydedin.');return;}setLanguageError('');change({language:value as Language});}} options={[{value:'en',label:'English'},{value:'tr',label:'Türkçe'}]}/></div>
+          {languageError&&<p className="settings-inline-error" role="alert">{languageError}</p>}
           <div className="settings-option"><span><span className="settings-option-title">Tema</span><span className="settings-option-description">Uygulamanın görünümünü seçin.</span></span><Select label="Tema" value={preferences.theme} onChange={value=>change({theme:value as SettingsPreferences['theme']})} options={[{value:'system',label:'Sistem'},{value:'light',label:'Açık'},{value:'dark',label:'Koyu'}]}/></div>
           <label className="settings-option"><span><span className="settings-option-title">Not sayfalarını koyu göster</span><span className="settings-option-description">Sayfaları yalnızca ekranda koyu gösterir.</span></span><input className="settings-toggle" type="checkbox" role="switch" aria-label="Not sayfalarını koyu göster" checked={preferences.darkPages} onChange={event=>change({darkPages:event.target.checked})}/></label>
           <div className="settings-option settings-view-option"><div><span className="settings-option-title">Not listesi</span><span className="settings-option-description">Notlarınızın nasıl görüneceğini seçin.</span></div><div className="settings-view-choices" role="group" aria-label="Not listesi görünümü">{(['grid','list'] as const).map(mode=><button key={mode} aria-pressed={preferences.galleryMode===mode} onClick={()=>change({galleryMode:mode})}>{mode==='grid'?<Grid2X2 size={23}/>:<List size={23}/>}<span>{mode==='grid'?'Izgara':'Liste'}</span>{preferences.galleryMode===mode&&<Check size={13} className="settings-choice-check"/>}</button>)}</div></div>

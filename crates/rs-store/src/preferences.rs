@@ -27,6 +27,9 @@ pub fn validate_preferences(value: &Val) -> Result<Val> {
         Val::Dict(items) => {
             let mut keys: Vec<&str> = items.iter().map(|(k, _)| k.as_str()).collect();
             let mut want = defaults.keys();
+            // "language" is optional and has no default: absent means the UI
+            // keeps its build default (NOTLAR_LANG).
+            if value.get("language").is_some() { want.push("language"); }
             // Older device records predate these optional fields.
             if value.get("theme").is_none() { want.retain(|k| *k != "theme"); }
             if value.get("darkPages").is_none() { want.retain(|k| *k != "darkPages"); }
@@ -40,6 +43,7 @@ pub fn validate_preferences(value: &Val) -> Result<Val> {
                 && matches!(value.get("defaultZoom"), Some(Val::Int(75 | 100 | 125 | 150)))
                 && value.get("theme").map_or(true, |v| ["system", "light", "dark"].iter().any(|m| py_eq(v, &Val::s(*m))))
                 && value.get("darkPages").map_or(true, |v| matches!(v, Val::Bool(_)))
+                && value.get("language").map_or(true, |v| ["tr", "en"].iter().any(|m| py_eq(v, &Val::s(*m))))
         }
         _ => false,
     };
@@ -103,5 +107,11 @@ mod tests {
         let mut bad = defaults.clone();
         if let Val::Dict(items) = &mut bad { items.iter_mut().find(|(key, _)| key == "darkPages").unwrap().1 = Val::Int(1); }
         assert!(validate_preferences(&bad).is_err());
+        let mut bad = defaults.clone();
+        if let Val::Dict(items) = &mut bad { items.push(("language".to_string(), Val::s("de"))); }
+        assert!(validate_preferences(&bad).is_err());
+        let mut english = defaults.clone();
+        if let Val::Dict(items) = &mut english { items.push(("language".to_string(), Val::s("en"))); }
+        assert_eq!(validate_preferences(&english).unwrap(), english);
     }
 }

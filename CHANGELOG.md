@@ -11,6 +11,16 @@ result was also checked in the official app on a phone or tablet.
 
 ## [Unreleased]
 
+### Added
+
+- English interface with an in-app switch (contributed by @Mahno9): Settings
+  → General → Language offers English and Türkçe. The choice is a device
+  preference kept by the engine, so it survives restarts. The source strings
+  stay Turkish and are translated at runtime; note text, titles and folder
+  names are never translated. The window reloads when the language changes,
+  and switching is blocked while there are unsaved edits. Turkish remains the
+  default.
+
 ### Fixed
 
 - Dark theme: the selected folder in the folder picker and the sign-in error box were light-on-light and unreadable.
