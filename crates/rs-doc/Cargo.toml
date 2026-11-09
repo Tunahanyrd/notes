@@ -10,7 +10,7 @@ name = "_doc"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-flate2 = { version = "=1.1.10", default-features = false, features = ["zlib"] }
+flate2 = { version = "=1.1.11", default-features = false, features = ["zlib"] }
 pyo3 = { workspace = true, optional = true }
 regex = { version = "=1.13.1", default-features = false, features = ["std", "perf", "unicode"] }
 rs-common = { path = "../rs-common", optional = true }
