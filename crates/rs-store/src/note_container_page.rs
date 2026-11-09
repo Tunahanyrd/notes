@@ -115,7 +115,7 @@ fn unsupported(message: impl Into<String>) -> PageReadError {
     PageReadError::Unsupported(message.into())
 }
 fn hash(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::lower_hex(Sha256::digest(bytes))
 }
 fn canonical_uuid(id: &str) -> bool {
     uuid::Uuid::parse_str(id).is_ok_and(|value| value.to_string() == id)

@@ -99,7 +99,6 @@ pub(crate) fn load_result(directory: Option<&Path>, output: &Path) -> R<Val> {
 mod tests {
     use super::*;
     use base64::{engine::general_purpose::STANDARD, Engine as _};
-    use sha2::{Digest, Sha256};
     use std::os::unix::fs::PermissionsExt;
 
     struct Temp(std::path::PathBuf);
@@ -129,7 +128,7 @@ mod tests {
             ("content_type", Val::s("application/xml")),
             ("raw_body", Val::s(STANDARD.encode(raw))),
             ("resource_xml", Val::s(STANDARD.encode(xml))),
-            ("raw_sha256", Val::s(format!("{:x}", Sha256::digest(raw)))),
+            ("raw_sha256", Val::s(crate::util::sha256_hex(raw))),
             ("title", Val::s("synthetic")),
         ]);
         Val::dict(vec![("snapshot", snapshot), ("verified", Val::Bool(true))])

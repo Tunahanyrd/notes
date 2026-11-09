@@ -259,8 +259,8 @@ impl DocumentStore {
         }
         writer.inner.sync_all()?;
         let reference = DocumentRef {
-            source_sha256: format!("{:x}", source_hash.finalize()),
-            stored_sha256: format!("{:x}", writer.hash.finalize()),
+            source_sha256: crate::lower_hex(source_hash.finalize()),
+            stored_sha256: crate::lower_hex(writer.hash.finalize()),
             source_size,
             stored_size: writer.size,
         };
@@ -550,14 +550,14 @@ impl DocumentStore {
         limited.read_to_end(&mut bytes)?;
         let input = limited.into_inner().finish().into_inner();
         if input.size != reference.stored_size
-            || format!("{:x}", input.hash.finalize()) != reference.stored_sha256
+            || crate::lower_hex(input.hash.finalize()) != reference.stored_sha256
         {
             return Err(Error::Value(
                 "document stored SHA-256 verification failed".into(),
             ));
         }
         if bytes.len() as u64 != reference.source_size
-            || format!("{:x}", Sha256::digest(&bytes)) != reference.source_sha256
+            || crate::lower_hex(Sha256::digest(&bytes)) != reference.source_sha256
         {
             return Err(Error::Value(
                 "document source SHA-256 or size verification failed".into(),
@@ -739,7 +739,7 @@ fn hash_reader(mut reader: impl Read) -> Result<(String, u64)> {
         hash.update(&bytes[..n]);
         size += n as u64;
     }
-    Ok((format!("{:x}", hash.finalize()), size))
+    Ok((crate::lower_hex(hash.finalize()), size))
 }
 fn hash_file(path: &Path) -> Result<(String, u64)> {
     let file = OpenOptions::new()
@@ -980,7 +980,7 @@ mod tests {
         let other = zstd::stream::encode_all(&b"replaced"[..], 3).unwrap();
         fs::write(store.path(&reference.source_sha256).unwrap(), &other).unwrap();
         reference.stored_size = other.len() as u64;
-        reference.stored_sha256 = format!("{:x}", Sha256::digest(&other));
+        reference.stored_sha256 = crate::lower_hex(Sha256::digest(&other));
         assert!(store
             .read(&reference)
             .unwrap_err()
@@ -1010,7 +1010,7 @@ mod tests {
         let oversized = encoder.finish().unwrap();
         fs::write(store.path(&reference.source_sha256).unwrap(), &oversized).unwrap();
         reference.stored_size = oversized.len() as u64;
-        reference.stored_sha256 = format!("{:x}", Sha256::digest(&oversized));
+        reference.stored_sha256 = crate::lower_hex(Sha256::digest(&oversized));
         let error = store.read(&reference).unwrap_err().to_string();
         assert!(error.contains("memory"), "unexpected error: {error}");
     }

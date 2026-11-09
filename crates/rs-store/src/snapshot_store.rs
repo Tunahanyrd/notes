@@ -32,7 +32,7 @@ struct CacheEntry { key: CacheKey, value: Val, cost: usize }
 static SNAPSHOTS: Mutex<VecDeque<CacheEntry>> = Mutex::new(VecDeque::new());
 
 fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::lower_hex(Sha256::digest(bytes))
 }
 
 fn field<'a>(value: &'a Val, name: &str) -> Result<&'a str> {

@@ -104,9 +104,9 @@ pub fn decrypt_saved_callback(directory: &Path) -> Result<()> {
     let output = serde_json::json!({
         "schemaVersion": 2, "code": result.code(), "loginId": result.login_id(),
         "bindings": {
-            "transactionSha256": format!("{:x}", Sha256::digest(&transaction_bytes)),
-            "callbackSha256": format!("{:x}", Sha256::digest(&callback_bytes)),
-            "profileSha256": format!("{:x}", Sha256::digest(&profile_bytes))
+            "transactionSha256": crate::lower_hex(Sha256::digest(&transaction_bytes)),
+            "callbackSha256": crate::lower_hex(Sha256::digest(&callback_bytes)),
+            "profileSha256": crate::lower_hex(Sha256::digest(&profile_bytes))
         },
         "authServerUrl": result.auth_server_url(), "apiServerUrl": result.api_server_url(),
         "hostSource": "decrypted-state-bound-samsung-callback", "tokenExchangePerformed": false

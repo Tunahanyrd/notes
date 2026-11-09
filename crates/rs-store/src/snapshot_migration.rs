@@ -52,7 +52,7 @@ fn verify_raw_reference(store: &DocumentStore, value: &Val) -> Result<()> {
     let rebuilt = crate::note_container::reconstruct(file).map_err(Error::Value)?;
     let expected = value.get("raw_sha256").and_then(Val::as_str).ok_or_else(|| Error::Value("missing snapshot digest".into()))?;
     let content_type = value.get("content_type").and_then(Val::as_str).ok_or_else(|| Error::Value("missing snapshot content type".into()))?;
-    if format!("{:x}", Sha256::digest(&rebuilt.raw_body)) != expected || rebuilt.content_type != content_type {
+    if crate::lower_hex(Sha256::digest(&rebuilt.raw_body)) != expected || rebuilt.content_type != content_type {
         return Err(Error::Value("reconstructed snapshot verification failed".into()));
     }
     Ok(())
@@ -136,7 +136,7 @@ impl ProjectionHasher {
     }
     pub fn finish(mut self) -> Result<String> {
         self.0.flush()?;
-        Ok(format!("{:x}", self.0.into_inner().map_err(|e| Error::Io(e.into_error()))?.0.finalize()))
+        Ok(crate::lower_hex(self.0.into_inner().map_err(|e| Error::Io(e.into_error()))?.0.finalize()))
     }
 }
 impl Default for ProjectionHasher { fn default() -> Self { Self::new() } }
@@ -570,7 +570,7 @@ mod tests {
             Val::dict(vec![("a\n", Val::List(vec![Val::s("ç"), Val::Float(1.25), Val::Null]))]),
         ];
         for value in values {
-            let expected = format!("{:x}", Sha256::digest(dumps_utf8(&value).unwrap().as_bytes()));
+            let expected = crate::lower_hex(Sha256::digest(dumps_utf8(&value).unwrap().as_bytes()));
             assert_eq!(projection_value_hash(&value).unwrap(), expected);
         }
         assert!(projection_value_hash(&Val::Bytes(vec![1])).is_err());
@@ -589,7 +589,7 @@ mod tests {
         let new_resource = rs_doc::doc::parse_document(new_raw, "application/xml", None).unwrap().resource_xml;
         replacement.set("raw_body", Val::s(STANDARD.encode(new_raw)));
         replacement.set("resource_xml", Val::s(STANDARD.encode(new_resource)));
-        replacement.set("raw_sha256", Val::s(format!("{:x}", Sha256::digest(new_raw))));
+        replacement.set("raw_sha256", Val::s(crate::lower_hex(Sha256::digest(new_raw))));
         replacement.set("title", Val::s("replacement"));
         // Simulate a committed pointer replacement while the reader
         // is paused after pinning. This must not wait for reconstruction.
@@ -700,7 +700,7 @@ mod tests {
             ("resource_xml", Val::s(&STANDARD.encode(resource))),
             (
                 "raw_sha256",
-                Val::s(&format!("{:x}", Sha256::digest(bytes))),
+                Val::s(&crate::lower_hex(Sha256::digest(bytes))),
             ),
             ("title", Val::s("synthetic")),
         ]);
@@ -760,7 +760,7 @@ mod tests {
             let mut snapshot = crate::val::loads(&original).unwrap();
             snapshot.set("raw_body", Val::s(&STANDARD.encode(&raw)));
             snapshot.set("resource_xml", Val::s(&STANDARD.encode(resource)));
-            snapshot.set("raw_sha256", Val::s(&format!("{:x}", Sha256::digest(&raw))));
+            snapshot.set("raw_sha256", Val::s(&crate::lower_hex(Sha256::digest(&raw))));
             let json = dumps_utf8(&snapshot).unwrap();
             let db = Connection::open(&path).unwrap();
             db.execute("DELETE FROM notes", []).unwrap();

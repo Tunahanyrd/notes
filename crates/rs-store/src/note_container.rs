@@ -108,7 +108,7 @@ fn standard_end(out: &mut Vec<u8>, boundary: &str) {
     out.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
 }
 fn hash(b: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(b))
+    crate::lower_hex(Sha256::digest(b))
 }
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
@@ -514,7 +514,7 @@ fn write_entry<W: Write + Seek, R: Read + Seek>(
                 if total > MAX_ENTRY { return Err("oversized entry".into()); }
                 actual.update(&buffer[..n]);
             }
-            if total != declared || format!("{:x}", actual.finalize()) != digest {
+            if total != declared || crate::lower_hex(actual.finalize()) != digest {
                 return Err("previous entry hash mismatch".into());
             }
         }
@@ -715,7 +715,7 @@ fn build_inner<W: Read + Write + Seek>(
             digest.update(len.to_le_bytes());
             digest.update(&xml.as_bytes()[v[0].clone()]);
             digest.update(&xml.as_bytes()[v[1].clone()]);
-            p.xml_sha256 = format!("{:x}", digest.finalize());
+            p.xml_sha256 = crate::lower_hex(digest.finalize());
             let name = format!("cloud/pages/{}.xml", p.page_id);
             hashes.insert(name.clone(), p.xml_sha256.clone());
             page_xml_entries.insert(name, (v[0].clone(), v[1].clone()));

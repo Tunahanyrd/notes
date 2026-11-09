@@ -76,7 +76,7 @@ pub struct PageFacts {
     pub has_canvas_cache: bool,
 }
 fn hash(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::lower_hex(Sha256::digest(bytes))
 }
 fn tag(node: roxmltree::Node<'_, '_>, name: &str) -> bool {
     node.is_element() && node.tag_name().name() == name

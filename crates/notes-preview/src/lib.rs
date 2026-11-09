@@ -77,3 +77,12 @@ pub fn default_workers() -> usize {
 pub fn png_valid(raw: &[u8], width: i64, height: i64) -> bool {
     rs_render::pixels::png_valid(raw, width, height)
 }
+
+/// Lower-case hex of a digest; sha2 0.11 digests no longer implement `LowerHex`.
+pub(crate) fn lower_hex(bytes: impl AsRef<[u8]>) -> String {
+    use std::fmt::Write;
+    bytes.as_ref().iter().fold(String::with_capacity(64), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
+}

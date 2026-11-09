@@ -16,7 +16,7 @@ pyo3 = { workspace = true, optional = true }
 roxmltree = "=0.21.2"
 rs-common = { path = "../rs-common", optional = true }
 notes_platform = { path = "../notes-platform", package = "notes-platform" }
-sha2 = "=0.10.9"
+sha2 = "=0.11.1"
 
 [features]
 # PyO3 bindings (the historical Python extension `_engine`, see reference/python).

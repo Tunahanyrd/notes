@@ -45,3 +45,12 @@ fn _store(m: &Bound<'_, PyModule>) -> PyResult<()> {
     rs_common::submodule(m, "shortcuts", shortcuts::register)?;
     Ok(())
 }
+
+/// Lower-case hex of a digest; sha2 0.11 digests no longer implement `LowerHex`.
+pub(crate) fn lower_hex(bytes: impl AsRef<[u8]>) -> String {
+    use std::fmt::Write;
+    bytes.as_ref().iter().fold(String::with_capacity(64), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
+}

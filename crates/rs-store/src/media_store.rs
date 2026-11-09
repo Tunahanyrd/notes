@@ -56,7 +56,7 @@ fn digest<R: Read>(reader: &mut R) -> Result<(String, u64)> {
         }
         hash.update(&buf[..n]);
     }
-    Ok((format!("{:x}", hash.finalize()), size))
+    Ok((crate::lower_hex(hash.finalize()), size))
 }
 struct Temp(PathBuf);
 impl Drop for Temp {
@@ -140,7 +140,7 @@ impl MediaStore {
         let mut bytes = Vec::new();
         file.take(max_bytes.saturating_add(1))
             .read_to_end(&mut bytes)?;
-        if bytes.len() as u64 > max_bytes || format!("{:x}", Sha256::digest(&bytes)) != hash {
+        if bytes.len() as u64 > max_bytes || crate::lower_hex(Sha256::digest(&bytes)) != hash {
             return Err(Error::Value("media verification failed".into()));
         }
         Ok(Some(bytes))
@@ -185,7 +185,7 @@ impl MediaStore {
                 hasher.update(&buf[..n]);
                 out.write_all(&buf[..n])?;
             }
-            if format!("{:x}", hasher.finalize()) != hash {
+            if crate::lower_hex(hasher.finalize()) != hash {
                 return Err(Error::Value("media SHA-256 mismatch".into()));
             }
             out.sync_all()?;
@@ -237,7 +237,7 @@ mod tests {
         let temp = Temp::new();
         let media = MediaStore::open(&temp.0).unwrap();
         let bytes = b"synthetic image bytes";
-        let hash = format!("{:x}", Sha256::digest(bytes));
+        let hash = crate::lower_hex(Sha256::digest(bytes));
         let path = media.put(&hash, bytes).unwrap();
         let inode = fs::metadata(&path).unwrap().ino();
         assert_eq!(media.put(&hash, bytes).unwrap(), path);
@@ -260,7 +260,7 @@ mod tests {
     fn no_symlink_source_or_hash_directory_is_followed() {
         let temp = Temp::new();
         let media = MediaStore::open(&temp.0).unwrap();
-        let hash = format!("{:x}", Sha256::digest(b"a"));
+        let hash = crate::lower_hex(Sha256::digest(b"a"));
         let source = temp.0.join("source");
         fs::write(&source, b"a").unwrap();
         let link = temp.0.join("link");

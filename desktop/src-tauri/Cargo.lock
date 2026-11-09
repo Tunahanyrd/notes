@@ -2142,7 +2142,7 @@ dependencies = [
  "rs-store",
  "serde_json",
  "sha1",
- "sha2",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -2186,7 +2186,7 @@ dependencies = [
  "notes-platform",
  "notes-protocol",
  "serde_json",
- "sha2",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -2220,7 +2220,7 @@ dependencies = [
  "rs-ops",
  "rs-render",
  "rs-store",
- "sha2",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -2233,7 +2233,7 @@ dependencies = [
  "roxmltree",
  "serde",
  "serde_json",
- "sha2",
+ "sha2 0.11.1",
  "zeroize",
 ]
 
@@ -2998,7 +2998,7 @@ dependencies = [
  "regex",
  "roxmltree",
  "sha1",
- "sha2",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -3008,7 +3008,7 @@ dependencies = [
  "base64 0.23.1",
  "roxmltree",
  "rs-doc",
- "sha2",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -3019,7 +3019,7 @@ dependencies = [
  "libc",
  "notes-platform",
  "roxmltree",
- "sha2",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -3029,7 +3029,7 @@ dependencies = [
  "base64 0.23.1",
  "roxmltree",
  "rs-doc",
- "sha2",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -3042,7 +3042,7 @@ dependencies = [
  "roxmltree",
  "rs-doc",
  "rs-ink",
- "sha2",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -3061,7 +3061,7 @@ dependencies = [
  "rs-ops",
  "rs-store",
  "serde_json",
- "sha2",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -3079,7 +3079,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "sha2",
+ "sha2 0.11.1",
  "uuid",
  "zip",
  "zstd",
@@ -3418,6 +3418,17 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
  "digest 0.10.7",
+]
+
+[[package]]
+name = "sha2"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.1",
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -3814,7 +3825,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "sha2",
+ "sha2 0.10.9",
  "syn 2.0.119",
  "tauri-utils",
  "thiserror 2.0.21",
@@ -4944,7 +4955,7 @@ dependencies = [
  "objc2-web-kit",
  "percent-encoding",
  "raw-window-handle",
- "sha2",
+ "sha2 0.10.9",
  "soup3",
  "tao-macros",
  "thiserror 2.0.21",

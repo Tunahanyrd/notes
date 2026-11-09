@@ -86,13 +86,19 @@ fn decrypted_callback_binds_exact_local_input_snapshots() {
     for name in ["transaction", "callback", "profile"] {
         assert_eq!(
             output["bindings"][format!("{name}Sha256")],
-            format!(
-                "{:x}",
-                Sha256::digest(fs::read(directory.join(format!("{name}.json"))).unwrap())
-            )
+            lower_hex(Sha256::digest(fs::read(directory.join(format!("{name}.json"))).unwrap()))
         );
     }
     assert!(!String::from_utf8_lossy(&result.stdout).contains("synthetic-code"));
     assert!(!run().status.success()); // no overwrite of consumed decode output
     fs::remove_dir_all(directory).unwrap();
+}
+
+/// Lower-case hex of a digest; sha2 0.11 digests no longer implement `LowerHex`.
+pub(crate) fn lower_hex(bytes: impl AsRef<[u8]>) -> String {
+    use std::fmt::Write;
+    bytes.as_ref().iter().fold(String::with_capacity(64), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
 }

@@ -115,7 +115,7 @@ pub fn capture(store: &StoreCore, key: &InventoryKey, original_resource: &[u8], 
     let global = note_container::read_global_context(file.try_clone()?, &context_hash, &key.raw_sha256).map_err(db::Error::Value)?;
     if !global.index.stroke_bindings_match(Some(&local), Some(&commit)) { return Ok(None); }
     let proof = global.index.admission.as_ref().ok_or_else(|| db::Error::Value("missing resource proof".into()))?;
-    if format!("{:x}", Sha256::digest(original_resource)) != proof.resource_sha256 { return Err(db::Error::Value("resource proof mismatch".into())); }
+    if crate::lower_hex(Sha256::digest(original_resource)) != proof.resource_sha256 { return Err(db::Error::Value("resource proof mismatch".into())); }
     let original = _ops::xml::parse_bytes(original_resource).map_err(db::Error::Value)?;
     if original.iter().any(|n| matches!(n.local().as_str(), "downloadurl" | "downloadurls")) { return Ok(None); }
     let doc = _ops::xml::parse_bytes(&global.note_xml).map_err(db::Error::Value)?;
@@ -125,7 +125,7 @@ pub fn capture(store: &StoreCore, key: &InventoryKey, original_resource: &[u8], 
     let allowed = ["noteTree", "contentFileList", "attributes", "pageList", "floatingObjectList", "bodyText"];
     if root.children.iter().any(|c| !allowed.contains(&c.tag.as_str())) || original.children.iter().map(|c| &c.tag).ne(root.children.iter().map(|c| &c.tag)) { return Ok(None); }
     let context = serde_json::to_vec(&global.index).map_err(|e| db::Error::Value(e.to_string()))?;
-    if format!("{:x}", Sha256::digest(&context)) != context_hash { return Err(db::Error::Value("context serialization differs from source".into())); }
+    if crate::lower_hex(Sha256::digest(&context)) != context_hash { return Err(db::Error::Value("context serialization differs from source".into())); }
     url_ids.sort();
     let Some((verified_ids, urls)) = verified_urls(&global).map_err(db::Error::Value)? else { return Ok(None) };
     if url_ids != verified_ids { return Err(db::Error::Value("preview URL identities differ from source".into())); }

@@ -49,7 +49,7 @@ pub(crate) fn render_index(store: &StoreCore, identity: &str) -> Result<Option<A
     let row = rows.one().ok_or_else(|| Fail::store("not_found", "Not bulunamadı.", 404))?;
     let corrupt = || Fail::store("preview_storage_corrupt", "Sayfa verisi doğrulanamadı.", 422);
     let raw = row.text("raw_sha256").ok_or_else(corrupt)?;
-    if row.text("manifest_sha256") != Some(projection.manifest_sha256.as_str()) || row.text("context_sha256") != Some(format!("{:x}", Sha256::digest(&projection.context)).as_str()) || rs_store::page_context::parse(&projection.context, raw).is_err() { return Err(corrupt()); }
+    if row.text("manifest_sha256") != Some(projection.manifest_sha256.as_str()) || row.text("context_sha256") != Some(crate::lower_hex(Sha256::digest(&projection.context)).as_str()) || rs_store::page_context::parse(&projection.context, raw).is_err() { return Err(corrupt()); }
     Ok(Some(projection))
 }
 
@@ -202,7 +202,7 @@ pub fn read_material(
         let reference = RawDocumentRef { sha256: hash.into(), size: size as u64 };
         let global = if let Some(projection) = &projection {
             use sha2::{Digest, Sha256};
-            if projection.manifest_sha256 != manifest_hash || format!("{:x}", Sha256::digest(&projection.context)) != context_hash { return Err(db::Error::Value("render projection source mismatch".into())); }
+            if projection.manifest_sha256 != manifest_hash || crate::lower_hex(Sha256::digest(&projection.context)) != context_hash { return Err(db::Error::Value("render projection source mismatch".into())); }
             let index = rs_store::page_context::parse(&projection.context, raw).map_err(db::Error::Value)?;
             note_container::GlobalPageContext { index, note_xml: Vec::new(), download_urls: Vec::new() }
         } else {

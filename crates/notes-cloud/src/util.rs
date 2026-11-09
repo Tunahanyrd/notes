@@ -4,8 +4,8 @@
 //! urllib.parse quoting, uuid4/uuid5, secrets, notes_cloud.endpoint).
 use crate::json;
 use notes_host::{Fail, Kind, Val};
+// sha1 and sha2 share digest 0.11's `Digest` trait.
 use sha1::Digest as _;
-use sha2::Digest as _;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};

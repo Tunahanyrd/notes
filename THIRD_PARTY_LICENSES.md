@@ -17,10 +17,10 @@ separate program), bubblewrap (LGPL-2.0+, separate program).
 
 ## Rust: Rust engine workspace
 
-Lock file: `Cargo.lock` (133 packages)
+Lock file: `Cargo.lock` (127 packages)
 
-- MIT OR Apache-2.0: 82
-- MIT: 19
+- MIT OR Apache-2.0: 77
+- MIT: 18
 - Apache-2.0 OR MIT: 12
 - BSD-3-Clause: 5
 - Unlicense OR MIT: 3
@@ -43,7 +43,6 @@ Lock file: `Cargo.lock` (133 packages)
 | autocfg | 1.5.1 | Apache-2.0 OR MIT | crates.io |
 | base64 | 0.23.1 | MIT OR Apache-2.0 | crates.io |
 | bitflags | 2.13.2 | MIT OR Apache-2.0 | crates.io |
-| block-buffer | 0.10.4 | MIT OR Apache-2.0 | crates.io |
 | block-buffer | 0.12.1 | MIT OR Apache-2.0 | crates.io |
 | bumpalo | 3.20.3 | MIT OR Apache-2.0 | crates.io |
 | bytemuck | 1.25.2 | Zlib OR Apache-2.0 OR MIT | crates.io |
@@ -53,13 +52,10 @@ Lock file: `Cargo.lock` (133 packages)
 | cfg_aliases | 0.2.2 | MIT | crates.io |
 | color_quant | 1.1.0 | MIT | crates.io |
 | const-oid | 0.10.2 | Apache-2.0 OR MIT | crates.io |
-| cpufeatures | 0.2.17 | MIT OR Apache-2.0 | crates.io |
 | cpufeatures | 0.3.1 | MIT OR Apache-2.0 | crates.io |
 | crc32fast | 1.5.3 | MIT OR Apache-2.0 | crates.io |
-| crypto-common | 0.1.7 | MIT OR Apache-2.0 | crates.io |
 | crypto-common | 0.2.2 | MIT OR Apache-2.0 | crates.io |
 | data-url | 0.3.2 | MIT OR Apache-2.0 | crates.io |
-| digest | 0.10.7 | MIT OR Apache-2.0 | crates.io |
 | digest | 0.11.3 | MIT OR Apache-2.0 | crates.io |
 | equivalent | 1.0.3 | Apache-2.0 OR MIT | crates.io |
 | euclid | 0.22.14 | MIT OR Apache-2.0 | crates.io |
@@ -75,7 +71,6 @@ Lock file: `Cargo.lock` (133 packages)
 | futures-core | 0.3.34 | MIT OR Apache-2.0 | crates.io |
 | futures-task | 0.3.34 | MIT OR Apache-2.0 | crates.io |
 | futures-util | 0.3.34 | MIT OR Apache-2.0 | crates.io |
-| generic-array | 0.14.7 | MIT | crates.io |
 | getrandom | 0.4.3 | MIT OR Apache-2.0 | crates.io |
 | gif | 0.14.2 | MIT OR Apache-2.0 | crates.io |
 | hashbrown | 0.16.1 | MIT OR Apache-2.0 | crates.io |
@@ -130,7 +125,7 @@ Lock file: `Cargo.lock` (133 packages)
 | serde_derive | 1.0.229 | MIT OR Apache-2.0 | crates.io |
 | serde_json | 1.0.154 | MIT OR Apache-2.0 | crates.io |
 | sha1 | 0.11.0 | MIT OR Apache-2.0 | crates.io |
-| sha2 | 0.10.9 | MIT OR Apache-2.0 | crates.io |
+| sha2 | 0.11.1 | MIT OR Apache-2.0 | crates.io |
 | shlex | 2.0.1 | MIT OR Apache-2.0 | crates.io |
 | simd-adler32 | 0.3.10 | MIT | crates.io |
 | simplecss | 0.2.2 | Apache-2.0 OR MIT | crates.io |
@@ -152,7 +147,6 @@ Lock file: `Cargo.lock` (133 packages)
 | usvg | 0.49.0 | Apache-2.0 OR MIT | crates.io |
 | uuid | 1.29.0 | Apache-2.0 OR MIT | crates.io |
 | vcpkg | 0.2.15 | MIT OR Apache-2.0 | crates.io |
-| version_check | 0.9.5 | MIT OR Apache-2.0 | crates.io |
 | wasm-bindgen | 0.2.127 | MIT OR Apache-2.0 | crates.io |
 | wasm-bindgen-macro | 0.2.127 | MIT OR Apache-2.0 | crates.io |
 | wasm-bindgen-macro-support | 0.2.127 | MIT OR Apache-2.0 | crates.io |
@@ -172,9 +166,9 @@ Lock file: `Cargo.lock` (133 packages)
 
 ## Rust: Tauri desktop shell
 
-Lock file: `desktop/src-tauri/Cargo.lock` (471 packages)
+Lock file: `desktop/src-tauri/Cargo.lock` (472 packages)
 
-- MIT OR Apache-2.0: 230
+- MIT OR Apache-2.0: 231
 - MIT: 113
 - Apache-2.0 OR MIT: 40
 - Unicode-3.0: 18
@@ -519,6 +513,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (471 packages)
 | servo_arc | 0.4.3 | MIT OR Apache-2.0 | crates.io |
 | sha1 | 0.11.0 | MIT OR Apache-2.0 | crates.io |
 | sha2 | 0.10.9 | MIT OR Apache-2.0 | crates.io |
+| sha2 | 0.11.1 | MIT OR Apache-2.0 | crates.io |
 | shlex | 2.0.1 | MIT OR Apache-2.0 | crates.io |
 | simd-adler32 | 0.3.10 | MIT | crates.io |
 | simplecss | 0.2.2 | Apache-2.0 OR MIT | crates.io |

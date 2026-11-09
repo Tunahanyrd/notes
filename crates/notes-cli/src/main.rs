@@ -137,9 +137,9 @@ fn decrypt_saved_callback(directory: &Path) -> Result<(), String> {
     let output = serde_json::json!({
         "schemaVersion": 2, "code": result.code(), "loginId": result.login_id(),
         "bindings": {
-            "transactionSha256": format!("{:x}", Sha256::digest(&transaction_bytes)),
-            "callbackSha256": format!("{:x}", Sha256::digest(&callback_bytes)),
-            "profileSha256": format!("{:x}", Sha256::digest(&profile_bytes))
+            "transactionSha256": crate::lower_hex(Sha256::digest(&transaction_bytes)),
+            "callbackSha256": crate::lower_hex(Sha256::digest(&callback_bytes)),
+            "profileSha256": crate::lower_hex(Sha256::digest(&profile_bytes))
         },
         "authServerUrl": result.auth_server_url(), "apiServerUrl": result.api_server_url(),
         "hostSource": "decrypted-state-bound-samsung-callback", "tokenExchangePerformed": false
@@ -187,7 +187,7 @@ fn run() -> Result<(), String> {
         let xml = std::str::from_utf8(&raw).map_err(|_| "change feed is not UTF-8")?;
         let page = parse_note_changes(xml).map_err(|e| e.to_string())?;
         let output = serde_json::json!({"schemaVersion": 1,
-            "sourceSha256": format!("{:x}", Sha256::digest(&raw)), "page": page});
+            "sourceSha256": crate::lower_hex(Sha256::digest(&raw)), "page": page});
         write_private(
             Path::new(&args[2]),
             &serde_json::to_vec(&output).map_err(|_| "could not serialize change feed")?,
@@ -279,4 +279,13 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Lower-case hex of a digest; sha2 0.11 digests no longer implement `LowerHex`.
+pub(crate) fn lower_hex(bytes: impl AsRef<[u8]>) -> String {
+    use std::fmt::Write;
+    bytes.as_ref().iter().fold(String::with_capacity(64), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
 }

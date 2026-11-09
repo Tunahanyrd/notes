@@ -15,7 +15,7 @@ pyo3 = { workspace = true, optional = true }
 regex = { version = "=1.13.1", default-features = false, features = ["std", "perf", "unicode"] }
 rs-common = { path = "../rs-common", optional = true }
 roxmltree = { workspace = true }
-sha2 = { workspace = true, features = ["std"] }
+sha2 = { workspace = true }
 base64 = { workspace = true }
 getrandom = { workspace = true }
 sha1 = "=0.11.0"
