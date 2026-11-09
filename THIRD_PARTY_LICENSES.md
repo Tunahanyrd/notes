@@ -17,11 +17,11 @@ separate program), bubblewrap (LGPL-2.0+, separate program).
 
 ## Rust: Rust engine workspace
 
-Lock file: `Cargo.lock` (127 packages)
+Lock file: `Cargo.lock` (129 packages)
 
 - MIT OR Apache-2.0: 77
 - MIT: 18
-- Apache-2.0 OR MIT: 12
+- Apache-2.0 OR MIT: 13
 - BSD-3-Clause: 5
 - Unlicense OR MIT: 3
 - MIT OR Apache-2.0 OR Zlib: 2
@@ -31,6 +31,7 @@ Lock file: `Cargo.lock` (127 packages)
 - 0BSD OR MIT OR Apache-2.0: 1
 - Apache-2.0: 1
 - BSD-2-Clause: 1
+- CC0-1.0 OR MIT-0 OR Apache-2.0: 1
 - MIT OR Apache-2.0 OR LGPL-2.1-or-later: 1
 - Zlib OR Apache-2.0 OR MIT: 1
 
@@ -52,6 +53,7 @@ Lock file: `Cargo.lock` (127 packages)
 | cfg_aliases | 0.2.2 | MIT | crates.io |
 | color_quant | 1.1.0 | MIT | crates.io |
 | const-oid | 0.10.2 | Apache-2.0 OR MIT | crates.io |
+| constant_time_eq | 0.6.1 | CC0-1.0 OR MIT-0 OR Apache-2.0 | crates.io |
 | cpufeatures | 0.3.1 | MIT OR Apache-2.0 | crates.io |
 | crc32fast | 1.5.3 | MIT OR Apache-2.0 | crates.io |
 | crypto-common | 0.2.2 | MIT OR Apache-2.0 | crates.io |
@@ -63,7 +65,7 @@ Lock file: `Cargo.lock` (127 packages)
 | fallible-streaming-iterator | 0.1.9 | MIT OR Apache-2.0 | crates.io |
 | fdeflate | 0.3.7 | MIT OR Apache-2.0 | crates.io |
 | find-msvc-tools | 0.1.15 | MIT OR Apache-2.0 | crates.io |
-| flate2 | 1.1.10 | MIT OR Apache-2.0 | crates.io |
+| flate2 | 1.1.11 | MIT OR Apache-2.0 | crates.io |
 | float-cmp | 0.9.0 | MIT | crates.io |
 | foldhash | 0.2.0 | Zlib | crates.io |
 | foreign-types | 0.3.2 | MIT OR Apache-2.0 | crates.io |
@@ -95,9 +97,9 @@ Lock file: `Cargo.lock` (127 packages)
 | nix | 0.31.3 | MIT | crates.io |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 | crates.io |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 | crates.io |
-| openssl | 0.10.81 | Apache-2.0 | crates.io |
+| openssl | 0.10.82 | Apache-2.0 | crates.io |
 | openssl-macros | 0.1.1 | MIT OR Apache-2.0 | crates.io |
-| openssl-sys | 0.9.117 | MIT | crates.io |
+| openssl-sys | 0.9.118 | MIT | crates.io |
 | parking_lot | 0.13.0 | MIT OR Apache-2.0 | crates.io |
 | parking_lot_core | 0.10.0 | MIT OR Apache-2.0 | crates.io |
 | pico-args | 0.5.0 | MIT | crates.io |
@@ -155,7 +157,8 @@ Lock file: `Cargo.lock` (127 packages)
 | windows-link | 0.2.1 | MIT OR Apache-2.0 | crates.io |
 | windows-sys | 0.61.2 | MIT OR Apache-2.0 | crates.io |
 | zeroize | 1.9.1 | Apache-2.0 OR MIT | crates.io |
-| zip | 9.2.0 | MIT | crates.io |
+| zeroize_derive | 1.5.0 | Apache-2.0 OR MIT | crates.io |
+| zip | 9.5.0 | MIT | crates.io |
 | zlib-rs | 0.6.8 | Zlib | crates.io |
 | zmij | 1.0.23 | MIT | crates.io |
 | zstd | 0.14.3 | BSD-3-Clause | crates.io |
@@ -166,11 +169,11 @@ Lock file: `Cargo.lock` (127 packages)
 
 ## Rust: Tauri desktop shell
 
-Lock file: `desktop/src-tauri/Cargo.lock` (472 packages)
+Lock file: `desktop/src-tauri/Cargo.lock` (474 packages)
 
 - MIT OR Apache-2.0: 231
 - MIT: 113
-- Apache-2.0 OR MIT: 40
+- Apache-2.0 OR MIT: 41
 - Unicode-3.0: 18
 - Zlib OR Apache-2.0 OR MIT: 17
 - Unlicense OR MIT: 12
@@ -180,6 +183,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (472 packages)
 - MIT OR Apache-2.0 OR Zlib: 4
 - Apache-2.0: 3
 - BSD-3-Clause OR MIT OR Apache-2.0: 2
+- CC0-1.0 OR MIT-0 OR Apache-2.0: 2
 - MIT OR Apache-2.0 OR LGPL-2.1-or-later: 2
 - MIT OR Zlib OR Apache-2.0: 2
 - Zlib: 2
@@ -190,7 +194,6 @@ Lock file: `desktop/src-tauri/Cargo.lock` (472 packages)
 - BSD-2-Clause: 1
 - BSD-3-Clause AND MIT: 1
 - BSD-3-Clause OR MIT: 1
-- CC0-1.0 OR MIT-0 OR Apache-2.0: 1
 - ISC: 1
 
 | Package | Version | License | Origin |
@@ -241,6 +244,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (472 packages)
 | color_quant | 1.1.0 | MIT | crates.io |
 | combine | 4.6.9 | MIT | crates.io |
 | const-oid | 0.10.2 | Apache-2.0 OR MIT | crates.io |
+| constant_time_eq | 0.6.1 | CC0-1.0 OR MIT-0 OR Apache-2.0 | crates.io |
 | cookie | 0.18.2 | MIT OR Apache-2.0 | crates.io |
 | core-foundation | 0.10.1 | MIT OR Apache-2.0 | crates.io |
 | core-foundation-sys | 0.8.7 | MIT OR Apache-2.0 | crates.io |
@@ -293,7 +297,7 @@ Lock file: `desktop/src-tauri/Cargo.lock` (472 packages)
 | fdeflate | 0.3.7 | MIT OR Apache-2.0 | crates.io |
 | field-offset | 0.3.6 | MIT OR Apache-2.0 | crates.io |
 | find-msvc-tools | 0.1.15 | MIT OR Apache-2.0 | crates.io |
-| flate2 | 1.1.10 | MIT OR Apache-2.0 | crates.io |
+| flate2 | 1.1.11 | MIT OR Apache-2.0 | crates.io |
 | float-cmp | 0.9.0 | MIT | crates.io |
 | fnv | 1.0.7 | Apache-2.0 OR MIT | crates.io |
 | foldhash | 0.2.0 | Zlib | crates.io |
@@ -432,9 +436,9 @@ Lock file: `desktop/src-tauri/Cargo.lock` (472 packages)
 | objc2-user-notifications | 0.3.2 | Zlib OR Apache-2.0 OR MIT | crates.io |
 | objc2-web-kit | 0.3.2 | Zlib OR Apache-2.0 OR MIT | crates.io |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 | crates.io |
-| openssl | 0.10.81 | Apache-2.0 | crates.io |
+| openssl | 0.10.82 | Apache-2.0 | crates.io |
 | openssl-macros | 0.1.1 | MIT OR Apache-2.0 | crates.io |
-| openssl-sys | 0.9.117 | MIT | crates.io |
+| openssl-sys | 0.9.118 | MIT | crates.io |
 | option-ext | 0.2.0 | MPL-2.0 | crates.io |
 | pango | 0.18.3 | MIT | crates.io |
 | pango-sys | 0.18.0 | MIT | crates.io |
@@ -656,10 +660,11 @@ Lock file: `desktop/src-tauri/Cargo.lock` (472 packages)
 | zerofrom | 0.1.8 | Unicode-3.0 | crates.io |
 | zerofrom-derive | 0.1.8 | Unicode-3.0 | crates.io |
 | zeroize | 1.9.1 | Apache-2.0 OR MIT | crates.io |
+| zeroize_derive | 1.5.0 | Apache-2.0 OR MIT | crates.io |
 | zerotrie | 0.2.5 | Unicode-3.0 | crates.io |
 | zerovec | 0.11.9 | Unicode-3.0 | crates.io |
 | zerovec-derive | 0.11.7 | Unicode-3.0 | crates.io |
-| zip | 9.2.0 | MIT | crates.io |
+| zip | 9.5.0 | MIT | crates.io |
 | zlib-rs | 0.6.8 | Zlib | crates.io |
 | zmij | 1.0.23 | MIT | crates.io |
 | zstd | 0.14.3 | BSD-3-Clause | crates.io |
@@ -947,23 +952,23 @@ Lock file: `desktop/package-lock.json` (152 packages)
 | @jridgewell/resolve-uri | 3.1.2 | MIT | dev |
 | @jridgewell/sourcemap-codec | 1.6.0 | MIT | dev |
 | @jridgewell/trace-mapping | 0.3.31 | MIT | dev |
-| @oxc-project/types | 0.155.0 | MIT | dev |
-| @playwright/test | 1.64.1 | Apache-2.0 | dev |
-| @rolldown/binding-android-arm-eabi | 1.2.15 | MIT | dev, optional/platform |
-| @rolldown/binding-android-arm64 | 1.2.15 | MIT | dev, optional/platform |
-| @rolldown/binding-darwin-arm64 | 1.2.15 | MIT | dev, optional/platform |
-| @rolldown/binding-darwin-x64 | 1.2.15 | MIT | dev, optional/platform |
-| @rolldown/binding-freebsd-x64 | 1.2.15 | MIT | dev, optional/platform |
-| @rolldown/binding-linux-arm-gnueabihf | 1.2.15 | MIT | dev, optional/platform |
-| @rolldown/binding-linux-arm64-gnu | 1.2.15 | MIT | dev, optional/platform |
-| @rolldown/binding-linux-arm64-musl | 1.2.15 | MIT | dev, optional/platform |
-| @rolldown/binding-linux-ppc64-gnu | 1.2.15 | MIT | dev, optional/platform |
-| @rolldown/binding-linux-s390x-gnu | 1.2.15 | MIT | dev, optional/platform |
-| @rolldown/binding-linux-x64-gnu | 1.2.15 | MIT | dev, optional/platform |
-| @rolldown/binding-linux-x64-musl | 1.2.15 | MIT | dev, optional/platform |
-| @rolldown/binding-openharmony-arm64 | 1.2.15 | MIT | dev, optional/platform |
-| @rolldown/binding-win32-arm64-msvc | 1.2.15 | MIT | dev, optional/platform |
-| @rolldown/binding-win32-x64-msvc | 1.2.15 | MIT | dev, optional/platform |
+| @oxc-project/types | 0.156.0 | MIT | dev |
+| @playwright/test | 1.65.0 | Apache-2.0 | dev |
+| @rolldown/binding-android-arm-eabi | 1.2.18 | MIT | dev, optional/platform |
+| @rolldown/binding-android-arm64 | 1.2.18 | MIT | dev, optional/platform |
+| @rolldown/binding-darwin-arm64 | 1.2.18 | MIT | dev, optional/platform |
+| @rolldown/binding-darwin-x64 | 1.2.18 | MIT | dev, optional/platform |
+| @rolldown/binding-freebsd-x64 | 1.2.18 | MIT | dev, optional/platform |
+| @rolldown/binding-linux-arm-gnueabihf | 1.2.18 | MIT | dev, optional/platform |
+| @rolldown/binding-linux-arm64-gnu | 1.2.18 | MIT | dev, optional/platform |
+| @rolldown/binding-linux-arm64-musl | 1.2.18 | MIT | dev, optional/platform |
+| @rolldown/binding-linux-ppc64-gnu | 1.2.18 | MIT | dev, optional/platform |
+| @rolldown/binding-linux-s390x-gnu | 1.2.18 | MIT | dev, optional/platform |
+| @rolldown/binding-linux-x64-gnu | 1.2.18 | MIT | dev, optional/platform |
+| @rolldown/binding-linux-x64-musl | 1.2.18 | MIT | dev, optional/platform |
+| @rolldown/binding-openharmony-arm64 | 1.2.18 | MIT | dev, optional/platform |
+| @rolldown/binding-win32-arm64-msvc | 1.2.18 | MIT | dev, optional/platform |
+| @rolldown/binding-win32-x64-msvc | 1.2.18 | MIT | dev, optional/platform |
 | @rolldown/pluginutils | 1.0.1 | MIT | dev |
 | @tauri-apps/cli | 2.12.4 | Apache-2.0 OR MIT | dev |
 | @tauri-apps/cli-darwin-arm64 | 2.12.4 | Apache-2.0 OR MIT | dev, optional/platform |
@@ -977,34 +982,34 @@ Lock file: `desktop/package-lock.json` (152 packages)
 | @tauri-apps/cli-win32-arm64-msvc | 2.12.4 | Apache-2.0 OR MIT | dev, optional/platform |
 | @tauri-apps/cli-win32-ia32-msvc | 2.12.4 | Apache-2.0 OR MIT | dev, optional/platform |
 | @tauri-apps/cli-win32-x64-msvc | 2.12.4 | Apache-2.0 OR MIT | dev, optional/platform |
-| @tiptap/core | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-blockquote | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-bold | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-bubble-menu | 3.32.1 | MIT | runtime (bundled into the UI), optional/platform |
-| @tiptap/extension-bullet-list | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-code | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-code-block | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-document | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-dropcursor | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-floating-menu | 3.32.1 | MIT | runtime (bundled into the UI), optional/platform |
-| @tiptap/extension-gapcursor | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-hard-break | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-heading | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-horizontal-rule | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-italic | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-link | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-list | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-list-item | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-list-keymap | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-ordered-list | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-paragraph | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-strike | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-text | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extension-underline | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/extensions | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/pm | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/react | 3.32.1 | MIT | runtime (bundled into the UI) |
-| @tiptap/starter-kit | 3.32.1 | MIT | runtime (bundled into the UI) |
+| @tiptap/core | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-blockquote | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-bold | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-bubble-menu | 3.33.0 | MIT | runtime (bundled into the UI), optional/platform |
+| @tiptap/extension-bullet-list | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-code | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-code-block | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-document | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-dropcursor | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-floating-menu | 3.33.0 | MIT | runtime (bundled into the UI), optional/platform |
+| @tiptap/extension-gapcursor | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-hard-break | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-heading | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-horizontal-rule | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-italic | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-link | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-list | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-list-item | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-list-keymap | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-ordered-list | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-paragraph | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-strike | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-text | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extension-underline | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/extensions | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/pm | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/react | 3.33.0 | MIT | runtime (bundled into the UI) |
+| @tiptap/starter-kit | 3.33.0 | MIT | runtime (bundled into the UI) |
 | @types/jsesc | 2.5.1 | MIT | dev |
 | @types/react | 19.3.0 | MIT | runtime (bundled into the UI) |
 | @types/react-dom | 19.3.0 | MIT | runtime (bundled into the UI) |
@@ -1029,7 +1034,7 @@ Lock file: `desktop/package-lock.json` (152 packages)
 | @typescript/typescript-sunos-x64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
 | @typescript/typescript-win32-arm64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
 | @typescript/typescript-win32-x64 | 7.0.2 | Apache-2.0 | dev, optional/platform |
-| @vitejs/plugin-react | 6.1.2 | MIT | dev |
+| @vitejs/plugin-react | 6.3.0 | MIT | dev |
 | csstype | 3.2.3 | MIT | runtime (bundled into the UI) |
 | detect-libc | 2.1.2 | Apache-2.0 | dev |
 | fast-equals | 5.4.5 | MIT | runtime (bundled into the UI) |
@@ -1050,15 +1055,15 @@ Lock file: `desktop/package-lock.json` (152 packages)
 | lightningcss-win32-arm64-msvc | 1.33.0 | MPL-2.0 | dev, optional/platform |
 | lightningcss-win32-x64-msvc | 1.33.0 | MPL-2.0 | dev, optional/platform |
 | linkifyjs | 4.4.0 | MIT | runtime (bundled into the UI) |
-| lucide-react | 1.64.0 | ISC | runtime (bundled into the UI) |
+| lucide-react | 1.70.0 | ISC | runtime (bundled into the UI) |
 | nanoid | 3.3.20 | MIT | dev |
 | obug | 3.0.0 | MIT | dev |
 | orderedmap | 2.1.1 | MIT | runtime (bundled into the UI) |
 | picocolors | 1.1.1 | ISC | dev |
 | picomatch | 4.0.7 | MIT | dev |
-| playwright | 1.64.1 | Apache-2.0 | dev |
-| playwright-core | 1.64.1 | Apache-2.0 | dev |
-| postcss | 8.5.31 | MIT | dev |
+| playwright | 1.65.0 | Apache-2.0 | dev |
+| playwright-core | 1.65.0 | Apache-2.0 | dev |
+| postcss | 8.5.32 | MIT | dev |
 | prosemirror-changeset | 2.4.4 | MIT | runtime (bundled into the UI) |
 | prosemirror-commands | 1.7.2 | MIT | runtime (bundled into the UI) |
 | prosemirror-dropcursor | 1.8.4 | MIT | runtime (bundled into the UI) |
@@ -1074,14 +1079,14 @@ Lock file: `desktop/package-lock.json` (152 packages)
 | prosemirror-view | 1.42.8 | MIT | runtime (bundled into the UI) |
 | react | 19.3.1 | MIT | runtime (bundled into the UI) |
 | react-dom | 19.3.1 | MIT | runtime (bundled into the UI) |
-| rolldown | 1.2.15 | MIT | dev |
+| rolldown | 1.2.18 | MIT | dev |
 | rope-sequence | 1.3.4 | MIT | runtime (bundled into the UI) |
 | scheduler | 0.28.0 | MIT | runtime (bundled into the UI) |
 | source-map-js | 1.2.2 | BSD-3-Clause | dev |
 | tinyglobby | 0.2.17 | MIT | dev |
 | typescript | 7.0.2 | Apache-2.0 | dev |
 | use-sync-external-store | 1.7.0 | MIT | runtime (bundled into the UI) |
-| vite | 8.3.5 | MIT | dev |
+| vite | 8.3.7 | MIT | dev |
 | w3c-keyname | 2.2.8 | MIT | runtime (bundled into the UI) |
 
 ## Icons

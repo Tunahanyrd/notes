@@ -10,7 +10,7 @@ name = "_render"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-flate2 = { version = "=1.1.10", default-features = false, features = ["zlib"] }
+flate2 = { version = "=1.1.11", default-features = false, features = ["zlib"] }
 libc = "=0.2.191"
 sha2 = { workspace = true }
 serde_json = { workspace = true }
