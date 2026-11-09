@@ -16,11 +16,11 @@
     "test:native": "python3 tests/native-lifecycle.py"
   },
   "dependencies": {
-    "@tiptap/core": "3.32.1",
-    "@tiptap/pm": "3.32.1",
-    "@tiptap/react": "3.32.1",
-    "@tiptap/starter-kit": "3.32.1",
-    "lucide-react": "^1.64.0",
+    "@tiptap/core": "3.33.0",
+    "@tiptap/pm": "3.33.0",
+    "@tiptap/react": "3.33.0",
+    "@tiptap/starter-kit": "3.33.0",
+    "lucide-react": "^1.70.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
@@ -29,12 +29,12 @@
     "@babel/parser": "^8.1.0",
     "@babel/traverse": "^8.1.0",
     "@babel/types": "^8.1.0",
-    "@playwright/test": "^1.58.0",
+    "@playwright/test": "^1.65.0",
     "@tauri-apps/cli": "^2.11.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
-    "@vitejs/plugin-react": "^6.0.0",
+    "@vitejs/plugin-react": "^6.2.1",
     "typescript": "^7.0.2",
-    "vite": "^8.0.0"
+    "vite": "^8.3.6"
   }
 }
