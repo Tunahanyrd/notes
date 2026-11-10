@@ -43,6 +43,6 @@ tar -C "$root/.." --transform "s|^$(basename "$root")|notes-$pkgver|" \
     export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}" PKGDEST="$out"
     makepkg -f --noconfirm --skipchecksums
 )
-for pkg in "$out"/notes-"$pkgver"-*.pkg.tar.*; do
+for pkg in "$out"/notes-desktop-"$pkgver"-*.pkg.tar.*; do
     python3 "$root/packaging/check-package-contents.py" "$pkg" || [ $? -eq 3 ]
 done

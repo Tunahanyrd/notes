@@ -105,7 +105,7 @@ sha256sum -c --ignore-missing SHA256SUMS
 
 | Package | Install |
 |---|---|
-| Arch Linux | `sudo pacman -U ./notes-*.pkg.tar.zst` |
+| Arch Linux | `sudo pacman -U ./notes-desktop-*.pkg.tar.zst` |
 | AppImage (any x86_64 distribution) | `chmod +x Notes_*_amd64.AppImage && ./Notes_*_amd64.AppImage` |
 | Debian / Ubuntu | `sudo apt install ./Notes_*_amd64.deb` |
 | Fedora / openSUSE / RHEL | `sudo dnf install ./Notes-*.x86_64.rpm` |

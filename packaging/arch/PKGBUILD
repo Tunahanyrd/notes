@@ -6,7 +6,11 @@
 # Release package. Until the GitHub repository and tag exist, build from the
 # local tree with packaging/build-arch.sh (it places a tarball of the tree
 # under the source file name below and runs makepkg in an Arch container).
-pkgname=notes
+# The AUR names notes and notes-git belong to an unrelated app (nuttyartist/notes)
+# that also installs /usr/bin/notes; an AUR helper would "upgrade" a package
+# named notes to it. Paths keep the short name.
+pkgname=notes-desktop
+_name=notes
 pkgver=0.1.0
 pkgrel=1
 pkgdesc='Unofficial notes client compatible with Samsung Notes and Samsung Cloud'
@@ -28,20 +32,22 @@ optdepends=(
 )
 # rust-wasm: wasm32-unknown-unknown std for the live pen module (ink-live.wasm).
 makedepends=('rust' 'rust-wasm' 'nodejs' 'npm' 'git')
-conflicts=('notes-git')
+# notes: this app's package name up to 0.0.4, and the unrelated app's
+# (both install /usr/bin/notes).
+conflicts=('notes' 'notes-git' 'notes-desktop-git')
 options=('!lto' '!debug')
 _sdocx_commit=41e9c1099b29a48dc7320501573d7c4858f09303
-source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
+source=("$_name-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
         "sdocx::git+https://github.com/twangodev/sdocx.git#commit=$_sdocx_commit")
 # The tag tarball does not exist yet: replace SKIP with its sha256 at release.
 sha256sums=('SKIP'
             'SKIP')
 
-_lib=/usr/lib/$pkgname
+_lib=/usr/lib/$_name
 _appid=io.github.tunahanyrd.Notes
 
 prepare() {
-  cd "$pkgname-$pkgver"
+  cd "$_name-$pkgver"
   # tools/ink-renderer/build.rs verifies a clean git checkout at the pin.
   mkdir -p references/upstream
   ln -sfn "$srcdir/sdocx" references/upstream/sdocx
@@ -55,9 +61,9 @@ prepare() {
 }
 
 build() {
-  cd "$pkgname-$pkgver"
+  cd "$_name-$pkgver"
   export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}" CARGO_PROFILE_RELEASE_DEBUG=0
-  export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$srcdir=/usr/src/$pkgname"
+  export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$srcdir=/usr/src/$_name"
   local host; host="$(rustc -vV | sed -n 's/^host: //p')"
   cargo build --frozen --release -p notes-engine
   cp -f target/release/notes-engine "target/release/notes-engine-$host"
@@ -71,7 +77,7 @@ build() {
 }
 
 package() {
-  cd "$pkgname-$pkgver"
+  cd "$_name-$pkgver"
   install -Dm755 desktop/src-tauri/target/release/notes "$pkgdir/usr/bin/notes"
   install -Dm755 target/release/notes-engine "$pkgdir$_lib/bin/notes-engine"
   install -Dm755 tools/ink-renderer/target/release/ink-render \

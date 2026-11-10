@@ -4,7 +4,7 @@
 # + the Python-free notes-engine). Not affiliated with Samsung.
 #
 # Development package built from the default branch of the repository.
-pkgname=notes-git
+pkgname=notes-desktop-git
 _pkgname=notes
 pkgver=0.1.0.r0.g0000000
 pkgrel=1
@@ -27,8 +27,9 @@ optdepends=(
 )
 # rust-wasm: wasm32-unknown-unknown std for the live pen module (ink-live.wasm).
 makedepends=('rust' 'rust-wasm' 'nodejs' 'npm' 'git')
-provides=('notes')
-conflicts=('notes')
+provides=('notes-desktop')
+# notes/notes-git: also the unrelated nuttyartist/notes, which installs /usr/bin/notes too.
+conflicts=('notes-desktop' 'notes' 'notes-git')
 options=('!lto' '!debug')
 _sdocx_commit=41e9c1099b29a48dc7320501573d7c4858f09303
 source=("$_pkgname::git+$url.git"

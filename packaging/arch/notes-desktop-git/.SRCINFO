@@ -1,4 +1,4 @@
-pkgbase = notes-git
+pkgbase = notes-desktop-git
 	pkgdesc = Unofficial notes client compatible with Samsung Notes and Samsung Cloud
 	pkgver = 0.1.0.r0.g0000000
 	pkgrel = 1
@@ -29,8 +29,10 @@ pkgbase = notes-git
 	depends = hicolor-icon-theme
 	optdepends = imagemagick: Save as PDF
 	optdepends = librsvg: rsvg-convert ink rasterizer (SAMSUNG_NOTES_INK_RASTER=rsvg)
-	provides = notes
+	provides = notes-desktop
+	conflicts = notes-desktop
 	conflicts = notes
+	conflicts = notes-git
 	options = !lto
 	options = !debug
 	source = notes::git+https://github.com/Tunahanyrd/notes.git
@@ -38,4 +40,4 @@ pkgbase = notes-git
 	sha256sums = SKIP
 	sha256sums = SKIP
 
-pkgname = notes-git
+pkgname = notes-desktop-git

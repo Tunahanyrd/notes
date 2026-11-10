@@ -11,6 +11,8 @@ result was also checked in the official app on a phone or tablet.
 
 ## [Unreleased]
 
+## [0.0.5-alpha] - 2026-11-10
+
 ### Added
 
 - English interface with an in-app switch (contributed by @Mahno9): Settings
@@ -20,6 +22,17 @@ result was also checked in the official app on a phone or tablet.
   names are never translated. The window reloads when the language changes,
   and switching is blocked while there are unsaved edits. Turkish remains the
   default.
+
+### Changed
+
+- The Arch package is now called `notes-desktop` (and `notes-desktop-git`).
+  The AUR packages `notes` and `notes-git` belong to an unrelated app, so an
+  AUR helper could replace this one with it during a system upgrade. The
+  command, window and data stay the same. Moving from 0.0.4 or earlier:
+  `sudo pacman -U notes-desktop-*.pkg.tar.zst` and answer yes when pacman
+  offers to remove `notes`.
+- Dependency updates: rusqlite 0.41.1, sha2 0.11.1, openssl 0.10.82, flate2
+  1.1.11, zip 9.5.0, tiptap 3.33.0, lucide-react 1.70.0.
 
 ### Fixed
 
@@ -166,7 +179,8 @@ The user interface is in Turkish.
 - Previews of pictures, shapes and text boxes are drawn by this client and are
   close to, not identical with, the official renderer.
 
-[Unreleased]: https://github.com/Tunahanyrd/notes/compare/v0.0.4-alpha...HEAD
+[Unreleased]: https://github.com/Tunahanyrd/notes/compare/v0.0.5-alpha...HEAD
+[0.0.5-alpha]: https://github.com/Tunahanyrd/notes/compare/v0.0.4-alpha...v0.0.5-alpha
 [0.0.4-alpha]: https://github.com/Tunahanyrd/notes/compare/v0.0.3-alpha...v0.0.4-alpha
 [0.0.3-alpha]: https://github.com/Tunahanyrd/notes/compare/v0.0.2-alpha...v0.0.3-alpha
 [0.0.2-alpha]: https://github.com/Tunahanyrd/notes/compare/v0.0.1-alpha...v0.0.2-alpha

@@ -27,7 +27,7 @@ known Samsung hashes and Segoe/Samsung fonts).
 | .deb (Ubuntu 22.04+, Debian 12+) | shell, notes-engine (SQLite static), ink-render, frontend | libwebkit2gtk-4.1-0, libgtk-3-0, libssl3, poppler-utils, bubblewrap, xdg-utils; Recommends imagemagick |
 | .rpm (Fedora) | same | webkit2gtk4.1, gtk3, openssl-libs, poppler-utils, bubblewrap, xdg-utils; Recommends ImageMagick |
 | AppImage (glibc >= 2.35) | same + WebKitGTK/GTK/libssl (linuxdeploy) | host Mesa `libgbm1`/`libEGL` (never bundled by linuxdeploy; present on every desktop), `pdftoppm` (PDF pages), `bwrap` (sandbox; falls back to rlimits), `magick` (Save as PDF), `xdg-open` |
-| Arch (`notes`, `notes-git`) | shell, notes-engine, ink-render, frontend under /usr/lib/notes | webkit2gtk-4.1 gtk3 libsoup3 openssl sqlite poppler bubblewrap xdg-utils; optdepends imagemagick, librsvg |
+| Arch (`notes-desktop`, `notes-desktop-git`) | shell, notes-engine, ink-render, frontend under /usr/lib/notes | webkit2gtk-4.1 gtk3 libsoup3 openssl sqlite poppler bubblewrap xdg-utils; optdepends imagemagick, librsvg |
 | Flatpak (GNOME 50) | shell, notes-engine, ink-render, Poppler 26.10.0 (pdftoppm/pdfinfo), ImageMagick 7.1.2-34 | GNOME 50 runtime (WebKitGTK 4.1, SQLite, librsvg) |
 
 The Flatpak's rust-stable SDK extension (rustc 1.98.1) has no wasm32
@@ -107,7 +107,7 @@ the bwrap sandbox (no such line) and rendered the PDF and ink previews.
   `metainfo-missing-screenshots`; warning `runtime-update-available` (GNOME
   51 is out; 50 is what was built and tested).
 - `makepkg --printsrcinfo` regenerated `packaging/arch/.SRCINFO` and
-  `packaging/arch/notes-git/.SRCINFO`; no local paths in either.
+  `packaging/arch/notes-desktop-git/.SRCINFO`; no local paths in either.
 
 ## Commands
 
@@ -133,7 +133,7 @@ Check and smoke-test a built package:
     packaging/smoke/container-smoke.sh deb      dist/Notes_*_amd64.deb      /tmp/synthlib ubuntu:24.04
     packaging/smoke/container-smoke.sh appimage dist/Notes_*_amd64.AppImage /tmp/synthlib ubuntu:22.04
     packaging/smoke/container-smoke.sh rpm      dist/Notes-*.x86_64.rpm     /tmp/synthlib fedora:latest
-    packaging/smoke/container-smoke.sh arch     dist/notes-*.pkg.tar.zst    /tmp/synthlib archlinux:latest
+    packaging/smoke/container-smoke.sh arch     dist/notes-desktop-*.pkg.tar.zst    /tmp/synthlib archlinux:latest
     # Flatpak, inside the builder container after FLATPAK_INSTALL=1 packaging/build-flatpak.sh:
     packaging/smoke/flatpak-smoke.sh io.github.tunahanyrd.Notes /tmp/synthlib
 
@@ -148,7 +148,7 @@ Regenerate the Flatpak offline source lists after lockfile changes:
   to GNOME 51 (rebuild + retest; WebKitGTK 4.1 availability must be
   checked first).
 - `packaging/arch/PKGBUILD` uses the GitHub tag tarball with `SKIP`
-  checksums; set the sha256 once tag v0.1.0 exists. `notes-git` builds from
+  checksums; set the sha256 once tag v0.1.0 exists. `notes-desktop-git` builds from
   the default branch and was not built here (no repository yet); the
   `notes` package was built from this tree with `packaging/build-arch.sh`.
   The AUR name `notes` may already be taken; check before the first push.
