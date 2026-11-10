@@ -187,8 +187,11 @@ fn main() {
         let (engine, url) = launch(resources.as_deref())?;
         let origin = url.origin();
         app.manage(Mutex::new(Some(engine)));
+        // Small minimum: tiling compositors give a window e.g. a quarter of a
+        // laptop screen (~720x450) and squash a client that refuses to shrink.
+        // The UI has its own narrow layouts below 800 and 460 px.
         WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
-            .title("Notlar").inner_size(1320.0, 860.0).min_inner_size(760.0, 540.0)
+            .title("Notlar").inner_size(1320.0, 860.0).min_inner_size(360.0, 320.0)
             .on_navigation(move |next| next.origin() == origin)
             .build()?;
         Ok(())

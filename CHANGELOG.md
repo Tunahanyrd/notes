@@ -11,6 +11,13 @@ result was also checked in the official app on a phone or tablet.
 
 ## [Unreleased]
 
+### Fixed
+
+- The window looked squashed when a tiling window manager gave it less than
+  760×540 (for example a quarter of a laptop screen): the app refused to get
+  smaller, so the compositor scaled it down. The minimum is now 360×320; the
+  list and the editor already have layouts for narrow windows.
+
 ## [0.0.5-alpha] - 2026-11-10
 
 ### Added
