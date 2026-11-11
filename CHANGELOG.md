@@ -11,12 +11,15 @@ result was also checked in the official app on a phone or tablet.
 
 ## [Unreleased]
 
+## [0.0.6-beta] - 2026-11-11
+
 ### Added
 
 - "Klasörler" view, like the tablet's Folders: clicking Klasörler in the
-  sidebar shows the top-level folders as cards and below them the notes that
-  are in no folder. Folder views have a back button to the parent folder (or
-  to Klasörler); the arrow next to Klasörler collapses the sidebar tree.
+  sidebar shows the top-level folders as cards and, below a dashed line, the
+  notes that are in no folder. Folder views have a back button to the parent
+  folder (or to Klasörler); the arrow next to Klasörler collapses the sidebar
+  tree.
 
 ### Fixed
 
@@ -193,7 +196,8 @@ The user interface is in Turkish.
 - Previews of pictures, shapes and text boxes are drawn by this client and are
   close to, not identical with, the official renderer.
 
-[Unreleased]: https://github.com/Tunahanyrd/notes/compare/v0.0.5-alpha...HEAD
+[Unreleased]: https://github.com/Tunahanyrd/notes/compare/v0.0.6-beta...HEAD
+[0.0.6-beta]: https://github.com/Tunahanyrd/notes/compare/v0.0.5-alpha...v0.0.6-beta
 [0.0.5-alpha]: https://github.com/Tunahanyrd/notes/compare/v0.0.4-alpha...v0.0.5-alpha
 [0.0.4-alpha]: https://github.com/Tunahanyrd/notes/compare/v0.0.3-alpha...v0.0.4-alpha
 [0.0.3-alpha]: https://github.com/Tunahanyrd/notes/compare/v0.0.2-alpha...v0.0.3-alpha

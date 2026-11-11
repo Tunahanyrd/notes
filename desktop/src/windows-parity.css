@@ -25,3 +25,6 @@
 .migration-progress{width:min(360px,calc(100vw - 48px));font-size:14px}
 .migration-progress p{display:flex;justify-content:space-between;gap:16px;margin:0 0 12px}
 .migration-progress progress{display:block;width:100%;height:5px;accent-color:#5179b5}
+.note-rows.gallery-grid{grid-auto-rows:auto}.note-rows.gallery-grid>.note-row{height:173px}
+.folder-strip{grid-column:1/-1;align-self:start;display:flex;flex-wrap:wrap;gap:20px 25px}.folder-strip.divided{padding-bottom:26px;margin-bottom:-24px;border-bottom:1px dashed var(--ui-border-c6c6c8)}
+.gallery-list .folder-strip{flex-direction:column;flex-wrap:nowrap;gap:10px}.gallery-list .folder-strip.divided{padding-bottom:12px;margin-bottom:2px}

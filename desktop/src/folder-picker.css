@@ -35,4 +35,4 @@
 .note-drag-text small{font-size:11px;color:var(--ui-text-717176);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .note-drag-text small.blocked{color:#a33}
 .nav-item.drop-target,.nav-item.drop-target.active{background:#fdece8;box-shadow:inset 0 0 0 1px var(--accent,#f26549)}
-.folder-section-heading>.folder-tree-toggle{margin-right:0;color:var(--ui-text-777777)}.folder-tree-toggle svg.open{transform:rotate(90deg)}
+.folder-section-heading{border-radius:6px;margin-bottom:6px}.folder-section-heading>.nav-item{margin-bottom:0}.folder-section-heading.active{background:var(--ui-bg-e5e5e6)}.folder-section-heading.active>.nav-item.active{background:none}.folder-section-heading>.nav-item small{margin-right:2px}.folder-section-heading>.folder-tree-toggle{width:24px;height:24px;min-width:24px;margin-right:2px;color:var(--ui-text-777777)}.folder-section-heading>.folder-tree-toggle:hover:not(:disabled),:root[data-theme="dark"] .folder-section-heading>.folder-tree-toggle:hover:not(:disabled){background:none;color:var(--ui-text-252525)}.folder-tree-toggle svg.open{transform:rotate(90deg)}
