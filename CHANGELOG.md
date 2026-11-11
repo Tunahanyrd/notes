@@ -11,6 +11,13 @@ result was also checked in the official app on a phone or tablet.
 
 ## [Unreleased]
 
+### Added
+
+- "Klasörler" view, like the tablet's Folders: clicking Klasörler in the
+  sidebar shows the top-level folders as cards and below them the notes that
+  are in no folder. Folder views have a back button to the parent folder (or
+  to Klasörler); the arrow next to Klasörler collapses the sidebar tree.
+
 ### Fixed
 
 - The window looked squashed when a tiling window manager gave it less than

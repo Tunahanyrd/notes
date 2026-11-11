@@ -882,3 +882,22 @@ test('dark theme keeps the selected folder in the picker readable',async({page})
   });
   expect(ratio).toBeGreaterThan(4.5);
 });
+test('Klasörler shows the library root like the tablet: top folders, then notes in no folder',async({page})=>{
+  await setup(page,async rows=>{rows.find(n=>n.id==='one').folderId='work';});
+  await page.getByRole('button',{name:/^Klasörler/}).click();
+  await expect(page.getByRole('heading',{name:'Klasörler',exact:true})).toBeVisible();
+  const cards=page.locator('.live-folder-card');
+  await expect(cards).toHaveCount(1);await expect(cards.filter({hasText:'Çalışma'})).toBeVisible();
+  await expect(page.getByRole('button',{name:/Hafta sonu için/})).toBeVisible();
+  await expect(page.getByRole('button',{name:/Aklımda kalanlar/})).toHaveCount(0);
+  await cards.filter({hasText:'Çalışma'}).click();
+  await expect(page.getByRole('heading',{name:'Çalışma',exact:true})).toBeVisible();
+  await expect(page.locator('.live-folder-card').filter({hasText:'Fikirler'})).toBeVisible();
+  await expect(page.getByRole('button',{name:/Aklımda kalanlar/})).toBeVisible();
+  await page.getByRole('button',{name:'Üst klasöre dön'}).click();
+  await expect(page.getByRole('heading',{name:'Klasörler',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Klasör listesini daralt'}).click();
+  await expect(sidebarFolder(page,'Çalışma')).toHaveCount(0);
+  await page.getByRole('button',{name:'Klasör listesini genişlet'}).click();
+  await expect(sidebarFolder(page,'Çalışma')).toBeVisible();
+});

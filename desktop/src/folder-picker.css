@@ -35,3 +35,4 @@
 .note-drag-text small{font-size:11px;color:var(--ui-text-717176);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .note-drag-text small.blocked{color:#a33}
 .nav-item.drop-target,.nav-item.drop-target.active{background:#fdece8;box-shadow:inset 0 0 0 1px var(--accent,#f26549)}
+.folder-section-heading>.folder-tree-toggle{margin-right:0;color:var(--ui-text-777777)}.folder-tree-toggle svg.open{transform:rotate(90deg)}
