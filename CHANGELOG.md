@@ -11,6 +11,12 @@ result was also checked in the official app on a phone or tablet.
 
 ## [Unreleased]
 
+### Security
+
+- Update the CI scanner's wcmatch and OpenTelemetry dependency family to patched
+  releases for GHSA-53pm-wgxf-c6qf and GHSA-mf5v-w3w3-f6cg. Validate the locked
+  dependency closure and scanner behavior before every CI scan.
+
 ### Fixed
 
 - PDF export waits for embedded pictures instead of saving temporary preview

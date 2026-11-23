@@ -57,6 +57,8 @@ jobs:
           "$RUNNER_TEMP/semgrep-venv/bin/python" -m pip install --disable-pip-version-check --no-cache-dir \
             --require-hashes --no-deps --only-binary=:all: -r security/semgrep-requirements.txt
           "$SEMGREP" --version
+      - name: Validate locked dependencies and scanner behavior
+        run: '"$RUNNER_TEMP/semgrep-venv/bin/python" security/validate_semgrep.py'
       - name: Gate (ERROR findings in product code)
         run: tools/semgrep.sh gate
       - name: Full report (non-blocking)
