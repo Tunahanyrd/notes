@@ -75,6 +75,9 @@ impl Previews for Native {
     fn manifest(&self, identity: &str) -> R<Val> {
         self.0.manifest(identity)
     }
+    fn export_page(&self, identity: &str, page: i64, revision: i64) -> R<Vec<u8>> {
+        self.0.export_page(identity, page, revision)
+    }
     fn request(&self, identity: &str, page: i64, priority: i64, wait: f64) -> R<Option<Vec<u8>>> {
         self.0.request(identity, page, priority, wait)
     }

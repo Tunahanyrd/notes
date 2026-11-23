@@ -417,26 +417,21 @@ impl Engine {
         let mut pages = Vec::new();
         if let Val::List(items) = key(&manifest, "pages")? {
             for page in items {
-                if page.get("available").map(Val::truthy).unwrap_or(false) {
-                    pages.push(page.clone());
-                }
+                pages.push(page.clone());
             }
         }
-        if pages.is_empty() {
+        if !pages.iter().any(|page| page.get("available").is_some_and(Val::truthy)) {
             return Err(Fail::store("no_pages", "Bu notta dışa aktarılabilecek sayfa görüntüsü yok.", 422));
         }
         let work = core::TempDir::new("notes-export-")?;
-        let (mut files, mut skipped) = (Vec::new(), 0i64);
+        let revision = key(&note, "revision")?.as_i64().ok_or_else(|| Fail::type_("revision"))?;
+        let mut files = Vec::new();
         for page in &pages {
             let index = key(page, "index")?.as_i64().ok_or_else(|| Fail::type_("page index"))?;
-            match self.previews.request(identity, index, 0, 90.0)? {
-                None => skipped += 1,
-                Some(raw) => {
-                    let path = work.0.join(format!("{:05}.png", index));
-                    std::fs::write(&path, raw)?;
-                    files.push(path);
-                }
-            }
+            let raw = self.previews.export_page(identity, index, revision)?;
+            let path = work.0.join(format!("{:05}.png", index));
+            std::fs::write(&path, raw)?;
+            files.push(path);
         }
         if files.is_empty() {
             return Err(Fail::store("no_pages", "Sayfa görüntüleri hazırlanamadı.", 503));
@@ -448,13 +443,16 @@ impl Engine {
         if !core::images_to_pdf_at(&files, &produced) {
             return Err(Fail::store("pdf_failed", "PDF oluşturulamadı.", 500));
         }
+        if key(&self.get(identity)?, "revision")?.as_i64() != Some(revision) {
+            return Err(Fail::store("preview_source_changed", "Not değişti. Dışa aktarmayı tekrar deneyebilirsin.", 409));
+        }
         let target = core::write_free_target(&folder, &base, "pdf", &mut std::fs::File::open(&produced)?)?;
         let name = file_name(&target);
         Ok(Val::dict(vec![
             ("path", Val::s(target.to_string_lossy())),
             ("name", Val::s(name)),
             ("pages", Val::Int(files.len() as i64)),
-            ("skipped", Val::Int(skipped)),
+            ("skipped", Val::Int(0)),
         ]))
     }
 

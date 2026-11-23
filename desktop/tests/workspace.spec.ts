@@ -223,7 +223,7 @@ test('search, favorites and authorized text export use contract endpoints',async
   await page.getByRole('button',{name:'Dışa aktar',exact:true}).click();
   // The desktop engine writes the file itself; the UI names where it went.
   await expect.poll(()=>requests.some(r=>r.path==='/api/notes/two/export-file')).toBe(true);
-  await expect(page.getByText('Dosya hazır: Hafta sonu için.txt')).toHaveCount(0);
+  await expect(page.getByRole('status').filter({hasText:'Dosya hazır: Hafta sonu için.txt'})).toBeVisible();
   await page.getByRole('button',{name:'Not listesine dön'}).click();await page.getByRole('button',{name:'Aramayı temizle'}).click();
   await page.getByRole('button',{name:'Görünüm',exact:true}).click();await page.getByRole('button',{name:'Favoriler',exact:true}).click();
   await expect(page.getByRole('button',{name:/Hafta sonu için/})).toBeVisible();
@@ -900,4 +900,13 @@ test('Klasörler shows the library root like the tablet: top folders, then notes
   await expect(sidebarFolder(page,'Çalışma')).toHaveCount(0);
   await page.getByRole('button',{name:'Klasör listesini genişlet'}).click();
   await expect(sidebarFolder(page,'Çalışma')).toBeVisible();
+});
+
+ test('share menu explicitly exports PDF even for editable text notes',async({page})=>{
+  const {requests}=await setup(page);
+  await openNote(page,/Hafta sonu için/);
+  await page.getByRole('button',{name:'Paylaş',exact:true}).click();
+  await page.getByRole('button',{name:'PDF olarak kaydet',exact:true}).click();
+  await expect.poll(()=>requests.some(r=>r.path==='/api/notes/two/export-file'&&r.data.format==='pdf')).toBe(true);
+  await expect(page.getByRole('status').filter({hasText:'Dosya hazır: Hafta sonu için.pdf'})).toBeVisible();
 });

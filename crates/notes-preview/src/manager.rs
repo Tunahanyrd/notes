@@ -435,6 +435,47 @@ impl PreviewManager {
         Inner::request(&self.inner, identity, page_index, priority, wait)
     }
 
+    /// Export only a complete page of the requested saved revision. Interactive
+    /// previews may serve placeholders; those must never enter an exported PDF.
+    pub fn export_page(&self, identity: &str, page_index: i64, revision: i64) -> Result<Vec<u8>, Fail> {
+        let inner = &self.inner;
+        let entry = inner.entry(identity)?;
+        let session = inner.env.session_path();
+        let guard = || -> Result<(), Fail> {
+            if entry.source.0.get(4).and_then(Val::as_i64) != Some(revision)
+                || inner.source(identity)? != entry.source || inner.env.session_path() != session
+                || inner.stop.load(AtomicOrdering::SeqCst) {
+                return Err(Fail::store("preview_source_changed", "Not veya hesap değişti. Dışa aktarmayı tekrar deneyebilirsin.", 409));
+            }
+            Ok(())
+        };
+        guard()?;
+        let candidate = entry.candidates.get(&page_index).ok_or_else(export_incomplete)?;
+        let path = inner.path(candidate)?;
+        // Only the main cache represents a complete native/local render.
+        if let Some(raw) = read_cached(&path, MAX_PNG as u64)? {
+            if crate::png_valid(&raw, candidate.width(), candidate.height()) {
+                guard()?;
+                return Ok(raw);
+            }
+        }
+        let local_pdf = match candidate {
+            Candidate::Pdf(c) => {
+                let media = rs_store::media_store::MediaStore::open(&inner.store.directory).map_err(store_fail)?;
+                pdf::cached_pdf_shared(c, &inner.directory.join("pdf-files"), &account_of(&inner.store)?, &media)?
+            }
+            _ => None,
+        };
+        let key = path.file_name().unwrap().to_string_lossy();
+        let item = inner.queue_item(&key, identity, &entry.source, candidate, &path, 1, local_pdf);
+        let result = inner.process_mode(&item, &mut Stages::default(), true)?.unwrap_or(path);
+        guard()?;
+        let raw = read_cached(&result, MAX_PNG as u64)?.ok_or_else(export_incomplete)?;
+        if !crate::png_valid(&raw, candidate.width(), candidate.height()) { return Err(export_incomplete()); }
+        guard()?;
+        Ok(raw)
+    }
+
     pub fn notext(&self, identity: &str, page_index: i64, revision: i64) -> Result<Option<Vec<u8>>, Fail> {
         self.inner.text_composite(identity, page_index, revision, false)
     }
@@ -1546,6 +1587,10 @@ impl Inner {
     }
 
     fn process(&self, item: &QueueItem, stages: &mut Stages) -> Result<Option<PathBuf>, Fail> {
+        self.process_mode(item, stages, false)
+    }
+
+    fn process_mode(&self, item: &QueueItem, stages: &mut Stages, exporting: bool) -> Result<Option<PathBuf>, Fail> {
         let candidate = &item.candidate;
         // Local pages and canvas pages (drawn locally when offline) run offline.
         let local_ok = matches!(candidate, Candidate::Ink(_) | Candidate::Canvas(_));
@@ -1574,6 +1619,7 @@ impl Inner {
                     }
                 };
                 if !complete {
+                    if exporting { return Err(export_incomplete()); }
                     // Pictures not downloaded (or ink approximated): keep it as
                     // a stand-in; the full image is retried later.
                     let partial = partial_path(&item.path);
@@ -1614,11 +1660,12 @@ impl Inner {
                             }
                             Err(error) => Err(error),
                         };
-                        let (layered, _) = match rendered {
+                        let (layered, complete) = match rendered {
                             Ok(rendered) => rendered,
                             Err(error) => { guard()?; return Err(overlay_fallback_error(error, deterministic_overlay)); }
                         };
-                        let stand_in = local_path(&item.path);
+                        if exporting && !complete { return Err(export_incomplete()); }
+                        let stand_in = if exporting { item.path.with_extension("export.png") } else { local_path(&item.path) };
                         guard()?;
                         Inner::cache_png(&stand_in, &layered, width, height, &guard)?;
                         return Ok(Some(stand_in));
@@ -1638,6 +1685,7 @@ impl Inner {
                         }
                     };
                     if !complete {
+                        if exporting { return Err(export_incomplete()); }
                         let partial = partial_path(&item.path);
                         guard()?;
                         Inner::cache_png(&partial, &layered, width, height, &guard)?;
@@ -1707,17 +1755,17 @@ impl Inner {
                         if stopped { return Err(e); }
                         guard()?;
                         let existing = local_path(&item.path);
-                        if !self.lock().partial_canvas.contains(&item.key) {
+                        if !exporting && !self.lock().partial_canvas.contains(&item.key) {
                             if let Some(raw) = read_cached(&existing, MAX_PNG as u64)? {
                                 if crate::png_valid(&raw, c.width, c.height) { guard()?; return Ok(Some(existing)); }
                             }
                         }
                         let start = Instant::now();
-                        let fallback = self.canvas_fallback(item, c);
+                        let fallback = self.canvas_fallback_mode(item, c, exporting);
                         stages.local = start.elapsed();
                         match fallback {
                             Ok(Some(path)) => return Ok(Some(path)),
-                            Err(changed) if matches!(changed.code.as_str(), "preview_source_changed" | "preview_storage_corrupt") => return Err(changed),
+                            Err(changed) if matches!(changed.code.as_str(), "preview_source_changed" | "preview_storage_corrupt" | "export_incomplete") => return Err(changed),
                             _ => { guard()?; return Err(e); },
                         }
                     }
@@ -2082,6 +2130,10 @@ impl Inner {
     /// cached next to it (`<key>.local.png`). None when the note's local
     /// renderer does not admit the page.
     fn canvas_fallback(&self, item: &QueueItem, c: &CanvasPreviewCandidate) -> Result<Option<PathBuf>, Fail> {
+        self.canvas_fallback_mode(item, c, false)
+    }
+
+    fn canvas_fallback_mode(&self, item: &QueueItem, c: &CanvasPreviewCandidate, exporting: bool) -> Result<Option<PathBuf>, Fail> {
         let guard = || -> Result<(), Fail> {
             if self.stop.load(AtomicOrdering::SeqCst) || self.source(&item.identity)? != item.source {
                 return Err(Fail::store("preview_source_changed", "Not veya hesap değişti.", 409));
@@ -2096,11 +2148,14 @@ impl Inner {
                         sha256: digest.to_owned(), is_dark_mode: page.dark, composite: page.composite, notice: page.notice.clone() };
                     if let Some((png, complete)) = self.render_container_over(&item.identity, &local, &guard, None, item.priority > 0)? {
                         let png = if (page.width, page.height) == (c.width, c.height) { png } else { rescale_png(&png, (page.width, page.height), (c.width, c.height))? };
-                        let path = local_path(&item.path);
+                        if exporting && !complete { return Err(export_incomplete()); }
+                        let path = if exporting { item.path.with_extension("export.png") } else { local_path(&item.path) };
                         guard()?;
                         Inner::cache_png(&path, &png, c.width, c.height, &guard)?;
-                        let mut state = self.lock();
-                        if complete { state.partial_canvas.remove(&item.key); } else { state.partial_canvas.insert(item.key.clone()); }
+                        if !exporting {
+                            let mut state = self.lock();
+                            if complete { state.partial_canvas.remove(&item.key); } else { state.partial_canvas.insert(item.key.clone()); }
+                        }
                         return Ok(Some(path));
                     }
                 }
@@ -2116,13 +2171,20 @@ impl Inner {
         };
         let (png, complete) = self.render_local(&item.identity, &local, &snapshot, &guard, item.priority > 0, item.priority)?;
         let png = if (page.width, page.height) == (c.width, c.height) { png } else { rescale_png(&png, (page.width, page.height), (c.width, c.height))? };
-        let path = local_path(&item.path);
+        if exporting && !complete { return Err(export_incomplete()); }
+        let path = if exporting { item.path.with_extension("export.png") } else { local_path(&item.path) };
         guard()?;
         Inner::cache_png(&path, &png, c.width, c.height, &guard)?;
-        let mut state = self.lock();
-        if complete { state.partial_canvas.remove(&item.key); } else { state.partial_canvas.insert(item.key.clone()); }
+        if !exporting {
+            let mut state = self.lock();
+            if complete { state.partial_canvas.remove(&item.key); } else { state.partial_canvas.insert(item.key.clone()); }
+        }
         Ok(Some(path))
     }
+}
+
+fn export_incomplete() -> Fail {
+    Fail::store("export_incomplete", "Sayfadaki tüm içerik hazırlanamadığı için PDF kaydedilmedi. İnternet bağlantısını kontrol edip tekrar deneyebilirsin.", 503)
 }
 
 fn next_retry_delay(state: &mut State, key: &str) -> Duration {

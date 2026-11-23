@@ -16,6 +16,9 @@ pub trait Previews: Send + Sync {
     fn retry_inventory(&self, identity: &str) -> R<Val> { self.manifest(identity) }
     /// `previews.request(identity, page, priority=, wait=)`
     fn request(&self, identity: &str, page: i64, priority: i64, wait: f64) -> R<Option<Vec<u8>>>;
+    fn export_page(&self, _identity: &str, _page: i64, _revision: i64) -> R<Vec<u8>> {
+        Err(notes_host::Fail::store("export_incomplete", "Sayfanın tamamı dışa aktarılamıyor.", 503))
+    }
     fn notext(&self, _identity: &str, _page: i64, _revision: i64) -> R<Option<Vec<u8>>> {
         Err(notes_host::Fail::store("preview_unavailable", "Bu sayfanın metinsiz görüntüsü kullanılamıyor.", 404))
     }

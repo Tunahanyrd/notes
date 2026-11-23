@@ -386,3 +386,33 @@ fn forbidden_canvas_is_not_retried_after_a_new_standin() {
     assert_eq!(calls.load(Ordering::SeqCst), 1, "403 must not trigger another download for the same URL");
     manager.close();
 }
+
+#[test]
+fn export_waits_for_picture_instead_of_reusing_offline_placeholder() {
+    let dir = TempDir::new();
+    let (offline, id) = manager_with(dir.path(), TestEnv::new(None, true), None, None);
+    let partial = wait_png(&offline, &id, 1);
+    assert_eq!(pixel(&partial, 300, 450), [0xf1, 0xf1, 0xf1, 255]);
+    offline.close();
+    offline.join(Duration::from_secs(2));
+    let (_, images) = fixture();
+    let (online, id) = manager_with(dir.path(), TestEnv::new(Some(dir.path()), false),
+        Some(media(images, Arc::new(Mutex::new(Vec::new())))),
+        Some(Arc::new(|_, _, _| Err(Fail::new(notes_preview::Kind::Preview, "synthetic unavailable canvas")))));
+    let revision = online.source(&id).unwrap().0[4].as_i64().unwrap();
+    let exported = online.export_page(&id, 1, revision).unwrap();
+    assert_eq!(pixel(&exported, 300, 450), [30, 60, 230, 255], "export must include the blue picture");
+    online.close();
+    online.join(Duration::from_secs(2));
+}
+
+#[test]
+fn export_refuses_a_missing_picture_and_stale_revision() {
+    let dir = TempDir::new();
+    let (m, id) = manager_with(dir.path(), TestEnv::new(None, true), None, None);
+    let revision = m.source(&id).unwrap().0[4].as_i64().unwrap();
+    assert!(m.export_page(&id, 1, revision).is_err(), "missing picture must not silently disappear from PDF");
+    assert!(m.export_page(&id, 2, revision + 1).is_err(), "export must bind the saved revision");
+    m.close();
+    m.join(Duration::from_secs(2));
+}

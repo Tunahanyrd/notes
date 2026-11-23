@@ -546,3 +546,54 @@ fn pdf_source_change_during_ink_failure_requeues_without_memoizing() {
     assert!(path.exists(), "new source should produce the full image");
     manager.close();
 }
+
+#[test]
+fn export_requires_complete_pdf_objects_with_or_without_native_overlay() {
+    use notes_preview::ink::{InkBackend, InkPage};
+    use notes_preview::manager::InkGeometryPreview;
+    struct Local(bool);
+    impl InkBackend for Local {
+        fn provider_available(&self) -> bool { true }
+        fn inspect_render_pages(&self, _: &Val) -> Vec<InkPage> { vec![] }
+        fn render_ink_page(&self, _: &Val, _: i64) -> Result<Vec<u8>, Fail> {
+            Ok(png(30, 20, &b"\x1e\x3c\xe6\xff".repeat(30 * 20)))
+        }
+        fn render_page(&self, snapshot: &Val, page: i64, _: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<(Vec<u8>, bool), Fail> {
+            self.render_ink_page(snapshot, page).map(|png| (png, self.0))
+        }
+    }
+    if !pdf::pdf_provider_available() { return; }
+    for overlay in [false, true] {
+        for complete in [false, true] {
+            let dir = TempDir::new();
+            let store = store(dir.path());
+            let snap = snapshot(b"synthetic note", "application/xml");
+            let id = note_with_document(&store, &snap);
+            let mut page = cand(0, 1, (2, 3, 22, 13));
+            if overlay {
+                let mut native = candidate(b"broken synthetic overlay");
+                native.width = 30; native.height = 20;
+                page.overlay = Some(native);
+            }
+            page.local_ink = Some(InkGeometryPreview { page_index: 0, width: 30, height: 20,
+                sha256: snap.get("raw_sha256").unwrap().as_str().unwrap().into(), is_dark_mode: false, composite: true, notice: None });
+            let entry = Entry { source: Source(vec![Val::Null, Val::Null, Val::Null, Val::Null, Val::Int(1)]),
+                pages: vec![], candidates: BTreeMap::from([(0, Candidate::Pdf(page.clone()))]) };
+            let source = entry.source.clone();
+            let manager = PreviewManager::with_options(store, TestEnv::new(None, true), PreviewOptions {
+                ink: Some(Arc::new(Local(complete))),
+                entry_hook: Some(Arc::new(move |_| Ok(entry.clone()))),
+                source_hook: Some(Arc::new(move |_| Ok(source.clone()))), ..Default::default()
+            }).unwrap();
+            pdf::fetch_pdf_with(&page, &|| Ok(vec![]), &manager.directory().join("pdf-files"), "offline", None,
+                                &|_, _, path, _, _| write_pdf(path)).unwrap();
+            let result = manager.export_page(&id, 0, 1);
+            if complete {
+                assert_eq!(pixel(&result.unwrap(), 10, 8), [30, 60, 230, 255]);
+            } else {
+                assert_eq!(result.unwrap_err().code, "export_incomplete");
+            }
+            manager.close();
+        }
+    }
+}

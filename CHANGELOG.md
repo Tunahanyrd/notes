@@ -11,6 +11,12 @@ result was also checked in the official app on a phone or tablet.
 
 ## [Unreleased]
 
+### Fixed
+
+- PDF export waits for embedded pictures instead of saving temporary preview
+  placeholders. Incomplete pages or a changed note stop the export with an error
+  instead of silently dropping content.
+
 ## [0.0.6-beta] - 2026-11-11
 
 ### Added
